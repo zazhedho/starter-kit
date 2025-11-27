@@ -68,6 +68,15 @@ func main() {
 
 	runMigration()
 
+	// Initialize Redis for session management (optional)
+	redisClient, err := database.InitRedis()
+	if err != nil {
+		logger.WriteLog(logger.LogLevelDebug, "Redis not available, session management will be disabled")
+	} else {
+		defer database.CloseRedis()
+		logger.WriteLog(logger.LogLevelInfo, "Redis initialized, session management enabled")
+	}
+
 	routes := router.NewRoutes()
 
 	routes.DB, sqlDb, err = database.ConnDb()
@@ -78,6 +87,11 @@ func main() {
 	routes.RoleRoutes()
 	routes.PermissionRoutes()
 	routes.MenuRoutes()
+
+	// Register session routes if Redis is available
+	if redisClient != nil {
+		routes.SessionRoutes()
+	}
 
 	logger.WriteLog(logger.LogLevelInfo, "All routes registered successfully")
 

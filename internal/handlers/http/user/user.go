@@ -5,25 +5,32 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
+	"strings"
 	"team-leader-development-program/internal/dto"
 	interfaceuser "team-leader-development-program/internal/interfaces/user"
 	"team-leader-development-program/pkg/filter"
 	"team-leader-development-program/pkg/logger"
 	"team-leader-development-program/pkg/messages"
 	"team-leader-development-program/pkg/response"
+	"team-leader-development-program/pkg/security"
 	"team-leader-development-program/utils"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type HandlerUser struct {
-	Service interfaceuser.ServiceUserInterface
+	Service      interfaceuser.ServiceUserInterface
+	LoginLimiter security.LoginLimiter
 }
 
-func NewUserHandler(s interfaceuser.ServiceUserInterface) *HandlerUser {
+func NewUserHandler(s interfaceuser.ServiceUserInterface, limiter security.LoginLimiter) *HandlerUser {
 	return &HandlerUser{
-		Service: s,
+		Service:      s,
+		LoginLimiter: limiter,
 	}
 }
 
@@ -79,10 +86,34 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	}
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
+	loginIdentifier := fmt.Sprintf("%s:%s", ctx.ClientIP(), strings.ToLower(req.Email))
+	if h.LoginLimiter != nil {
+		blocked, ttl, limiterErr := h.LoginLimiter.IsBlocked(ctx.Request.Context(), loginIdentifier)
+		if limiterErr != nil {
+			logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.IsBlocked error: %v", logPrefix, limiterErr))
+		} else if blocked {
+			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("%s; Too many attempts", logPrefix))
+			h.respondTooManyLoginAttempts(ctx, logId, ttl)
+			return
+		}
+	}
+
 	token, err := h.Service.LoginUser(req, logId.String())
 	if err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; Service.LoginUser; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == messages.ErrHashPassword {
+			if h.LoginLimiter != nil {
+				blocked, ttl, limiterErr := h.LoginLimiter.RegisterFailure(ctx.Request.Context(), loginIdentifier)
+				if limiterErr != nil {
+					logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.RegisterFailure error: %v", logPrefix, limiterErr))
+				}
+				if blocked {
+					logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("%s; Account temporarily locked after repeated failures", logPrefix))
+					h.respondTooManyLoginAttempts(ctx, logId, ttl)
+					return
+				}
+			}
+
 			res := response.Response(http.StatusBadRequest, messages.InvalidCred, logId, nil)
 			res.Error = response.Errors{Code: http.StatusBadRequest, Message: messages.MsgCredential}
 			ctx.JSON(http.StatusBadRequest, res)
@@ -95,9 +126,30 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		return
 	}
 
+	if h.LoginLimiter != nil {
+		if err := h.LoginLimiter.Reset(ctx.Request.Context(), loginIdentifier); err != nil {
+			logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.Reset error: %v", logPrefix, err))
+		}
+	}
+
 	res := response.Response(http.StatusOK, "success", logId, map[string]interface{}{"token": token})
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(token)))
 	ctx.JSON(http.StatusOK, res)
+}
+
+func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.UUID, ttl time.Duration) {
+	if ttl > 0 {
+		ctx.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
+	}
+
+	message := "Too many login attempts. Please try again later."
+	if ttl > 0 {
+		message = fmt.Sprintf("Too many login attempts. Try again in %d seconds.", int(ttl.Seconds()))
+	}
+
+	res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
+	res.Error = response.Errors{Code: http.StatusTooManyRequests, Message: message}
+	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
 }
 
 func (h *HandlerUser) Logout(ctx *gin.Context) {
