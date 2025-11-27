@@ -2,9 +2,9 @@ package repositorymenu
 
 import (
 	"fmt"
-	domainmenu "team-leader-development-program/internal/domain/menu"
-	interfacemenu "team-leader-development-program/internal/interfaces/menu"
-	"team-leader-development-program/pkg/filter"
+	domainmenu "starter-kit/internal/domain/menu"
+	interfacemenu "starter-kit/internal/interfaces/menu"
+	"starter-kit/pkg/filter"
 
 	"gorm.io/gorm"
 )

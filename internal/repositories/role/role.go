@@ -2,10 +2,10 @@ package repositoryrole
 
 import (
 	"fmt"
-	domainrole "team-leader-development-program/internal/domain/role"
-	interfacerole "team-leader-development-program/internal/interfaces/role"
-	"team-leader-development-program/pkg/filter"
-	"team-leader-development-program/utils"
+	domainrole "starter-kit/internal/domain/role"
+	interfacerole "starter-kit/internal/interfaces/role"
+	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 
 	"gorm.io/gorm"
 )

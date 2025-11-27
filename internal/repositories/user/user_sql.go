@@ -2,9 +2,9 @@ package repositoryuser
 
 import (
 	"fmt"
-	domainuser "team-leader-development-program/internal/domain/user"
-	interfaceuser "team-leader-development-program/internal/interfaces/user"
-	"team-leader-development-program/pkg/filter"
+	domainuser "starter-kit/internal/domain/user"
+	interfaceuser "starter-kit/internal/interfaces/user"
+	"starter-kit/pkg/filter"
 
 	"gorm.io/gorm"
 )

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	interfacesession "team-leader-development-program/internal/interfaces/session"
-	"team-leader-development-program/pkg/logger"
-	"team-leader-development-program/pkg/messages"
-	"team-leader-development-program/pkg/response"
-	"team-leader-development-program/utils"
+	interfacesession "starter-kit/internal/interfaces/session"
+	"starter-kit/pkg/logger"
+	"starter-kit/pkg/messages"
+	"starter-kit/pkg/response"
+	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )

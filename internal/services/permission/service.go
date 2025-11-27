@@ -2,11 +2,11 @@ package servicepermission
 
 import (
 	"errors"
-	domainpermission "team-leader-development-program/internal/domain/permission"
-	"team-leader-development-program/internal/dto"
-	interfacepermission "team-leader-development-program/internal/interfaces/permission"
-	"team-leader-development-program/pkg/filter"
-	"team-leader-development-program/utils"
+	domainpermission "starter-kit/internal/domain/permission"
+	"starter-kit/internal/dto"
+	interfacepermission "starter-kit/internal/interfaces/permission"
+	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 	"time"
 )
 

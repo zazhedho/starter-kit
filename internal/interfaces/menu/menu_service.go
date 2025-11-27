@@ -1,9 +1,9 @@
 package interfacemenu
 
 import (
-	domainmenu "team-leader-development-program/internal/domain/menu"
-	"team-leader-development-program/internal/dto"
-	"team-leader-development-program/pkg/filter"
+	domainmenu "starter-kit/internal/domain/menu"
+	"starter-kit/internal/dto"
+	"starter-kit/pkg/filter"
 )
 
 type ServiceMenuInterface interface {

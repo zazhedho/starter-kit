@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	domainuser "starter-kit/internal/domain/user"
 	"strings"
-	domainuser "team-leader-development-program/internal/domain/user"
 	"time"
 
 	"github.com/gin-gonic/gin"

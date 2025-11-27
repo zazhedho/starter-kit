@@ -2,13 +2,13 @@ package servicerole
 
 import (
 	"errors"
-	domainrole "team-leader-development-program/internal/domain/role"
-	"team-leader-development-program/internal/dto"
-	interfacemenu "team-leader-development-program/internal/interfaces/menu"
-	interfacepermission "team-leader-development-program/internal/interfaces/permission"
-	interfacerole "team-leader-development-program/internal/interfaces/role"
-	"team-leader-development-program/pkg/filter"
-	"team-leader-development-program/utils"
+	domainrole "starter-kit/internal/domain/role"
+	"starter-kit/internal/dto"
+	interfacemenu "starter-kit/internal/interfaces/menu"
+	interfacepermission "starter-kit/internal/interfaces/permission"
+	interfacerole "starter-kit/internal/interfaces/role"
+	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 	"time"
 )
 

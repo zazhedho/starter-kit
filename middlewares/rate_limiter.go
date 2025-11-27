@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
-	"team-leader-development-program/pkg/logger"
-	"team-leader-development-program/pkg/messages"
-	"team-leader-development-program/pkg/response"
-	"team-leader-development-program/utils"
+	"starter-kit/pkg/logger"
+	"starter-kit/pkg/messages"
+	"starter-kit/pkg/response"
+	"starter-kit/utils"
 )
 
 // IPRateLimitMiddleware applies a simple Redis-backed rate limit per client IP

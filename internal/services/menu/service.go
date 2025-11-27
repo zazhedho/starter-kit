@@ -2,11 +2,11 @@ package servicemenu
 
 import (
 	"errors"
-	domainmenu "team-leader-development-program/internal/domain/menu"
-	"team-leader-development-program/internal/dto"
-	interfacemenu "team-leader-development-program/internal/interfaces/menu"
-	"team-leader-development-program/pkg/filter"
-	"team-leader-development-program/utils"
+	domainmenu "starter-kit/internal/domain/menu"
+	"starter-kit/internal/dto"
+	interfacemenu "starter-kit/internal/interfaces/menu"
+	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 	"time"
 )
 

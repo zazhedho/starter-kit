@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	domainsession "team-leader-development-program/internal/domain/session"
-	"team-leader-development-program/pkg/logger"
+	domainsession "starter-kit/internal/domain/session"
+	"starter-kit/pkg/logger"
 	"time"
 
 	"github.com/redis/go-redis/v9"

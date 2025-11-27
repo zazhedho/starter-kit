@@ -3,8 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"team-leader-development-program/pkg/logger"
-	"team-leader-development-program/utils"
+	"starter-kit/pkg/logger"
+	"starter-kit/utils"
 	"time"
 
 	"gorm.io/driver/postgres"

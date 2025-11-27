@@ -1,7 +1,7 @@
 package middlewares
 
 import (
-	"team-leader-development-program/utils"
+	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

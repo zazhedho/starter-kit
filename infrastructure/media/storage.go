@@ -2,11 +2,11 @@ package media
 
 import (
 	"fmt"
+	"starter-kit/pkg/logger"
+	"starter-kit/pkg/storage"
+	"starter-kit/utils"
 	"strconv"
 	"strings"
-	"team-leader-development-program/pkg/logger"
-	"team-leader-development-program/pkg/storage"
-	"team-leader-development-program/utils"
 )
 
 // InitStorage initializes and returns a storage provider (MinIO or R2)

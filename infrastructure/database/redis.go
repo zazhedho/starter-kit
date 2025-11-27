@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"team-leader-development-program/pkg/logger"
-	"team-leader-development-program/utils"
+	"starter-kit/pkg/logger"
+	"starter-kit/utils"
 	"time"
 
 	"github.com/redis/go-redis/v9"

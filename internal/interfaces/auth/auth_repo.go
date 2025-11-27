@@ -1,6 +1,6 @@
 package interfaceauth
 
-import domainauth "team-leader-development-program/internal/domain/auth"
+import domainauth "starter-kit/internal/domain/auth"
 
 type RepoAuthInterface interface {
 	Store(m domainauth.Blacklist) error

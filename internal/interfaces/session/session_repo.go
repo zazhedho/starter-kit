@@ -2,7 +2,7 @@ package interfacesession
 
 import (
 	"context"
-	domainsession "team-leader-development-program/internal/domain/session"
+	domainsession "starter-kit/internal/domain/session"
 	"time"
 )
 

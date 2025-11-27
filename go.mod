@@ -1,4 +1,4 @@
-module team-leader-development-program
+module starter-kit
 
 go 1.25
 

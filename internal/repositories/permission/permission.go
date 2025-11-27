@@ -2,9 +2,9 @@ package repositorypermission
 
 import (
 	"fmt"
-	domainpermission "team-leader-development-program/internal/domain/permission"
-	interfacepermission "team-leader-development-program/internal/interfaces/permission"
-	"team-leader-development-program/pkg/filter"
+	domainpermission "starter-kit/internal/domain/permission"
+	interfacepermission "starter-kit/internal/interfaces/permission"
+	"starter-kit/pkg/filter"
 
 	"gorm.io/gorm"
 )

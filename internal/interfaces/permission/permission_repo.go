@@ -1,8 +1,8 @@
 package interfacepermission
 
 import (
-	domainpermission "team-leader-development-program/internal/domain/permission"
-	"team-leader-development-program/pkg/filter"
+	domainpermission "starter-kit/internal/domain/permission"
+	"starter-kit/pkg/filter"
 )
 
 type RepoPermissionInterface interface {
