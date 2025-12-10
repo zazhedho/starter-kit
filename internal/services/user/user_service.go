@@ -83,9 +83,65 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 	if err != nil {
 		return domainuser.Users{}, err
 	}
-	var roleName = utils.RoleViewer
-	if strings.TrimSpace(req.Role) != "" {
-		roleName = strings.ToLower(req.Role)
+
+	// SECURITY: Public registration always uses vendor role
+	// This prevents privilege escalation through request manipulation
+	roleName := utils.RoleViewer
+
+	var roleId *string
+	roleEntity, err := s.RoleRepo.GetByName(roleName)
+	if err == nil && roleEntity.Id != "" {
+		roleId = &roleEntity.Id
+	}
+
+	data = domainuser.Users{
+		Id:        utils.CreateUUID(),
+		Name:      req.Name,
+		Phone:     phone,
+		Email:     req.Email,
+		Password:  string(hashedPwd),
+		Role:      roleName,
+		RoleId:    roleId,
+		CreatedAt: time.Now(),
+	}
+
+	if err = s.UserRepo.Store(data); err != nil {
+		return domainuser.Users{}, err
+	}
+
+	return data, nil
+}
+
+func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorRole string) (domainuser.Users, error) {
+	phone := utils.NormalizePhoneTo62(req.Phone)
+
+	data, _ := s.UserRepo.GetByEmail(req.Email)
+	if data.Id != "" {
+		return domainuser.Users{}, errors.New("email already exists")
+	}
+
+	if phone != "" {
+		phoneData, _ := s.UserRepo.GetByPhone(phone)
+		if phoneData.Id != "" {
+			return domainuser.Users{}, errors.New("phone number already exists")
+		}
+	}
+
+	if err := ValidatePasswordStrength(req.Password); err != nil {
+		return domainuser.Users{}, err
+	}
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return domainuser.Users{}, err
+	}
+
+	roleName := strings.ToLower(strings.TrimSpace(req.Role))
+
+	// SECURITY: Validate role assignment based on creator's role
+	// Only superadmin can create superadmin users
+	if roleName == utils.RoleSuperAdmin && creatorRole != utils.RoleSuperAdmin {
+		return domainuser.Users{}, errors.New("only superadmin can create superadmin users")
 	}
 
 	var roleId *string
@@ -93,10 +149,7 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 	if err == nil && roleEntity.Id != "" {
 		roleId = &roleEntity.Id
 	} else {
-		roleName = utils.RoleViewer
-		if viewerRole, errViewer := s.RoleRepo.GetByName(utils.RoleViewer); errViewer == nil && viewerRole.Id != "" {
-			roleId = &viewerRole.Id
-		}
+		return domainuser.Users{}, errors.New("invalid role: " + roleName)
 	}
 
 	data = domainuser.Users{

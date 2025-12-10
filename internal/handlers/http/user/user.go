@@ -75,6 +75,50 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, res)
 }
 
+func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
+	var req dto.AdminCreateUser
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := fmt.Sprintf("[%s][UserHandler][AdminCreateUser]", logId)
+
+	if err := ctx.BindJSON(&req); err != nil {
+		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
+
+	// Get creator's role from auth data
+	authData := utils.GetAuthData(ctx)
+	if authData == nil {
+		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
+	creatorRole := authData["role"].(string)
+
+	data, err := h.Service.AdminCreateUser(req, creatorRole)
+	if err != nil {
+		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; Service.AdminCreateUser; Error: %+v", logPrefix, err))
+		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "already exists") {
+			res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
+			res.Error = response.Errors{Code: http.StatusBadRequest, Message: err.Error()}
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
+
+		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	res := response.Response(http.StatusCreated, "User created successfully", logId, data)
+	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
+	ctx.JSON(http.StatusCreated, res)
+}
+
 func (h *HandlerUser) Login(ctx *gin.Context) {
 	var req dto.Login
 	logId := utils.GenerateLogId(ctx)

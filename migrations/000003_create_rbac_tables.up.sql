@@ -110,22 +110,41 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     (gen_random_uuid(), 'view_dashboard', 'View Dashboard', 'dashboard', 'view'),
 
     -- User permissions
-    (gen_random_uuid(), 'view_users', 'View Users', 'users', 'view'),
+    (gen_random_uuid(), 'list_users', 'List Users', 'users', 'list'),
+    (gen_random_uuid(), 'view_users', 'View User Detail', 'users', 'view'),
     (gen_random_uuid(), 'create_users', 'Create Users', 'users', 'create'),
     (gen_random_uuid(), 'update_users', 'Update Users', 'users', 'update'),
+    (gen_random_uuid(), 'update_password_users', 'Update Password Users', 'users', 'update_password'),
     (gen_random_uuid(), 'delete_users', 'Delete Users', 'users', 'delete'),
 
     -- Role permissions
-    (gen_random_uuid(), 'view_roles', 'View Roles', 'roles', 'view'),
+    (gen_random_uuid(), 'list_roles', 'List Roles', 'roles', 'list'),
+    (gen_random_uuid(), 'view_roles', 'View Role Detail', 'roles', 'view'),
     (gen_random_uuid(), 'create_roles', 'Create Roles', 'roles', 'create'),
     (gen_random_uuid(), 'update_roles', 'Update Roles', 'roles', 'update'),
     (gen_random_uuid(), 'delete_roles', 'Delete Roles', 'roles', 'delete'),
     (gen_random_uuid(), 'assign_permissions', 'Assign Permissions', 'roles', 'assign_permissions'),
     (gen_random_uuid(), 'assign_menus', 'Assign Menus', 'roles', 'assign_menus'),
 
+    -- Menu permissions
+    (gen_random_uuid(), 'list_menus', 'List Menus', 'menus', 'list'),
+    (gen_random_uuid(), 'view_menu', 'View Menu Detail', 'menus', 'view'),
+    (gen_random_uuid(), 'create_menu', 'Create Menu', 'menus', 'create'),
+    (gen_random_uuid(), 'update_menu', 'Update Menu', 'menus', 'update'),
+    (gen_random_uuid(), 'delete_menu', 'Delete Menu', 'menus', 'delete'),
+
+    -- Permission management permissions
+    (gen_random_uuid(), 'list_permissions', 'List Permissions', 'permissions', 'list'),
+    (gen_random_uuid(), 'view_permissions', 'View Permission Detail', 'permissions', 'view'),
+    (gen_random_uuid(), 'create_permissions', 'Create Permissions', 'permissions', 'create'),
+    (gen_random_uuid(), 'update_permissions', 'Update Permissions', 'permissions', 'update'),
+    (gen_random_uuid(), 'delete_permissions', 'Delete Permissions', 'permissions', 'delete'),
+
     -- Profile permissions
     (gen_random_uuid(), 'view_profile', 'View Profile', 'profile', 'view'),
-    (gen_random_uuid(), 'update_profile', 'Update Profile', 'profile', 'update')
+    (gen_random_uuid(), 'update_profile', 'Update Profile', 'profile', 'update'),
+    (gen_random_uuid(), 'update_password_profile', 'Update Password Profile', 'profile', 'update_password'),
+    (gen_random_uuid(), 'delete_profile', 'Delete Profile', 'profile', 'delete')
 ON CONFLICT (name) DO NOTHING;
 
 -- Assign all permissions to admin role
@@ -142,8 +161,8 @@ SELECT r.id, p.id
 FROM roles r
 CROSS JOIN permissions p
 WHERE r.name = 'staff'
-AND p.action IN ('view', 'create', 'update')
-AND p.resource NOT IN ('users', 'roles')
+AND p.action IN ('list', 'view', 'create', 'update')
+AND p.resource NOT IN ('users', 'roles', 'permissions')
 ON CONFLICT DO NOTHING;
 
 -- Assign view profile permission to staff
@@ -161,8 +180,8 @@ SELECT r.id, p.id
 FROM roles r
 CROSS JOIN permissions p
 WHERE r.name = 'viewer'
-AND p.action = 'view'
-AND p.resource NOT IN ('users', 'roles')
+AND p.action IN ('list', 'view')
+AND p.resource NOT IN ('users', 'roles', 'permissions')
 ON CONFLICT DO NOTHING;
 
 -- Assign view profile permission to viewer

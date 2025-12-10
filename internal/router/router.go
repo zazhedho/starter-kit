@@ -74,7 +74,7 @@ func (r *Routes) UserRoutes() {
 	}
 
 	h := userHandler.NewUserHandler(uc, loginLimiter)
-	mdw := middlewares.NewMiddleware(blacklistRepo)
+	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter
 	registerLimit := utils.GetEnv("REGISTER_RATE_LIMIT", 5).(int)
@@ -100,16 +100,19 @@ func (r *Routes) UserRoutes() {
 		{
 			userPriv.POST("/logout", h.Logout)
 			userPriv.GET("", h.GetUserByAuth)
-			userPriv.GET("/:id", mdw.RoleMiddleware(utils.RoleAdmin, utils.RoleStaff), h.GetUserById)
+			userPriv.GET("/:id", mdw.PermissionMiddleware("users", "view"), h.GetUserById)
 			userPriv.PUT("", h.Update)
-			userPriv.PUT("/:id", mdw.RoleMiddleware(utils.RoleAdmin), h.UpdateUserById)
+			userPriv.PUT("/:id", mdw.PermissionMiddleware("users", "update"), h.UpdateUserById)
 			userPriv.PUT("/change/password", h.ChangePassword)
 			userPriv.DELETE("", h.Delete)
-			userPriv.DELETE("/:id", mdw.RoleMiddleware(utils.RoleAdmin), h.DeleteUserById)
+			userPriv.DELETE("/:id", mdw.PermissionMiddleware("users", "delete"), h.DeleteUserById)
+
+			// Admin create user endpoint (with role selection)
+			userPriv.POST("", mdw.PermissionMiddleware("users", "create"), h.AdminCreateUser)
 		}
 	}
 
-	r.App.GET("/api/users", mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleSuperAdmin, utils.RoleAdmin, utils.RoleStaff), h.GetAllUsers)
+	r.App.GET("/api/users", mdw.AuthMiddleware(), mdw.PermissionMiddleware("users", "list"), h.GetAllUsers)
 }
 
 func (r *Routes) RoleRoutes() {
@@ -118,19 +121,23 @@ func (r *Routes) RoleRoutes() {
 	repoMenu := menuRepo.NewMenuRepo(r.DB)
 	svc := roleSvc.NewRoleService(repoRole, repoPermission, repoMenu)
 	h := roleHandler.NewRoleHandler(svc)
-	mdw := middlewares.NewMiddleware(authRepo.NewBlacklistRepo(r.DB))
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, repoPermission)
 
-	r.App.GET("/api/roles", mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleAdmin), h.GetAll)
+	// List endpoints
+	r.App.GET("/api/roles", mdw.AuthMiddleware(), mdw.PermissionMiddleware("roles", "list"), h.GetAll)
 
-	role := r.App.Group("/api/role").Use(mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleAdmin))
+	// CRUD endpoints
+	role := r.App.Group("/api/role").Use(mdw.AuthMiddleware())
 	{
-		role.POST("", h.Create)
-		role.GET("/:id", h.GetByID)
-		role.PUT("/:id", h.Update)
-		role.DELETE("/:id", h.Delete)
+		role.POST("", mdw.PermissionMiddleware("roles", "create"), h.Create)
+		role.GET("/:id", mdw.PermissionMiddleware("roles", "view"), h.GetByID)
+		role.PUT("/:id", mdw.PermissionMiddleware("roles", "update"), h.Update)
+		role.DELETE("/:id", mdw.PermissionMiddleware("roles", "delete"), h.Delete)
 
-		role.POST("/:id/permissions", h.AssignPermissions)
-		role.POST("/:id/menus", h.AssignMenus)
+		// Permission and menu assignment
+		role.POST("/:id/permissions", mdw.PermissionMiddleware("roles", "assign_permissions"), h.AssignPermissions)
+		role.POST("/:id/menus", mdw.PermissionMiddleware("roles", "assign_menus"), h.AssignMenus)
 	}
 }
 
@@ -138,17 +145,22 @@ func (r *Routes) PermissionRoutes() {
 	repo := permissionRepo.NewPermissionRepo(r.DB)
 	svc := permissionSvc.NewPermissionService(repo)
 	h := permissionHandler.NewPermissionHandler(svc)
-	mdw := middlewares.NewMiddleware(authRepo.NewBlacklistRepo(r.DB))
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, repo)
 
-	r.App.GET("/api/permissions", mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleAdmin), h.GetAll)
+	// List endpoints
+	r.App.GET("/api/permissions", mdw.AuthMiddleware(), mdw.PermissionMiddleware("permissions", "list"), h.GetAll)
+
+	// Get current user's permissions
 	r.App.GET("/api/permissions/me", mdw.AuthMiddleware(), h.GetUserPermissions)
 
-	permission := r.App.Group("/api/permission").Use(mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleAdmin))
+	// CRUD endpoints
+	permission := r.App.Group("/api/permission").Use(mdw.AuthMiddleware())
 	{
-		permission.POST("", h.Create)
-		permission.GET("/:id", h.GetByID)
-		permission.PUT("/:id", h.Update)
-		permission.DELETE("/:id", h.Delete)
+		permission.POST("", mdw.PermissionMiddleware("permissions", "create"), h.Create)
+		permission.GET("/:id", mdw.PermissionMiddleware("permissions", "view"), h.GetByID)
+		permission.PUT("/:id", mdw.PermissionMiddleware("permissions", "update"), h.Update)
+		permission.DELETE("/:id", mdw.PermissionMiddleware("permissions", "delete"), h.Delete)
 	}
 }
 
@@ -156,18 +168,24 @@ func (r *Routes) MenuRoutes() {
 	repo := menuRepo.NewMenuRepo(r.DB)
 	svc := menuSvc.NewMenuService(repo)
 	h := menuHandler.NewMenuHandler(svc)
-	mdw := middlewares.NewMiddleware(authRepo.NewBlacklistRepo(r.DB))
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
+	// Public endpoints for authenticated users
 	r.App.GET("/api/menus/active", mdw.AuthMiddleware(), h.GetActiveMenus)
 	r.App.GET("/api/menus/me", mdw.AuthMiddleware(), h.GetUserMenus)
-	r.App.GET("/api/menus", mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleAdmin), h.GetAll)
 
-	menu := r.App.Group("/api/menu").Use(mdw.AuthMiddleware(), mdw.RoleMiddleware(utils.RoleAdmin))
+	// List endpoints
+	r.App.GET("/api/menus", mdw.AuthMiddleware(), mdw.PermissionMiddleware("menus", "list"), h.GetAll)
+
+	// CRUD endpoints
+	menu := r.App.Group("/api/menu").Use(mdw.AuthMiddleware())
 	{
-		menu.POST("", h.Create)
-		menu.GET("/:id", h.GetByID)
-		menu.PUT("/:id", h.Update)
-		menu.DELETE("/:id", h.Delete)
+		menu.POST("", mdw.PermissionMiddleware("menus", "create"), h.Create)
+		menu.GET("/:id", mdw.PermissionMiddleware("menus", "view"), h.GetByID)
+		menu.PUT("/:id", mdw.PermissionMiddleware("menus", "update"), h.Update)
+		menu.DELETE("/:id", mdw.PermissionMiddleware("menus", "delete"), h.Delete)
 	}
 }
 
@@ -181,8 +199,11 @@ func (r *Routes) SessionRoutes() {
 	repo := sessionRepo.NewSessionRepository(redisClient)
 	svc := sessionSvc.NewSessionService(repo)
 	h := sessionHandler.NewSessionHandler(svc)
-	mdw := middlewares.NewMiddleware(authRepo.NewBlacklistRepo(r.DB))
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
+	// Session management endpoints (authenticated users only)
 	sessionGroup := r.App.Group("/api/user").Use(mdw.AuthMiddleware())
 	{
 		sessionGroup.GET("/sessions", h.GetActiveSessions)
