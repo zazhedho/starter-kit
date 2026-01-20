@@ -17,13 +17,26 @@ func CreateUUID() string {
 }
 
 func GenerateLogId(ctx *gin.Context) uuid.UUID {
-	if logId, ok := ctx.Value(CtxKeyId).(uuid.UUID); ok {
-		return logId
+	if ctx != nil {
+		if storedID, ok := ctx.Get(CtxKeyId); ok {
+			switch v := storedID.(type) {
+			case uuid.UUID:
+				return v
+			case string:
+				if parsedID, err := uuid.Parse(v); err == nil {
+					return parsedID
+				}
+			}
+		}
 	}
 
 	logId, err := uuid.NewV7()
 	if err != nil {
 		logId = uuid.New()
+	}
+
+	if ctx != nil {
+		ctx.Set(CtxKeyId, logId)
 	}
 
 	return logId

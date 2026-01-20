@@ -41,9 +41,10 @@ func NewRoutes() *Routes {
 	app.Use(middlewares.CORS())
 	app.Use(gin.CustomRecovery(middlewares.ErrorHandler))
 	app.Use(middlewares.SetContextId())
+	app.Use(middlewares.RequestLogger())
 
 	app.GET("/healthcheck", func(ctx *gin.Context) {
-		logger.WriteLog(logger.LogLevelDebug, "ClientIP: "+ctx.ClientIP())
+		logger.WriteLogWithContext(ctx, logger.LogLevelDebug, "ClientIP: "+ctx.ClientIP())
 		ctx.JSON(http.StatusOK, gin.H{
 			"message": "OK!!",
 		})

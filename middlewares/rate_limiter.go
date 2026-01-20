@@ -25,7 +25,7 @@ func IPRateLimitMiddleware(redisClient *redis.Client, prefix string, limit int, 
 		}
 
 		logId := utils.GenerateLogId(ctx)
-		logPrefix := fmt.Sprintf("[%s][RateLimiter][%s]", logId, prefix)
+		logPrefix := fmt.Sprintf("[RateLimiter][%s]", prefix)
 
 		ip := ctx.ClientIP()
 		key := fmt.Sprintf("rate_limit:%s:%s", prefix, ip)
@@ -35,14 +35,14 @@ func IPRateLimitMiddleware(redisClient *redis.Client, prefix string, limit int, 
 
 		current, err := redisClient.Incr(reqCtx, key).Result()
 		if err != nil {
-			logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; redis.Incr error: %v", logPrefix, err))
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; redis.Incr error: %v", logPrefix, err))
 			ctx.Next()
 			return
 		}
 
 		if current == 1 {
 			if err := redisClient.Expire(reqCtx, key, window).Err(); err != nil {
-				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; redis.Expire error: %v", logPrefix, err))
+				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; redis.Expire error: %v", logPrefix, err))
 			}
 		}
 
@@ -74,7 +74,7 @@ func EndpointRateLimitMiddleware(redisClient *redis.Client, limit int, window ti
 		}
 
 		logId := utils.GenerateLogId(ctx)
-		logPrefix := fmt.Sprintf("[%s][EndpointRateLimiter]", logId)
+		logPrefix := "[EndpointRateLimiter]"
 
 		ip := ctx.ClientIP()
 		endpoint := ctx.FullPath()
@@ -85,14 +85,14 @@ func EndpointRateLimitMiddleware(redisClient *redis.Client, limit int, window ti
 
 		current, err := redisClient.Incr(reqCtx, key).Result()
 		if err != nil {
-			logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; redis.Incr error: %v", logPrefix, err))
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; redis.Incr error: %v", logPrefix, err))
 			ctx.Next()
 			return
 		}
 
 		if current == 1 {
 			if err := redisClient.Expire(reqCtx, key, window).Err(); err != nil {
-				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("%s; redis.Expire error: %v", logPrefix, err))
+				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; redis.Expire error: %v", logPrefix, err))
 			}
 		}
 
