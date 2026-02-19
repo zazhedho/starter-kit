@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/infrastructure/database"
+	locationHandler "starter-kit/internal/handlers/http/location"
 	menuHandler "starter-kit/internal/handlers/http/menu"
 	permissionHandler "starter-kit/internal/handlers/http/permission"
 	roleHandler "starter-kit/internal/handlers/http/role"
@@ -19,6 +20,7 @@ import (
 	roleRepo "starter-kit/internal/repositories/role"
 	sessionRepo "starter-kit/internal/repositories/session"
 	userRepo "starter-kit/internal/repositories/user"
+	locationSvc "starter-kit/internal/services/location"
 	menuSvc "starter-kit/internal/services/menu"
 	permissionSvc "starter-kit/internal/services/permission"
 	roleSvc "starter-kit/internal/services/role"
@@ -213,4 +215,17 @@ func (r *Routes) SessionRoutes() {
 	}
 
 	logger.WriteLog(logger.LogLevelInfo, "Session management routes registered")
+}
+
+func (r *Routes) LocationRoutes() {
+	svc := locationSvc.NewLocationService()
+	h := locationHandler.NewLocationHandler(svc)
+
+	location := r.App.Group("/api/location")
+	{
+		location.GET("/province", h.GetProvince)
+		location.GET("/city", h.GetCity)
+		location.GET("/district", h.GetDistrict)
+		location.GET("/village", h.GetVillage)
+	}
 }

@@ -66,7 +66,7 @@ func main() {
 	confID := config.GetAppConf("CONFIG_ID", "", nil)
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
 
-	runMigration()
+	//runMigration()
 
 	// Initialize Redis for session management (optional)
 	redisClient, err := database.InitRedis()
@@ -87,6 +87,7 @@ func main() {
 	routes.RoleRoutes()
 	routes.PermissionRoutes()
 	routes.MenuRoutes()
+	routes.LocationRoutes()
 
 	// Register session routes if Redis is available
 	if redisClient != nil {
