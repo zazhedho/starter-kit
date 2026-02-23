@@ -30,3 +30,7 @@ func NormalizePhoneTo62(phoneInput string) string {
 
 	return normalized
 }
+
+func SanitizeEmail(email string) string {
+	return strings.TrimSpace(strings.ToLower(email))
+}
