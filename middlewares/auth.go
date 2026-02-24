@@ -183,6 +183,14 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 
 		permissions, err := m.PermissionRepo.GetUserPermissions(userId)
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))
+				res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
+				res.Error = response.Errors{Code: http.StatusForbidden, Message: messages.AccessDenied}
+				ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+				return
+			}
+
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
 			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
 			res.Error = "failed to check permissions"
@@ -190,16 +198,19 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			return
 		}
 
+		targetResource := strings.TrimSpace(resource)
+		targetAction := strings.TrimSpace(action)
 		hasPermission := false
 		for _, perm := range permissions {
-			if perm.Resource == resource && perm.Action == action {
+			if strings.EqualFold(strings.TrimSpace(perm.Resource), targetResource) &&
+				strings.EqualFold(strings.TrimSpace(perm.Action), targetAction) {
 				hasPermission = true
 				break
 			}
 		}
 
 		if !hasPermission {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; User '%s' lacks permission '%s:%s'", logPrefix, userId, resource, action))
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; User '%s' lacks permission '%s:%s'", logPrefix, userId, targetResource, targetAction))
 			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
 			res.Error = response.Errors{Code: http.StatusForbidden, Message: messages.AccessDenied}
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
