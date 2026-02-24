@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"starter-kit/infrastructure/database"
+	domainsession "starter-kit/internal/domain/session"
 	"starter-kit/internal/dto"
 	interfaceuser "starter-kit/internal/interfaces/user"
 	sessionRepo "starter-kit/internal/repositories/session"
@@ -187,7 +188,10 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 			sRepo := sessionRepo.NewSessionRepository(redisClient)
 			sSvc := sessionSvc.NewSessionService(sRepo)
 
-			session, errSession := sSvc.CreateSession(context.Background(), &user, token, ctx)
+			session, errSession := sSvc.CreateSession(context.Background(), &user, token, domainsession.RequestMeta{
+				IP:        ctx.ClientIP(),
+				UserAgent: ctx.GetHeader("User-Agent"),
+			})
 			if errSession != nil {
 				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to create session: %v", logPrefix, errSession))
 			} else {

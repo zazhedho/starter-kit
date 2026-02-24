@@ -37,13 +37,23 @@ func (r *repo) GetByName(name string) (ret domainpermission.Permission, err erro
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainpermission.Permission, totalData int64, err error) {
 	query := r.DB.Model(&domainpermission.Permission{}).Debug()
+	allowedFilters := []string{
+		"id",
+		"name",
+		"display_name",
+		"resource",
+		"action",
+		"created_at",
+		"updated_at",
+	}
 
 	if params.Search != "" {
 		searchPattern := "%" + params.Search + "%"
 		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) OR LOWER(resource) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 
-	for key, value := range params.Filters {
+	safeFilters := filter.WhitelistFilter(params.Filters, allowedFilters)
+	for key, value := range safeFilters {
 		if value == nil {
 			continue
 		}

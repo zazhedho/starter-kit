@@ -7,9 +7,9 @@ import (
 	domainuser "starter-kit/internal/domain/user"
 	interfacesession "starter-kit/internal/interfaces/session"
 	"starter-kit/utils"
+	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
@@ -23,15 +23,17 @@ func NewSessionService(sessionRepo interfacesession.RepoSessionInterface) *Servi
 	}
 }
 
-func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Users, token string, ginCtx *gin.Context) (*domainsession.Session, error) {
+func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Users, token string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
 	sessionID := uuid.New().String()
 
 	jwtExpHours := utils.GetEnv("JWT_EXP", 24).(int)
 	expiresAt := time.Now().Add(time.Hour * time.Duration(jwtExpHours))
 
-	deviceInfo := extractDeviceInfo(ginCtx)
-	ip := ginCtx.ClientIP()
-	userAgent := ginCtx.GetHeader("User-Agent")
+	userAgent := requestMeta.UserAgent
+	deviceInfo := requestMeta.DeviceInfo
+	if deviceInfo == "" {
+		deviceInfo = extractDeviceInfo(userAgent)
+	}
 
 	session := &domainsession.Session{
 		SessionID:    sessionID,
@@ -40,7 +42,7 @@ func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Use
 		Role:         user.Role,
 		Token:        token,
 		DeviceInfo:   deviceInfo,
-		IP:           ip,
+		IP:           requestMeta.IP,
 		UserAgent:    userAgent,
 		LoginAt:      time.Now(),
 		LastActivity: time.Now(),
@@ -137,40 +139,25 @@ func (s *ServiceSession) DestroyOtherSessions(ctx context.Context, userID string
 	return nil
 }
 
-func extractDeviceInfo(ctx *gin.Context) string {
-	userAgent := ctx.GetHeader("User-Agent")
-
-	if contains(userAgent, "Mobile") || contains(userAgent, "Android") || contains(userAgent, "iPhone") {
-		if contains(userAgent, "Android") {
+func extractDeviceInfo(userAgent string) string {
+	if strings.Contains(userAgent, "Mobile") || strings.Contains(userAgent, "Android") || strings.Contains(userAgent, "iPhone") {
+		if strings.Contains(userAgent, "Android") {
 			return "Android Mobile"
-		} else if contains(userAgent, "iPhone") {
+		} else if strings.Contains(userAgent, "iPhone") {
 			return "iOS Mobile"
 		}
 		return "Mobile Device"
-	} else if contains(userAgent, "iPad") || contains(userAgent, "Tablet") {
+	} else if strings.Contains(userAgent, "iPad") || strings.Contains(userAgent, "Tablet") {
 		return "Tablet"
-	} else if contains(userAgent, "Windows") {
+	} else if strings.Contains(userAgent, "Windows") {
 		return "Windows PC"
-	} else if contains(userAgent, "Macintosh") || contains(userAgent, "Mac OS") {
+	} else if strings.Contains(userAgent, "Macintosh") || strings.Contains(userAgent, "Mac OS") {
 		return "Mac"
-	} else if contains(userAgent, "Linux") {
+	} else if strings.Contains(userAgent, "Linux") {
 		return "Linux"
 	}
 
 	return "Unknown Device"
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) >= len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || indexOf(s, substr) >= 0))
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
 
 var _ interfacesession.ServiceSessionInterface = (*ServiceSession)(nil)

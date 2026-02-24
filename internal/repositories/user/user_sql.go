@@ -46,13 +46,24 @@ func (r *repo) GetByID(id string) (ret domainuser.Users, err error) {
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainuser.Users, totalData int64, err error) {
 	query := r.DB.Model(&domainuser.Users{}).Debug()
+	allowedFilters := []string{
+		"id",
+		"name",
+		"email",
+		"phone",
+		"role",
+		"role_id",
+		"created_at",
+		"updated_at",
+	}
 
 	if params.Search != "" {
 		searchPattern := "%" + params.Search + "%"
 		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?) OR LOWER(phone) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern)
 	}
 
-	for key, value := range params.Filters {
+	safeFilters := filter.WhitelistFilter(params.Filters, allowedFilters)
+	for key, value := range safeFilters {
 		if value == nil {
 			continue
 		}

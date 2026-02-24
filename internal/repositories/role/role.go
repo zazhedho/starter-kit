@@ -38,13 +38,22 @@ func (r *repo) GetByName(name string) (ret domainrole.Role, err error) {
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainrole.Role, totalData int64, err error) {
 	query := r.DB.Model(&domainrole.Role{}).Debug()
+	allowedFilters := []string{
+		"id",
+		"name",
+		"display_name",
+		"is_system",
+		"created_at",
+		"updated_at",
+	}
 
 	if params.Search != "" {
 		searchPattern := "%" + params.Search + "%"
 		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern)
 	}
 
-	for key, value := range params.Filters {
+	safeFilters := filter.WhitelistFilter(params.Filters, allowedFilters)
+	for key, value := range safeFilters {
 		if value == nil {
 			continue
 		}

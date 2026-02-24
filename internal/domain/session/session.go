@@ -24,3 +24,9 @@ type SessionInfo struct {
 	LastActivity     time.Time `json:"last_activity"`
 	IsCurrentSession bool      `json:"is_current_session"`
 }
+
+type RequestMeta struct {
+	IP         string `json:"ip,omitempty"`
+	UserAgent  string `json:"user_agent,omitempty"`
+	DeviceInfo string `json:"device_info,omitempty"`
+}

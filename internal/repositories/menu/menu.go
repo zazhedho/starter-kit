@@ -37,13 +37,25 @@ func (r *repo) GetByName(name string) (ret domainmenu.MenuItem, err error) {
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainmenu.MenuItem, totalData int64, err error) {
 	query := r.DB.Model(&domainmenu.MenuItem{}).Debug()
+	allowedFilters := []string{
+		"id",
+		"name",
+		"display_name",
+		"path",
+		"parent_id",
+		"order_index",
+		"is_active",
+		"created_at",
+		"updated_at",
+	}
 
 	if params.Search != "" {
 		searchPattern := "%" + params.Search + "%"
 		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?) OR LOWER(path) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern)
 	}
 
-	for key, value := range params.Filters {
+	safeFilters := filter.WhitelistFilter(params.Filters, allowedFilters)
+	for key, value := range safeFilters {
 		if value == nil {
 			continue
 		}
