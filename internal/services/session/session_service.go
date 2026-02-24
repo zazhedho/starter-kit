@@ -61,7 +61,9 @@ func (s *ServiceSession) ValidateSession(ctx context.Context, token string) (*do
 	}
 
 	if time.Now().After(session.ExpiresAt) {
-		s.SessionRepo.Delete(ctx, session.SessionID)
+		if delErr := s.SessionRepo.Delete(ctx, session.SessionID); delErr != nil {
+			fmt.Printf("Failed to delete expired session: %v\n", delErr)
+		}
 		return nil, fmt.Errorf("session expired")
 	}
 

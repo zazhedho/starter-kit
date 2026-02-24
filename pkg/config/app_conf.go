@@ -44,7 +44,9 @@ func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{}
 		if getNewConfig {
 			consulPath := fmt.Sprintf("%s/%s", os.Getenv("CONSUL_PATH"), os.Getenv("APP_ENV"))
 			runtimeViper := viper.New()
-			runtimeViper.AddRemoteProvider("consul", consul, consulPath)
+			if err = runtimeViper.AddRemoteProvider("consul", consul, consulPath); err != nil {
+				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err))
+			}
 			runtimeViper.SetConfigType("json")
 			if err = runtimeViper.ReadRemoteConfig(); err != nil {
 				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s/%s; error: %+v;", consul, consulPath, err))

@@ -29,8 +29,9 @@ func FailOnError(err error, msg string) {
 
 func main() {
 	var (
-		err   error
-		sqlDb *sql.DB
+		err        error
+		sqlDb      *sql.DB
+		runMigrate bool
 	)
 	if timeZone, err := time.LoadLocation("Asia/Jakarta"); err != nil {
 		logger.WriteLog(logger.LogLevelError, "time.LoadLocation - Error: "+err.Error())
@@ -60,20 +61,27 @@ func main() {
 	var port, appName string
 	flag.StringVar(&port, "port", os.Getenv("PORT"), "port of the service")
 	flag.StringVar(&appName, "appname", os.Getenv("APP_NAME"), "service name")
+	flag.BoolVar(&runMigrate, "migrate", false, "run database migration before starting server")
 	flag.Parse()
 	logger.WriteLog(logger.LogLevelInfo, "APP: "+appName+"; PORT: "+port)
 
 	confID := config.GetAppConf("CONFIG_ID", "", nil)
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
 
-	//runMigration()
+	if runMigrate {
+		runMigration()
+	}
 
 	// Initialize Redis for session management (optional)
 	redisClient, err := database.InitRedis()
 	if err != nil {
 		logger.WriteLog(logger.LogLevelDebug, "Redis not available, session management will be disabled")
 	} else {
-		defer database.CloseRedis()
+		defer func() {
+			if closeErr := database.CloseRedis(); closeErr != nil {
+				logger.WriteLog(logger.LogLevelError, "Failed to close redis connection: "+closeErr.Error())
+			}
+		}()
 		logger.WriteLog(logger.LogLevelInfo, "Redis initialized, session management enabled")
 	}
 

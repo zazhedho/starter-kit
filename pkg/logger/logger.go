@@ -228,16 +228,22 @@ func (h *stringHandler) Handle(_ context.Context, record slog.Record) error {
 }
 
 func (h *stringHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	clone := *h
-	clone.attrs = append(append([]slog.Attr{}, h.attrs...), attrs...)
-	return &clone
+	return &stringHandler{
+		writer: h.writer,
+		level:  h.level,
+		attrs:  append(append([]slog.Attr{}, h.attrs...), attrs...),
+		groups: append([]string{}, h.groups...),
+	}
 }
 
 func (h *stringHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h
 	}
-	clone := *h
-	clone.groups = append(append([]string{}, h.groups...), name)
-	return &clone
+	return &stringHandler{
+		writer: h.writer,
+		level:  h.level,
+		attrs:  append([]slog.Attr{}, h.attrs...),
+		groups: append(append([]string{}, h.groups...), name),
+	}
 }

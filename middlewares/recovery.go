@@ -17,5 +17,4 @@ func ErrorHandler(c *gin.Context, err any) {
 
 	res := response.Response(http.StatusInternalServerError, fmt.Sprintf("%s (%s)", messages.MsgFail, logId.String()), logId, nil)
 	c.AbortWithStatusJSON(http.StatusInternalServerError, res)
-	return
 }

@@ -23,7 +23,7 @@ func ConnDb() (db *gorm.DB, sqlDB *sql.DB, err error) {
 			utils.GetEnv("DB_NAME", "").(string),
 			utils.GetEnv("DB_SSLMODE", "disable").(string))
 	}
-	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConnDb; Initialize db connection..."))
+	logger.WriteLog(logger.LogLevelDebug, "ConnDb; Initialize db connection...")
 
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
 	if err != nil {

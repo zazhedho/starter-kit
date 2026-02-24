@@ -17,11 +17,10 @@ func GetEnv(key string, def interface{}) interface{} {
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
 		}
-		break
 	case time.Duration:
 		if v == "eod" {
 			eodTime, _ := time.Parse(time.RFC3339, time.Now().Format("2006-01-02")+"T23:59:59+07:00")
-			return time.Duration(int(eodTime.Sub(time.Now()).Seconds()))
+			return time.Duration(int(time.Until(eodTime).Seconds()))
 		}
 
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
@@ -33,7 +32,6 @@ func GetEnv(key string, def interface{}) interface{} {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
-		break
 	case string:
 		return v
 	}
