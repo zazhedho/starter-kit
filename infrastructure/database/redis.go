@@ -17,9 +17,9 @@ func InitRedis() (*redis.Client, error) {
 	opt, _ := redis.ParseURL(os.Getenv("REDIS_URL"))
 	if opt == nil {
 		opt = &redis.Options{
-			Addr:         fmt.Sprintf("%s:%s", utils.GetEnv("REDIS_HOST", "localhost").(string), utils.GetEnv("REDIS_PORT", "6379").(string)),
-			Password:     utils.GetEnv("REDIS_PASSWORD", "").(string),
-			DB:           utils.GetEnv("REDIS_DB", 0).(int),
+			Addr:         fmt.Sprintf("%s:%s", utils.GetEnv("REDIS_HOST", "localhost"), utils.GetEnv("REDIS_PORT", "6379")),
+			Password:     utils.GetEnv("REDIS_PASSWORD", ""),
+			DB:           utils.GetEnv("REDIS_DB", 0),
 			DialTimeout:  10 * time.Second,
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
@@ -38,7 +38,7 @@ func InitRedis() (*redis.Client, error) {
 		return nil, err
 	}
 
-	logger.WriteLog(logger.LogLevelInfo, fmt.Sprintf("Connected to Redis at %s:%s", utils.GetEnv("REDIS_HOST", "localhost").(string), utils.GetEnv("REDIS_PORT", "6379").(string)))
+	logger.WriteLog(logger.LogLevelInfo, fmt.Sprintf("Connected to Redis at %s:%s", utils.GetEnv("REDIS_HOST", "localhost"), utils.GetEnv("REDIS_PORT", "6379")))
 	RedisClient = client
 	return client, nil
 }

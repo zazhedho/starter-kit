@@ -43,8 +43,7 @@ func mapValidateMessage(fe validator.FieldError) string {
 }
 
 func ValidateError(err error, reflectType reflect.Type, tagName string) []ValidateMessage {
-	var ve validator.ValidationErrors
-	if errors.As(err, &ve) {
+	if ve, ok := errors.AsType[validator.ValidationErrors](err); ok {
 		out := make([]ValidateMessage, len(ve))
 		for i, fe := range ve {
 			field := fe.Field()

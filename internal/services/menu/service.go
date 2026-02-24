@@ -90,8 +90,7 @@ func (s *MenuService) Update(id string, req dto.MenuUpdate) (domainmenu.MenuItem
 	if req.IsActive != nil {
 		menu.IsActive = *req.IsActive
 	}
-	now := time.Now()
-	menu.UpdatedAt = &now
+	menu.UpdatedAt = new(time.Now())
 
 	if err := s.MenuRepo.Update(menu); err != nil {
 		return domainmenu.MenuItem{}, err

@@ -26,7 +26,7 @@ func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetProvince]"
 
-	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025").(string))
+	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025"))
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Query Year: %s;", logPrefix, year))
 
 	data, err := h.Service.GetProvince(year)
@@ -47,7 +47,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetCity]"
 
-	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025").(string))
+	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025"))
 	lvl := ctx.DefaultQuery("lvl", "11")
 	pro := ctx.Query("pro")
 
@@ -78,7 +78,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetDistrict]"
 
-	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025").(string))
+	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025"))
 	lvl := ctx.DefaultQuery("lvl", "12")
 	pro := ctx.Query("pro")
 	kab := ctx.Query("kab")
@@ -117,7 +117,7 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetVillage]"
 
-	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025").(string))
+	year := ctx.DefaultQuery("thn", utils.GetEnv("PROVINCE_YEAR", "2025"))
 	lvl := ctx.DefaultQuery("lvl", "13")
 	pro := ctx.Query("pro")
 	kab := ctx.Query("kab")

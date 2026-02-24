@@ -70,9 +70,9 @@ func (r *Routes) UserRoutes() {
 	if redisClient != nil {
 		loginLimiter = security.NewRedisLoginLimiter(
 			redisClient,
-			utils.GetEnv("LOGIN_ATTEMPT_LIMIT", 5).(int),
-			time.Duration(utils.GetEnv("LOGIN_ATTEMPT_WINDOW_SECONDS", 60).(int))*time.Second,
-			time.Duration(utils.GetEnv("LOGIN_BLOCK_DURATION_SECONDS", 300).(int))*time.Second,
+			utils.GetEnv("LOGIN_ATTEMPT_LIMIT", 5),
+			time.Duration(utils.GetEnv("LOGIN_ATTEMPT_WINDOW_SECONDS", 60))*time.Second,
+			time.Duration(utils.GetEnv("LOGIN_BLOCK_DURATION_SECONDS", 300))*time.Second,
 		)
 	}
 
@@ -80,8 +80,8 @@ func (r *Routes) UserRoutes() {
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter
-	registerLimit := utils.GetEnv("REGISTER_RATE_LIMIT", 5).(int)
-	registerWindowSeconds := utils.GetEnv("REGISTER_RATE_WINDOW_SECONDS", 60).(int)
+	registerLimit := utils.GetEnv("REGISTER_RATE_LIMIT", 5)
+	registerWindowSeconds := utils.GetEnv("REGISTER_RATE_WINDOW_SECONDS", 60)
 	if registerWindowSeconds <= 0 {
 		registerWindowSeconds = 60
 	}

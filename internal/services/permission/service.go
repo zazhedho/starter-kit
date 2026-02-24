@@ -75,8 +75,7 @@ func (s *PermissionService) Update(id string, req dto.PermissionUpdate) (domainp
 	if req.Action != "" {
 		permission.Action = req.Action
 	}
-	now := time.Now()
-	permission.UpdatedAt = &now
+	permission.UpdatedAt = new(time.Now())
 
 	if err := s.PermissionRepo.Update(permission); err != nil {
 		return domainpermission.Permission{}, err

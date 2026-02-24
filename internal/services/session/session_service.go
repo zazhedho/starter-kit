@@ -26,7 +26,7 @@ func NewSessionService(sessionRepo interfacesession.RepoSessionInterface) *Servi
 func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Users, token string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
 	sessionID := uuid.New().String()
 
-	jwtExpHours := utils.GetEnv("JWT_EXP", 24).(int)
+	jwtExpHours := utils.GetEnv("JWT_EXP", 24)
 	expiresAt := time.Now().Add(time.Hour * time.Duration(jwtExpHours))
 
 	userAgent := requestMeta.UserAgent

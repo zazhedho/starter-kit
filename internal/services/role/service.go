@@ -124,8 +124,7 @@ func (s *RoleService) Update(id string, req dto.RoleUpdate) (domainrole.Role, er
 		role.DisplayName = req.DisplayName
 	}
 	role.Description = req.Description
-	now := time.Now()
-	role.UpdatedAt = &now
+	role.UpdatedAt = new(time.Now())
 
 	if err := s.RoleRepo.Update(role); err != nil {
 		return domainrole.Role{}, err

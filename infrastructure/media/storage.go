@@ -13,20 +13,20 @@ import (
 func InitStorage() (storage.StorageProvider, error) {
 	logger.WriteLog(logger.LogLevelDebug, "InitStorage; Initializing storage provider...")
 
-	provider := strings.ToLower(utils.GetEnv("STORAGE_PROVIDER", "minio").(string))
+	provider := strings.ToLower(utils.GetEnv("STORAGE_PROVIDER", "minio"))
 
-	useSSL, _ := strconv.ParseBool(utils.GetEnv("STORAGE_USE_SSL", "false").(string))
+	useSSL, _ := strconv.ParseBool(utils.GetEnv("STORAGE_USE_SSL", "false"))
 
 	config := storage.Config{
 		Provider:        provider,
-		Endpoint:        utils.GetEnv("STORAGE_ENDPOINT", "localhost:9000").(string),
-		AccessKeyID:     utils.GetEnv("STORAGE_ACCESS_KEY", "minioadmin").(string),
-		SecretAccessKey: utils.GetEnv("STORAGE_SECRET_KEY", "minioadmin").(string),
-		BucketName:      utils.GetEnv("STORAGE_BUCKET_NAME", "uploads").(string),
+		Endpoint:        utils.GetEnv("STORAGE_ENDPOINT", "localhost:9000"),
+		AccessKeyID:     utils.GetEnv("STORAGE_ACCESS_KEY", "minioadmin"),
+		SecretAccessKey: utils.GetEnv("STORAGE_SECRET_KEY", "minioadmin"),
+		BucketName:      utils.GetEnv("STORAGE_BUCKET_NAME", "uploads"),
 		UseSSL:          useSSL,
-		BaseURL:         utils.GetEnv("STORAGE_BASE_URL", "http://localhost:9000").(string),
-		Region:          utils.GetEnv("STORAGE_REGION", "auto").(string),
-		AccountID:       utils.GetEnv("R2_ACCOUNT_ID", "").(string),
+		BaseURL:         utils.GetEnv("STORAGE_BASE_URL", "http://localhost:9000"),
+		Region:          utils.GetEnv("STORAGE_REGION", "auto"),
+		AccountID:       utils.GetEnv("R2_ACCOUNT_ID", ""),
 	}
 
 	storageProvider, err := storage.NewStorageProvider(config)

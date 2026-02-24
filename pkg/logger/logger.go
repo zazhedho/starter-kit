@@ -47,7 +47,7 @@ func WriteLog(level int, msg ...any) {
 		return
 	}
 
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5").(string)); logLevel < level {
+	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5")); logLevel < level {
 		return
 	}
 
@@ -77,7 +77,7 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 		return
 	}
 
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5").(string)); logLevel < level {
+	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5")); logLevel < level {
 		return
 	}
 
@@ -120,7 +120,7 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 
 func getLogger() *slog.Logger {
 	loggerOnce.Do(func() {
-		format := strings.ToLower(utils.GetEnv("LOG_FORMAT", "json").(string))
+		format := strings.ToLower(utils.GetEnv("LOG_FORMAT", "json"))
 		options := &slog.HandlerOptions{Level: slog.LevelDebug}
 
 		var handler slog.Handler

@@ -26,7 +26,7 @@ func GenerateJwt(user *domainuser.Users, logId string) (string, error) {
 		Role:     user.Role,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ID:        logId,
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(GetEnv("JWT_EXP", 24).(int)))),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(GetEnv("JWT_EXP", 24)))),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -58,7 +58,7 @@ func JwtClaim(tokenString string) (map[string]interface{}, error) {
 	}
 
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		hmacSecretString := GetEnv("JWT_KEY", "").(string)
+		hmacSecretString := GetEnv("JWT_KEY", "")
 		hmacSecret := []byte(hmacSecretString)
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return "", fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

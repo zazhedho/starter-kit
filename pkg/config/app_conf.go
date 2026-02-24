@@ -88,7 +88,7 @@ func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{}
 		if cache && getNewConfig {
 			go func(rdbCache *redis.Client, cacheKey string, data map[string]string) {
 				if cacheData, err := json.Marshal(data); err == nil {
-					ttl := utils.GetEnv("TTL_CACHE_CONFIG_APP", time.Duration(60*60*24)).(time.Duration) * time.Second
+					ttl := utils.GetEnv("TTL_CACHE_CONFIG_APP", time.Duration(60*60*24)) * time.Second
 					_ = rdbCache.Set(context.Background(), cacheKey, string(cacheData), ttl).Err()
 				}
 			}(rdbCache, cacheKey, appConf)
