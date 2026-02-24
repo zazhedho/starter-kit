@@ -11,6 +11,7 @@ import (
 	"starter-kit/pkg/messages"
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -93,10 +94,17 @@ func (m *Middleware) RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
-		dataJWT := authData.(map[string]interface{})
-
-		userRole, ok := dataJWT["role"].(string)
+		dataJWT, ok := authData.(map[string]interface{})
 		if !ok {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
+			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
+			res.Error = "invalid auth data type"
+			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+			return
+		}
+
+		userRole := strings.TrimSpace(utils.InterfaceString(dataJWT["role"]))
+		if userRole == "" {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; there is no role user", logPrefix))
 			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
 			res.Error = "there is no role user"
@@ -140,10 +148,17 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
-		dataJWT := authData.(map[string]interface{})
-
-		userRole, ok := dataJWT["role"].(string)
+		dataJWT, ok := authData.(map[string]interface{})
 		if !ok {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
+			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
+			res.Error = "invalid auth data type"
+			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+			return
+		}
+
+		userRole := strings.TrimSpace(utils.InterfaceString(dataJWT["role"]))
+		if userRole == "" {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; there is no role user", logPrefix))
 			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
 			res.Error = "there is no role user"
@@ -157,7 +172,15 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			return
 		}
 
-		userId := utils.InterfaceString(dataJWT["user_id"])
+		userId := strings.TrimSpace(utils.InterfaceString(dataJWT["user_id"]))
+		if userId == "" {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid token claims: user_id is empty", logPrefix))
+			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
+			res.Error = "invalid token claims"
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
+			return
+		}
+
 		permissions, err := m.PermissionRepo.GetUserPermissions(userId)
 		if err != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
