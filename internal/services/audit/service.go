@@ -1,7 +1,6 @@
 package serviceaudit
 
 import (
-	"encoding/json"
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
@@ -43,7 +42,7 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 	data := domainaudit.AuditTrail{
 		ID:           utils.CreateUUID(),
 		OccurredAt:   occurredAt,
-		ActorUserID:  strings.TrimSpace(req.ActorUserID),
+		ActorUserID:  utils.NormalizeUUIDPointer(req.ActorUserID),
 		ActorRole:    strings.TrimSpace(req.ActorRole),
 		Action:       strings.TrimSpace(req.Action),
 		Resource:     strings.TrimSpace(req.Resource),
@@ -64,26 +63,8 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 }
 
 func sanitizePayload(input interface{}) interface{} {
-	if input == nil {
-		return map[string]interface{}{}
-	}
-
-	normalized := normalizePayload(input)
+	normalized := utils.NormalizePayload(input)
 	return sanitizeValue(normalized)
-}
-
-func normalizePayload(input interface{}) interface{} {
-	raw, err := json.Marshal(input)
-	if err != nil {
-		return input
-	}
-
-	var normalized interface{}
-	if err := json.Unmarshal(raw, &normalized); err != nil {
-		return input
-	}
-
-	return normalized
 }
 
 func sanitizeValue(input interface{}) interface{} {

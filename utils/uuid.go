@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -40,4 +42,17 @@ func GenerateLogId(ctx *gin.Context) uuid.UUID {
 	}
 
 	return logId
+}
+
+func NormalizeUUIDPointer(input string) *string {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return nil
+	}
+
+	if _, err := uuid.Parse(value); err != nil {
+		return nil
+	}
+
+	return &value
 }

@@ -9,7 +9,7 @@ func (AuditTrail) TableName() string {
 type AuditTrail struct {
 	ID           string    `json:"id" gorm:"column:id;primaryKey"`
 	OccurredAt   time.Time `json:"occurred_at" gorm:"column:occurred_at"`
-	ActorUserID  string    `json:"actor_user_id,omitempty" gorm:"column:actor_user_id"`
+	ActorUserID  *string   `json:"actor_user_id,omitempty" gorm:"column:actor_user_id"`
 	ActorRole    string    `json:"actor_role,omitempty" gorm:"column:actor_role"`
 	Action       string    `json:"action" gorm:"column:action"`
 	Resource     string    `json:"resource" gorm:"column:resource"`
