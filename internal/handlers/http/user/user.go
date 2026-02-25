@@ -18,12 +18,9 @@ import (
 	"starter-kit/pkg/response"
 	"starter-kit/pkg/security"
 	"starter-kit/utils"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -203,21 +200,6 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	res := response.Response(http.StatusOK, "success", logId, map[string]interface{}{"token": token})
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(token)))
 	ctx.JSON(http.StatusOK, res)
-}
-
-func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.UUID, ttl time.Duration) {
-	if ttl > 0 {
-		ctx.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
-	}
-
-	message := "Too many login attempts. Please try again later."
-	if ttl > 0 {
-		message = fmt.Sprintf("Too many login attempts. Try again in %d seconds.", int(ttl.Seconds()))
-	}
-
-	res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
-	res.Error = response.Errors{Code: http.StatusTooManyRequests, Message: message}
-	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
 }
 
 func (h *HandlerUser) Logout(ctx *gin.Context) {

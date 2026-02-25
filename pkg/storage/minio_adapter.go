@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -67,13 +64,7 @@ func NewMinIOAdapter(config Config) (StorageProvider, error) {
 }
 
 func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (string, error) {
-	ext := filepath.Ext(fileHeader.Filename)
-	filename := fmt.Sprintf("%s_%s%s", time.Now().Format("20060102_150405"), uuid.New().String()[:8], ext)
-
-	objectName := filename
-	if folder != "" {
-		objectName = fmt.Sprintf("%s/%s", strings.Trim(folder, "/"), filename)
-	}
+	objectName := buildObjectName(fileHeader.Filename, folder)
 
 	fileSize := fileHeader.Size
 
@@ -94,13 +85,7 @@ func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, file
 }
 
 func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (string, error) {
-	ext := filepath.Ext(filename)
-	uniqueFilename := fmt.Sprintf("%s_%s%s", time.Now().Format("20060102_150405"), uuid.New().String()[:8], ext)
-
-	objectName := uniqueFilename
-	if folder != "" {
-		objectName = fmt.Sprintf("%s/%s", strings.Trim(folder, "/"), uniqueFilename)
-	}
+	objectName := buildObjectName(filename, folder)
 
 	if contentType == "" {
 		contentType = "application/octet-stream"

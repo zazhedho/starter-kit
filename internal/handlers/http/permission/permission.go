@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/internal/dto"
+	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/logger"
@@ -16,11 +18,15 @@ import (
 )
 
 type PermissionHandler struct {
-	Service interfacepermission.ServicePermissionInterface
+	Service      interfacepermission.ServicePermissionInterface
+	AuditService interfaceaudit.ServiceAuditInterface
 }
 
-func NewPermissionHandler(s interfacepermission.ServicePermissionInterface) *PermissionHandler {
-	return &PermissionHandler{Service: s}
+func NewPermissionHandler(s interfacepermission.ServicePermissionInterface, auditService interfaceaudit.ServiceAuditInterface) *PermissionHandler {
+	return &PermissionHandler{
+		Service:      s,
+		AuditService: auditService,
+	}
 }
 
 func (h *PermissionHandler) Create(ctx *gin.Context) {
@@ -40,12 +46,28 @@ func (h *PermissionHandler) Create(ctx *gin.Context) {
 
 	data, err := h.Service.Create(req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionCreate,
+			Resource:     "permission",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to create permission",
+			ErrorMessage: err.Error(),
+			AfterData:    req,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Create; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionCreate,
+		Resource:   "permission",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Created permission",
+		AfterData:  data,
+	})
 
 	res := response.Response(http.StatusCreated, "Permission created successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -114,14 +136,34 @@ func (h *PermissionHandler) Update(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
+	before, _ := h.Service.GetByID(id)
 	data, err := h.Service.Update(id, req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionUpdate,
+			Resource:     "permission",
+			ResourceID:   id,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to update permission",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+			AfterData:    req,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionUpdate,
+		Resource:   "permission",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Updated permission",
+		BeforeData: before,
+		AfterData:  data,
+	})
 
 	res := response.Response(http.StatusOK, "Permission updated successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -132,14 +174,32 @@ func (h *PermissionHandler) Delete(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][Delete]"
+	before, _ := h.Service.GetByID(id)
 
 	if err := h.Service.Delete(id); err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionDelete,
+			Resource:     "permission",
+			ResourceID:   id,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to delete permission",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionDelete,
+		Resource:   "permission",
+		ResourceID: id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Deleted permission",
+		BeforeData: before,
+	})
 
 	res := response.Response(http.StatusOK, "Permission deleted successfully", logId, nil)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: Permission deleted", logPrefix))

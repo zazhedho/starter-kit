@@ -14,12 +14,14 @@ import (
 	roleHandler "starter-kit/internal/handlers/http/role"
 	sessionHandler "starter-kit/internal/handlers/http/session"
 	userHandler "starter-kit/internal/handlers/http/user"
+	auditRepo "starter-kit/internal/repositories/audit"
 	authRepo "starter-kit/internal/repositories/auth"
 	menuRepo "starter-kit/internal/repositories/menu"
 	permissionRepo "starter-kit/internal/repositories/permission"
 	roleRepo "starter-kit/internal/repositories/role"
 	sessionRepo "starter-kit/internal/repositories/session"
 	userRepo "starter-kit/internal/repositories/user"
+	auditSvc "starter-kit/internal/services/audit"
 	locationSvc "starter-kit/internal/services/location"
 	menuSvc "starter-kit/internal/services/menu"
 	permissionSvc "starter-kit/internal/services/permission"
@@ -123,7 +125,9 @@ func (r *Routes) RoleRoutes() {
 	repoPermission := permissionRepo.NewPermissionRepo(r.DB)
 	repoMenu := menuRepo.NewMenuRepo(r.DB)
 	svc := roleSvc.NewRoleService(repoRole, repoPermission, repoMenu)
-	h := roleHandler.NewRoleHandler(svc)
+	repoAudit := auditRepo.NewAuditRepo(r.DB)
+	svcAudit := auditSvc.NewAuditService(repoAudit)
+	h := roleHandler.NewRoleHandler(svc, svcAudit)
 	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
 	mdw := middlewares.NewMiddleware(blacklistRepo, repoPermission)
 
@@ -147,7 +151,9 @@ func (r *Routes) RoleRoutes() {
 func (r *Routes) PermissionRoutes() {
 	repo := permissionRepo.NewPermissionRepo(r.DB)
 	svc := permissionSvc.NewPermissionService(repo)
-	h := permissionHandler.NewPermissionHandler(svc)
+	repoAudit := auditRepo.NewAuditRepo(r.DB)
+	svcAudit := auditSvc.NewAuditService(repoAudit)
+	h := permissionHandler.NewPermissionHandler(svc, svcAudit)
 	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
 	mdw := middlewares.NewMiddleware(blacklistRepo, repo)
 
@@ -170,7 +176,9 @@ func (r *Routes) PermissionRoutes() {
 func (r *Routes) MenuRoutes() {
 	repo := menuRepo.NewMenuRepo(r.DB)
 	svc := menuSvc.NewMenuService(repo)
-	h := menuHandler.NewMenuHandler(svc)
+	repoAudit := auditRepo.NewAuditRepo(r.DB)
+	svcAudit := auditSvc.NewAuditService(repoAudit)
+	h := menuHandler.NewMenuHandler(svc, svcAudit)
 	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
 	pRepo := permissionRepo.NewPermissionRepo(r.DB)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)

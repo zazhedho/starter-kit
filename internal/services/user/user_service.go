@@ -2,7 +2,6 @@ package serviceuser
 
 import (
 	"errors"
-	"regexp"
 	domainauth "starter-kit/internal/domain/auth"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
@@ -34,34 +33,6 @@ func NewUserService(userRepo interfaceuser.RepoUserInterface, blacklistRepo inte
 	}
 }
 
-func ValidatePasswordStrength(password string) error {
-	if len(password) < 8 {
-		return errors.New("password must be at least 8 characters long")
-	}
-
-	hasLower := regexp.MustCompile(`[a-z]`).MatchString(password)
-	if !hasLower {
-		return errors.New("password must contain at least 1 lowercase letter (a-z)")
-	}
-
-	hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(password)
-	if !hasUpper {
-		return errors.New("password must contain at least 1 uppercase letter (A-Z)")
-	}
-
-	hasNumber := regexp.MustCompile(`[0-9]`).MatchString(password)
-	if !hasNumber {
-		return errors.New("password must contain at least 1 number (0-9)")
-	}
-
-	hasSymbol := regexp.MustCompile(`[^a-zA-Z0-9]`).MatchString(password)
-	if !hasSymbol {
-		return errors.New("password must contain at least 1 symbol (!@#$%^&*...)")
-	}
-
-	return nil
-}
-
 func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, error) {
 	phone := utils.NormalizePhoneTo62(req.Phone)
 	email := utils.SanitizeEmail(req.Email)
@@ -89,11 +60,7 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 	// This prevents privilege escalation through request manipulation
 	roleName := utils.RoleViewer
 
-	var roleId *string
-	roleEntity, err := s.RoleRepo.GetByName(roleName)
-	if err == nil && roleEntity.Id != "" {
-		roleId = &roleEntity.Id
-	}
+	roleId, _ := findRoleIDByName(s.RoleRepo, roleName)
 
 	data = domainuser.Users{
 		Id:        utils.CreateUUID(),
@@ -146,11 +113,8 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorRole strin
 		return domainuser.Users{}, errors.New("only superadmin can create superadmin users")
 	}
 
-	var roleId *string
-	roleEntity, err := s.RoleRepo.GetByName(roleName)
-	if err == nil && roleEntity.Id != "" {
-		roleId = &roleEntity.Id
-	} else {
+	roleId, ok := findRoleIDByName(s.RoleRepo, roleName)
+	if !ok {
 		return domainuser.Users{}, errors.New("invalid role: " + roleName)
 	}
 
@@ -221,33 +185,15 @@ func (s *ServiceUser) GetUserByAuth(id string) (map[string]interface{}, error) {
 
 	role, err := s.RoleRepo.GetByName(user.Role)
 	if err != nil {
-		return map[string]interface{}{
-			"id":          user.Id,
-			"name":        user.Name,
-			"email":       user.Email,
-			"phone":       user.Phone,
-			"role":        user.Role,
-			"permissions": []string{},
-			"created_at":  user.CreatedAt,
-			"updated_at":  user.UpdatedAt,
-		}, nil
+		return buildUserAuthResponse(user, nil), nil
 	}
 
 	permissionIds, err := s.RoleRepo.GetRolePermissions(role.Id)
 	if err != nil {
-		return map[string]interface{}{
-			"id":          user.Id,
-			"name":        user.Name,
-			"email":       user.Email,
-			"phone":       user.Phone,
-			"role":        user.Role,
-			"permissions": []string{},
-			"created_at":  user.CreatedAt,
-			"updated_at":  user.UpdatedAt,
-		}, nil
+		return buildUserAuthResponse(user, nil), nil
 	}
 
-	permissionNames := []string{}
+	var permissionNames []string
 	for _, permId := range permissionIds {
 		perm, err := s.PermissionRepo.GetByID(permId)
 		if err == nil {
@@ -255,16 +201,7 @@ func (s *ServiceUser) GetUserByAuth(id string) (map[string]interface{}, error) {
 		}
 	}
 
-	return map[string]interface{}{
-		"id":          user.Id,
-		"name":        user.Name,
-		"email":       user.Email,
-		"phone":       user.Phone,
-		"role":        user.Role,
-		"permissions": permissionNames,
-		"created_at":  user.CreatedAt,
-		"updated_at":  user.UpdatedAt,
-	}, nil
+	return buildUserAuthResponse(user, permissionNames), nil
 }
 
 func (s *ServiceUser) GetAllUsers(params filter.BaseParams, currentUserRole string) ([]domainuser.Users, int64, error) {
@@ -310,30 +247,15 @@ func (s *ServiceUser) Update(id, role string, req dto.UserUpdate) (domainuser.Us
 		data.Email = utils.SanitizeEmail(req.Email)
 	}
 
-	if role == utils.RoleAdmin && strings.TrimSpace(req.Role) != "" {
-		newRoleName := strings.ToLower(req.Role)
-
-		if newRoleName == utils.RoleSuperAdmin {
+	if reqRole := strings.TrimSpace(req.Role); reqRole != "" && (role == utils.RoleAdmin || role == utils.RoleSuperAdmin) {
+		newRoleName := strings.ToLower(reqRole)
+		if role == utils.RoleAdmin && newRoleName == utils.RoleSuperAdmin {
 			return domainuser.Users{}, errors.New("cannot assign superadmin role")
 		}
 
 		data.Role = newRoleName
-
-		roleEntity, err := s.RoleRepo.GetByName(newRoleName)
-		if err == nil && roleEntity.Id != "" {
-			data.RoleId = &roleEntity.Id
-		} else {
-			data.RoleId = nil
-		}
-	}
-
-	if role == utils.RoleSuperAdmin && strings.TrimSpace(req.Role) != "" {
-		newRoleName := strings.ToLower(req.Role)
-		data.Role = newRoleName
-
-		roleEntity, err := s.RoleRepo.GetByName(newRoleName)
-		if err == nil && roleEntity.Id != "" {
-			data.RoleId = &roleEntity.Id
+		if roleID, ok := findRoleIDByName(s.RoleRepo, newRoleName); ok {
+			data.RoleId = roleID
 		} else {
 			data.RoleId = nil
 		}
