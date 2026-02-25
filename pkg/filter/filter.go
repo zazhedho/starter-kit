@@ -28,8 +28,14 @@ func GetBaseParams(ctx *gin.Context, defOrderBy, defOrderDirection string, defLi
 	if req.Page < 1 {
 		req.Page = 1
 	}
-	if req.Limit < 1 || req.Limit > 10000 {
-		req.Limit = defLimit
+	if req.Limit == -1 {
+		req.Page = 1
+		req.Offset = 0
+	} else {
+		if req.Limit < 1 || req.Limit > 10000 {
+			req.Limit = defLimit
+		}
+		req.Offset = (req.Page - 1) * req.Limit
 	}
 	if req.OrderBy == "" {
 		req.OrderBy = defOrderBy
@@ -38,7 +44,6 @@ func GetBaseParams(ctx *gin.Context, defOrderBy, defOrderDirection string, defLi
 	if !validDirs[strings.ToLower(req.OrderDirection)] {
 		req.OrderDirection = defOrderDirection
 	}
-	req.Offset = (req.Page - 1) * req.Limit
 
 	if req.Filters == nil {
 		req.Filters = make(map[string]interface{})
