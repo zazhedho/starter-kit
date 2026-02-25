@@ -65,6 +65,8 @@ func (r *Routes) UserRoutes() {
 	rRepo := roleRepo.NewRoleRepo(r.DB)
 	pRepo := permissionRepo.NewPermissionRepo(r.DB)
 	uc := userSvc.NewUserService(repo, blacklistRepo, rRepo, pRepo)
+	repoAudit := auditRepo.NewAuditRepo(r.DB)
+	svcAudit := auditSvc.NewAuditService(repoAudit)
 
 	// Setup login limiter if Redis is available
 	redisClient := database.GetRedisClient()
@@ -78,7 +80,7 @@ func (r *Routes) UserRoutes() {
 		)
 	}
 
-	h := userHandler.NewUserHandler(uc, loginLimiter)
+	h := userHandler.NewUserHandler(uc, loginLimiter, svcAudit)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter

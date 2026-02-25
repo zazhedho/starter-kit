@@ -1,6 +1,7 @@
 package serviceaudit
 
 import (
+	"encoding/json"
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
@@ -63,11 +64,34 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 }
 
 func sanitizePayload(input interface{}) interface{} {
+	if input == nil {
+		return map[string]interface{}{}
+	}
+
+	normalized := normalizePayload(input)
+	return sanitizeValue(normalized)
+}
+
+func normalizePayload(input interface{}) interface{} {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return input
+	}
+
+	var normalized interface{}
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return input
+	}
+
+	return normalized
+}
+
+func sanitizeValue(input interface{}) interface{} {
 	switch v := input.(type) {
 	case map[string]interface{}:
 		return sanitizeMap(v)
-	case nil:
-		return map[string]interface{}{}
+	case []interface{}:
+		return sanitizeSlice(v)
 	default:
 		return v
 	}
@@ -81,14 +105,7 @@ func sanitizeMap(in map[string]interface{}) map[string]interface{} {
 			continue
 		}
 
-		switch nested := val.(type) {
-		case map[string]interface{}:
-			out[k] = sanitizeMap(nested)
-		case []interface{}:
-			out[k] = sanitizeSlice(nested)
-		default:
-			out[k] = nested
-		}
+		out[k] = sanitizeValue(val)
 	}
 	return out
 }
@@ -96,14 +113,7 @@ func sanitizeMap(in map[string]interface{}) map[string]interface{} {
 func sanitizeSlice(values []interface{}) []interface{} {
 	out := make([]interface{}, 0, len(values))
 	for _, val := range values {
-		switch nested := val.(type) {
-		case map[string]interface{}:
-			out = append(out, sanitizeMap(nested))
-		case []interface{}:
-			out = append(out, sanitizeSlice(nested))
-		default:
-			out = append(out, nested)
-		}
+		out = append(out, sanitizeValue(val))
 	}
 	return out
 }

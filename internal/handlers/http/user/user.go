@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"reflect"
 	"starter-kit/infrastructure/database"
+	domainaudit "starter-kit/internal/domain/audit"
 	domainsession "starter-kit/internal/domain/session"
 	"starter-kit/internal/dto"
+	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfaceuser "starter-kit/internal/interfaces/user"
 	sessionRepo "starter-kit/internal/repositories/session"
 	sessionSvc "starter-kit/internal/services/session"
@@ -27,12 +29,14 @@ import (
 type HandlerUser struct {
 	Service      interfaceuser.ServiceUserInterface
 	LoginLimiter security.LoginLimiter
+	AuditService interfaceaudit.ServiceAuditInterface
 }
 
-func NewUserHandler(s interfaceuser.ServiceUserInterface, limiter security.LoginLimiter) *HandlerUser {
+func NewUserHandler(s interfaceuser.ServiceUserInterface, limiter security.LoginLimiter, auditService interfaceaudit.ServiceAuditInterface) *HandlerUser {
 	return &HandlerUser{
 		Service:      s,
 		LoginLimiter: limiter,
+		AuditService: auditService,
 	}
 }
 
@@ -53,6 +57,18 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 
 	data, err := h.Service.RegisterUser(req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionCreate,
+			Resource:     "user",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to register user",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"name":  req.Name,
+				"email": req.Email,
+				"phone": req.Phone,
+			},
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.RegisterUser; Error: %+v", logPrefix, err))
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Error: email or phone already exists", logPrefix))
@@ -67,6 +83,20 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionCreate,
+		Resource:   "user",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Registered user",
+		AfterData: map[string]interface{}{
+			"id":    data.Id,
+			"name":  data.Name,
+			"email": data.Email,
+			"phone": data.Phone,
+			"role":  data.Role,
+		},
+	})
 
 	res := response.Response(http.StatusCreated, "User registered successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -98,6 +128,19 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 
 	data, err := h.Service.AdminCreateUser(req, creatorRole)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionCreate,
+			Resource:     "user",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to create user",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"name":  req.Name,
+				"email": req.Email,
+				"phone": req.Phone,
+				"role":  req.Role,
+			},
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AdminCreateUser; Error: %+v", logPrefix, err))
 		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "already exists") {
 			res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
@@ -111,6 +154,20 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionCreate,
+		Resource:   "user",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Created user by admin",
+		AfterData: map[string]interface{}{
+			"id":    data.Id,
+			"name":  data.Name,
+			"email": data.Email,
+			"phone": data.Phone,
+			"role":  data.Role,
+		},
+	})
 
 	res := response.Response(http.StatusCreated, "User created successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -138,6 +195,15 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		if limiterErr != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.IsBlocked error: %v", logPrefix, limiterErr))
 		} else if blocked {
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:   domainaudit.ActionLogin,
+				Resource: "auth",
+				Status:   domainaudit.StatusFailed,
+				Message:  "Login blocked due to too many attempts",
+				AfterData: map[string]interface{}{
+					"email": req.Email,
+				},
+			})
 			logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; Too many attempts", logPrefix))
 			h.respondTooManyLoginAttempts(ctx, logId, ttl)
 			return
@@ -154,22 +220,56 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 					logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.RegisterFailure error: %v", logPrefix, limiterErr))
 				}
 				if blocked {
+					h.writeAudit(ctx, domainaudit.AuditEvent{
+						Action:   domainaudit.ActionLogin,
+						Resource: "auth",
+						Status:   domainaudit.StatusFailed,
+						Message:  "Login blocked after repeated failures",
+						AfterData: map[string]interface{}{
+							"email": req.Email,
+						},
+					})
 					logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; Account temporarily locked after repeated failures", logPrefix))
 					h.respondTooManyLoginAttempts(ctx, logId, ttl)
 					return
 				}
 			}
 
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:   domainaudit.ActionLogin,
+				Resource: "auth",
+				Status:   domainaudit.StatusFailed,
+				Message:  "Login failed due to invalid credentials",
+				AfterData: map[string]interface{}{
+					"email": req.Email,
+				},
+			})
 			res := response.Response(http.StatusBadRequest, messages.InvalidCred, logId, nil)
 			res.Error = response.Errors{Code: http.StatusBadRequest, Message: messages.MsgCredential}
 			ctx.JSON(http.StatusBadRequest, res)
 			return
 		}
 
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionLogin,
+			Resource:     "auth",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Login failed due to internal error",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"email": req.Email,
+			},
+		})
 		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
+	}
+
+	loggedInUser, userErr := h.Service.GetUserByEmail(req.Email)
+	loginUserID := ""
+	if userErr == nil {
+		loginUserID = loggedInUser.Id
 	}
 
 	if h.LoginLimiter != nil {
@@ -180,12 +280,11 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 
 	// Create session if Redis is available
 	if redisClient := database.GetRedisClient(); redisClient != nil {
-		user, errUser := h.Service.GetUserByEmail(req.Email)
-		if errUser == nil {
+		if userErr == nil {
 			sRepo := sessionRepo.NewSessionRepository(redisClient)
 			sSvc := sessionSvc.NewSessionService(sRepo)
 
-			session, errSession := sSvc.CreateSession(context.Background(), &user, token, domainsession.RequestMeta{
+			session, errSession := sSvc.CreateSession(context.Background(), &loggedInUser, token, domainsession.RequestMeta{
 				IP:        ctx.ClientIP(),
 				UserAgent: ctx.GetHeader("User-Agent"),
 			})
@@ -196,6 +295,17 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 			}
 		}
 	}
+
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionLogin,
+		Resource:   "auth",
+		ResourceID: loginUserID,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Login success",
+		AfterData: map[string]interface{}{
+			"email": req.Email,
+		},
+	})
 
 	res := response.Response(http.StatusOK, "success", logId, map[string]interface{}{"token": token})
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(token)))
@@ -208,6 +318,13 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 
 	token, ok := ctx.Get("token")
 	if !ok {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionLogout,
+			Resource:     "auth",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Logout failed because token missing in context",
+			ErrorMessage: "token not found",
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; token not found in context", logPrefix))
 		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
 		res.Error = "token not found"
@@ -229,12 +346,25 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 	}
 
 	if err := h.Service.LogoutUser(token.(string)); err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionLogout,
+			Resource:     "auth",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Logout failed",
+			ErrorMessage: err.Error(),
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.LogoutUser; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:   domainaudit.ActionLogout,
+		Resource: "auth",
+		Status:   domainaudit.StatusSuccess,
+		Message:  "Logout success",
+	})
 
 	res := response.Response(http.StatusOK, "User logged out successfully", logId, nil)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Success: User logged out successfully", logPrefix))
@@ -339,8 +469,19 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 		return
 	}
 
+	before, _ := h.Service.GetUserById(userId)
 	data, err := h.Service.Update(userId, role, req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionUpdate,
+			Resource:     "user",
+			ResourceID:   userId,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to update user profile",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+			AfterData:    req,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
@@ -354,6 +495,15 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionUpdate,
+		Resource:   "user",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Updated user profile",
+		BeforeData: before,
+		AfterData:  data,
+	})
 
 	res := response.Response(http.StatusOK, "User updated successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -382,8 +532,19 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
+	before, _ := h.Service.GetUserById(id)
 	data, err := h.Service.Update(id, role, req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionUpdate,
+			Resource:     "user",
+			ResourceID:   id,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to update user by ID",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+			AfterData:    req,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
@@ -397,6 +558,15 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionUpdate,
+		Resource:   "user",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Updated user by ID",
+		BeforeData: before,
+		AfterData:  data,
+	})
 
 	res := response.Response(http.StatusOK, "User updated successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -419,8 +589,19 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		return
 	}
 
+	before, _ := h.Service.GetUserById(userId)
 	data, err := h.Service.ChangePassword(userId, req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionUpdate,
+			Resource:     "user_password",
+			ResourceID:   userId,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to change password",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+			AfterData:    req,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ChangePassword; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
@@ -441,6 +622,17 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionUpdate,
+		Resource:   "user_password",
+		ResourceID: data.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Changed user password",
+		BeforeData: before,
+		AfterData: map[string]interface{}{
+			"user_id": data.Id,
+		},
+	})
 
 	res := response.Response(http.StatusOK, "User password changed successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
@@ -462,12 +654,31 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 
 	token, err := h.Service.ForgotPassword(req)
 	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionUpdate,
+			Resource:     "user_password_reset",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to request password reset",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"email": req.Email,
+			},
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ForgotPassword; ERROR: %s;", logPrefix, err))
 		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:   domainaudit.ActionUpdate,
+		Resource: "user_password_reset",
+		Status:   domainaudit.StatusSuccess,
+		Message:  "Requested password reset",
+		AfterData: map[string]interface{}{
+			"email": req.Email,
+		},
+	})
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("MOCK EMAIL SENT: Reset Token for %s: %s", req.Email, token))
 
@@ -489,12 +700,29 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 	}
 
 	if err := h.Service.ResetPassword(req); err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionUpdate,
+			Resource:     "user_password_reset",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to reset password",
+			ErrorMessage: err.Error(),
+			AfterData:    req,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ResetPassword; ERROR: %s;", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:   domainaudit.ActionUpdate,
+		Resource: "user_password_reset",
+		Status:   domainaudit.StatusSuccess,
+		Message:  "Reset password success",
+		AfterData: map[string]interface{}{
+			"token": req.Token,
+		},
+	})
 
 	res := response.Response(http.StatusOK, "Password reset successfully", logId, nil)
 	ctx.JSON(http.StatusOK, res)
@@ -505,8 +733,18 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 	logPrefix := "[UserHandler][Delete]"
 	authData := utils.GetAuthData(ctx)
 	userId := utils.InterfaceString(authData["user_id"])
+	before, _ := h.Service.GetUserById(userId)
 
 	if err := h.Service.Delete(userId); err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionDelete,
+			Resource:     "user",
+			ResourceID:   userId,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to delete own user",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
@@ -520,6 +758,14 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionDelete,
+		Resource:   "user",
+		ResourceID: userId,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Deleted own user",
+		BeforeData: before,
+	})
 
 	res := response.Response(http.StatusOK, "User deleted successfully", logId, nil)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Success: User deleted successfully", logPrefix))
@@ -534,8 +780,18 @@ func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 	if err != nil {
 		return
 	}
+	before, _ := h.Service.GetUserById(id)
 
 	if err := h.Service.Delete(id); err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionDelete,
+			Resource:     "user",
+			ResourceID:   id,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to delete user by ID",
+			ErrorMessage: err.Error(),
+			BeforeData:   before,
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)
@@ -549,6 +805,14 @@ func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionDelete,
+		Resource:   "user",
+		ResourceID: id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Deleted user by ID",
+		BeforeData: before,
+	})
 
 	res := response.Response(http.StatusOK, "User deleted successfully", logId, nil)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Success: User deleted successfully", logPrefix))
