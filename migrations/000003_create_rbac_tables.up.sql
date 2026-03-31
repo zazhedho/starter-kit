@@ -124,7 +124,6 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     (gen_random_uuid(), 'update_roles', 'Update Roles', 'roles', 'update'),
     (gen_random_uuid(), 'delete_roles', 'Delete Roles', 'roles', 'delete'),
     (gen_random_uuid(), 'assign_permissions', 'Assign Permissions', 'roles', 'assign_permissions'),
-    (gen_random_uuid(), 'assign_menus', 'Assign Menus', 'roles', 'assign_menus'),
 
     -- Menu permissions
     (gen_random_uuid(), 'list_menus', 'List Menus', 'menus', 'list'),
@@ -199,38 +198,4 @@ SELECT r.id, p.id
 FROM roles r
 CROSS JOIN permissions p
 WHERE r.name = 'superadmin'
-ON CONFLICT DO NOTHING;
-
--- Assign all menus to superadmin role
-INSERT INTO role_menus (role_id, menu_item_id)
-SELECT r.id, m.id
-FROM roles r
-CROSS JOIN menu_items m
-WHERE r.name = 'superadmin'
-ON CONFLICT DO NOTHING;
-
--- Assign all menus to admin role
-INSERT INTO role_menus (role_id, menu_item_id)
-SELECT r.id, m.id
-FROM roles r
-CROSS JOIN menu_items m
-WHERE r.name = 'admin'
-ON CONFLICT DO NOTHING;
-
--- Assign menus to staff role (all except users, roles, menus)
-INSERT INTO role_menus (role_id, menu_item_id)
-SELECT r.id, m.id
-FROM roles r
-CROSS JOIN menu_items m
-WHERE r.name = 'staff'
-AND m.name NOT IN ('users', 'roles', 'menus')
-ON CONFLICT DO NOTHING;
-
--- Assign menus to viewer role (all except users, roles, menus)
-INSERT INTO role_menus (role_id, menu_item_id)
-SELECT r.id, m.id
-FROM roles r
-CROSS JOIN menu_items m
-WHERE r.name = 'viewer'
-AND m.name NOT IN ('users', 'roles', 'menus')
 ON CONFLICT DO NOTHING;

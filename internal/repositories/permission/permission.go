@@ -5,6 +5,7 @@ import (
 	domainpermission "starter-kit/internal/domain/permission"
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 
 	"gorm.io/gorm"
 )
@@ -123,31 +124,26 @@ func (r *repo) GetUserPermissions(userId string) (ret []domainpermission.Permiss
 		return nil, err
 	}
 
-	if user.RoleId != nil && *user.RoleId != "" {
-		query := `
-			SELECT DISTINCT p.*
-			FROM permissions p
-			INNER JOIN role_permissions rp ON p.id = rp.permission_id
-			INNER JOIN roles r ON rp.role_id = r.id
-			INNER JOIN users u ON u.role_id = r.id
-			WHERE u.id = ? AND p.deleted_at IS NULL
-			ORDER BY p.resource, p.action
-		`
-		if err = r.DB.Raw(query, userId).Scan(&ret).Error; err != nil {
+	if user.Role == utils.RoleSuperAdmin {
+		if err = r.DB.Where("deleted_at IS NULL").Order("resource, action").Find(&ret).Error; err != nil {
 			return nil, err
 		}
-	} else if user.Role != "" {
-		query := `
-			SELECT DISTINCT p.*
-			FROM permissions p
-			INNER JOIN role_permissions rp ON p.id = rp.permission_id
-			INNER JOIN roles r ON rp.role_id = r.id
-			WHERE r.name = ? AND p.deleted_at IS NULL
-			ORDER BY p.resource, p.action
-		`
-		if err = r.DB.Raw(query, user.Role).Scan(&ret).Error; err != nil {
-			return nil, err
-		}
+		return ret, nil
+	}
+
+	if user.RoleId == nil || *user.RoleId == "" {
+		return []domainpermission.Permission{}, nil
+	}
+
+	query := `
+		SELECT DISTINCT p.*
+		FROM permissions p
+		INNER JOIN role_permissions rp ON p.id = rp.permission_id
+		WHERE rp.role_id = ? AND p.deleted_at IS NULL
+		ORDER BY p.resource, p.action
+	`
+	if err = r.DB.Raw(query, *user.RoleId).Scan(&ret).Error; err != nil {
+		return nil, err
 	}
 
 	return ret, nil

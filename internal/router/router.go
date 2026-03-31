@@ -8,12 +8,14 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/infrastructure/database"
+	appConfigHandler "starter-kit/internal/handlers/http/appconfig"
 	locationHandler "starter-kit/internal/handlers/http/location"
 	menuHandler "starter-kit/internal/handlers/http/menu"
 	permissionHandler "starter-kit/internal/handlers/http/permission"
 	roleHandler "starter-kit/internal/handlers/http/role"
 	sessionHandler "starter-kit/internal/handlers/http/session"
 	userHandler "starter-kit/internal/handlers/http/user"
+	appConfigRepo "starter-kit/internal/repositories/appconfig"
 	auditRepo "starter-kit/internal/repositories/audit"
 	authRepo "starter-kit/internal/repositories/auth"
 	menuRepo "starter-kit/internal/repositories/menu"
@@ -21,6 +23,7 @@ import (
 	roleRepo "starter-kit/internal/repositories/role"
 	sessionRepo "starter-kit/internal/repositories/session"
 	userRepo "starter-kit/internal/repositories/user"
+	appConfigSvc "starter-kit/internal/services/appconfig"
 	auditSvc "starter-kit/internal/services/audit"
 	locationSvc "starter-kit/internal/services/location"
 	menuSvc "starter-kit/internal/services/menu"
@@ -146,7 +149,6 @@ func (r *Routes) RoleRoutes() {
 
 		// Permission and menu assignment
 		role.POST("/:id/permissions", mdw.PermissionMiddleware("roles", "assign_permissions"), h.AssignPermissions)
-		role.POST("/:id/menus", mdw.PermissionMiddleware("roles", "assign_menus"), h.AssignMenus)
 	}
 }
 
@@ -199,6 +201,25 @@ func (r *Routes) MenuRoutes() {
 		menu.GET("/:id", mdw.PermissionMiddleware("menus", "view"), h.GetByID)
 		menu.PUT("/:id", mdw.PermissionMiddleware("menus", "update"), h.Update)
 		menu.DELETE("/:id", mdw.PermissionMiddleware("menus", "delete"), h.Delete)
+	}
+}
+
+func (r *Routes) AppConfigRoutes() {
+	repo := appConfigRepo.NewAppConfigRepo(r.DB)
+	svc := appConfigSvc.NewAppConfigService(repo)
+	repoAudit := auditRepo.NewAuditRepo(r.DB)
+	svcAudit := auditSvc.NewAuditService(repoAudit)
+	h := appConfigHandler.NewAppConfigHandler(svc, svcAudit)
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+
+	r.App.GET("/api/configs", mdw.AuthMiddleware(), mdw.PermissionMiddleware("configs", "list"), h.GetAll)
+
+	config := r.App.Group("/api/config").Use(mdw.AuthMiddleware())
+	{
+		config.GET("/:id", mdw.PermissionMiddleware("configs", "view"), h.GetByID)
+		config.PUT("/:id", mdw.PermissionMiddleware("configs", "update"), h.Update)
 	}
 }
 

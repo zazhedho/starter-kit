@@ -183,22 +183,14 @@ func (s *ServiceUser) GetUserByAuth(id string) (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	role, err := s.RoleRepo.GetByName(user.Role)
-	if err != nil {
-		return buildUserAuthResponse(user, nil), nil
-	}
-
-	permissionIds, err := s.RoleRepo.GetRolePermissions(role.Id)
+	permissions, err := s.PermissionRepo.GetUserPermissions(user.Id)
 	if err != nil {
 		return buildUserAuthResponse(user, nil), nil
 	}
 
 	var permissionNames []string
-	for _, permId := range permissionIds {
-		perm, err := s.PermissionRepo.GetByID(permId)
-		if err == nil {
-			permissionNames = append(permissionNames, perm.Name)
-		}
+	for _, perm := range permissions {
+		permissionNames = append(permissionNames, perm.Name)
 	}
 
 	return buildUserAuthResponse(user, permissionNames), nil

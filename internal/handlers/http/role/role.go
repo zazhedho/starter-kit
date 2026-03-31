@@ -303,7 +303,7 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 			AfterData: req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignMenus; Error: %+v", logPrefix, err))
-		statusCode := http.StatusInternalServerError
+		statusCode := http.StatusBadRequest
 		if err.Error() == "access denied: cannot modify superadmin role" || err.Error() == "access denied: only superadmin and admin can modify system roles" {
 			statusCode = http.StatusForbidden
 		}

@@ -67,7 +67,7 @@ func (s *RoleService) GetByIDWithDetails(id string) (dto.RoleWithDetails, error)
 		return dto.RoleWithDetails{}, err
 	}
 
-	menuIds, err := s.RoleRepo.GetRoleMenus(id)
+	menuIds, err := s.deriveMenuIDsFromPermissions(permissionIds)
 	if err != nil {
 		return dto.RoleWithDetails{}, err
 	}
@@ -172,28 +172,7 @@ func (s *RoleService) AssignPermissions(roleId string, req dto.AssignPermissions
 }
 
 func (s *RoleService) AssignMenus(roleId string, req dto.AssignMenus, currentUserRole string) error {
-	role, err := s.RoleRepo.GetByID(roleId)
-	if err != nil {
-		return err
-	}
-
-	if role.IsSystem {
-		if currentUserRole != utils.RoleSuperAdmin && currentUserRole != utils.RoleAdmin {
-			return errors.New("access denied: only superadmin and admin can modify system roles")
-		}
-
-		if role.Name == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
-			return errors.New("access denied: cannot modify superadmin role")
-		}
-	}
-
-	for _, menuId := range req.MenuIds {
-		if _, err := s.MenuRepo.GetByID(menuId); err != nil {
-			return errors.New("invalid menu ID: " + menuId)
-		}
-	}
-
-	return s.RoleRepo.AssignMenus(roleId, req.MenuIds)
+	return errors.New("menu access is derived from permissions; assign permissions instead")
 }
 
 func (s *RoleService) GetRolePermissions(roleId string) ([]string, error) {
@@ -201,7 +180,65 @@ func (s *RoleService) GetRolePermissions(roleId string) ([]string, error) {
 }
 
 func (s *RoleService) GetRoleMenus(roleId string) ([]string, error) {
-	return s.RoleRepo.GetRoleMenus(roleId)
+	permissionIds, err := s.RoleRepo.GetRolePermissions(roleId)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.deriveMenuIDsFromPermissions(permissionIds)
+}
+
+func (s *RoleService) deriveMenuIDsFromPermissions(permissionIds []string) ([]string, error) {
+	menuIDSet := make(map[string]struct{})
+	menuIDs := make([]string, 0)
+
+	for _, permissionId := range permissionIds {
+		permission, err := s.PermissionRepo.GetByID(permissionId)
+		if err != nil {
+			return nil, err
+		}
+
+		if permission.Resource == "" {
+			continue
+		}
+
+		menu, err := s.MenuRepo.GetByName(permission.Resource)
+		if err != nil {
+			continue
+		}
+
+		if !menu.IsActive || menu.DeletedAt.Valid {
+			continue
+		}
+
+		if _, exists := menuIDSet[menu.Id]; exists {
+			continue
+		}
+
+		menuIDSet[menu.Id] = struct{}{}
+		menuIDs = append(menuIDs, menu.Id)
+
+		parentID := menu.ParentId
+		for parentID != nil && *parentID != "" {
+			parentMenu, err := s.MenuRepo.GetByID(*parentID)
+			if err != nil {
+				break
+			}
+
+			if !parentMenu.IsActive || parentMenu.DeletedAt.Valid {
+				break
+			}
+
+			if _, exists := menuIDSet[parentMenu.Id]; !exists {
+				menuIDSet[parentMenu.Id] = struct{}{}
+				menuIDs = append(menuIDs, parentMenu.Id)
+			}
+
+			parentID = parentMenu.ParentId
+		}
+	}
+
+	return menuIDs, nil
 }
 
 var _ interfacerole.ServiceRoleInterface = (*RoleService)(nil)
