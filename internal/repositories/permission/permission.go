@@ -1,9 +1,9 @@
 package repositorypermission
 
 import (
-	"fmt"
 	domainpermission "starter-kit/internal/domain/permission"
 	interfacepermission "starter-kit/internal/interfaces/permission"
+	repositorybase "starter-kit/internal/repositories/base"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 
@@ -11,108 +11,34 @@ import (
 )
 
 type repo struct {
-	DB *gorm.DB
+	*repositorybase.GenericRepository[domainpermission.Permission]
 }
 
 func NewPermissionRepo(db *gorm.DB) interfacepermission.RepoPermissionInterface {
-	return &repo{DB: db}
-}
-
-func (r *repo) Store(m domainpermission.Permission) error {
-	return r.DB.Create(&m).Error
-}
-
-func (r *repo) GetByID(id string) (ret domainpermission.Permission, err error) {
-	if err = r.DB.Where("id = ?", id).First(&ret).Error; err != nil {
-		return domainpermission.Permission{}, err
-	}
-	return ret, nil
+	return &repo{GenericRepository: repositorybase.New[domainpermission.Permission](db)}
 }
 
 func (r *repo) GetByName(name string) (ret domainpermission.Permission, err error) {
-	if err = r.DB.Where("name = ?", name).First(&ret).Error; err != nil {
-		return domainpermission.Permission{}, err
-	}
-	return ret, nil
+	return r.GetOneByField("name", name)
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainpermission.Permission, totalData int64, err error) {
-	query := r.DB.Model(&domainpermission.Permission{}).Debug()
-	allowedFilters := []string{
-		"id",
-		"name",
-		"display_name",
-		"resource",
-		"action",
-		"created_at",
-		"updated_at",
-	}
-
-	if params.Search != "" {
-		searchPattern := "%" + params.Search + "%"
-		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) OR LOWER(resource) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern, searchPattern)
-	}
-
-	safeFilters := filter.WhitelistFilter(params.Filters, allowedFilters)
-	for key, value := range safeFilters {
-		if value == nil {
-			continue
-		}
-
-		switch v := value.(type) {
-		case string:
-			if v == "" {
-				continue
-			}
-			query = query.Where(fmt.Sprintf("%s = ?", key), v)
-		case []string, []int:
-			query = query.Where(fmt.Sprintf("%s IN ?", key), v)
-		default:
-			query = query.Where(fmt.Sprintf("%s = ?", key), v)
-		}
-	}
-
-	if err := query.Count(&totalData).Error; err != nil {
-		return nil, 0, err
-	}
-
-	if params.OrderBy != "" && params.OrderDirection != "" {
-		validColumns := map[string]bool{
-			"name":         true,
-			"display_name": true,
-			"resource":     true,
-			"action":       true,
-			"created_at":   true,
-			"updated_at":   true,
-		}
-
-		if _, ok := validColumns[params.OrderBy]; !ok {
-			return nil, 0, fmt.Errorf("invalid orderBy column: %s", params.OrderBy)
-		}
-
-		query = query.Order(fmt.Sprintf("%s %s", params.OrderBy, params.OrderDirection))
-	}
-
-	if err := query.Offset(params.Offset).Limit(params.Limit).Find(&ret).Error; err != nil {
-		return nil, 0, err
-	}
-
-	return ret, totalData, nil
-}
-
-func (r *repo) Update(m domainpermission.Permission) error {
-	return r.DB.Save(&m).Error
-}
-
-func (r *repo) Delete(id string) error {
-	return r.DB.Where("id = ?", id).Delete(&domainpermission.Permission{}).Error
+	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
+		Search:         repositorybase.BuildSearchFunc("name", "display_name", "description", "resource"),
+		AllowedFilters: []string{"id", "name", "display_name", "resource", "action", "created_at", "updated_at"},
+		AllowedOrderColumns: []string{
+			"name",
+			"display_name",
+			"resource",
+			"action",
+			"created_at",
+			"updated_at",
+		},
+	})
 }
 
 func (r *repo) GetByResource(resource string) (ret []domainpermission.Permission, err error) {
-	if err = r.DB.Where("resource = ?", resource).Find(&ret).Error; err != nil {
-		return nil, err
-	}
-	return ret, nil
+	return r.GetManyByField("resource", resource)
 }
 
 func (r *repo) GetUserPermissions(userId string) (ret []domainpermission.Permission, err error) {

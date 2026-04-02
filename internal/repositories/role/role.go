@@ -1,9 +1,9 @@
 package repositoryrole
 
 import (
-	"fmt"
 	domainrole "starter-kit/internal/domain/role"
 	interfacerole "starter-kit/internal/interfaces/role"
+	repositorybase "starter-kit/internal/repositories/base"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 
@@ -11,99 +11,29 @@ import (
 )
 
 type repo struct {
-	DB *gorm.DB
+	*repositorybase.GenericRepository[domainrole.Role]
 }
 
 func NewRoleRepo(db *gorm.DB) interfacerole.RepoRoleInterface {
-	return &repo{DB: db}
-}
-
-func (r *repo) Store(m domainrole.Role) error {
-	return r.DB.Create(&m).Error
-}
-
-func (r *repo) GetByID(id string) (ret domainrole.Role, err error) {
-	if err = r.DB.Where("id = ?", id).First(&ret).Error; err != nil {
-		return domainrole.Role{}, err
-	}
-	return ret, nil
+	return &repo{GenericRepository: repositorybase.New[domainrole.Role](db)}
 }
 
 func (r *repo) GetByName(name string) (ret domainrole.Role, err error) {
-	if err = r.DB.Where("name = ?", name).First(&ret).Error; err != nil {
-		return domainrole.Role{}, err
-	}
-	return ret, nil
+	return r.GetOneByField("name", name)
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainrole.Role, totalData int64, err error) {
-	query := r.DB.Model(&domainrole.Role{}).Debug()
-	allowedFilters := []string{
-		"id",
-		"name",
-		"display_name",
-		"is_system",
-		"created_at",
-		"updated_at",
-	}
-
-	if params.Search != "" {
-		searchPattern := "%" + params.Search + "%"
-		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)", searchPattern, searchPattern, searchPattern)
-	}
-
-	safeFilters := filter.WhitelistFilter(params.Filters, allowedFilters)
-	for key, value := range safeFilters {
-		if value == nil {
-			continue
-		}
-
-		switch v := value.(type) {
-		case string:
-			if v == "" {
-				continue
-			}
-			query = query.Where(fmt.Sprintf("%s = ?", key), v)
-		case []string, []int:
-			query = query.Where(fmt.Sprintf("%s IN ?", key), v)
-		default:
-			query = query.Where(fmt.Sprintf("%s = ?", key), v)
-		}
-	}
-
-	if err := query.Count(&totalData).Error; err != nil {
-		return nil, 0, err
-	}
-
-	if params.OrderBy != "" && params.OrderDirection != "" {
-		validColumns := map[string]bool{
-			"name":         true,
-			"display_name": true,
-			"is_system":    true,
-			"created_at":   true,
-			"updated_at":   true,
-		}
-
-		if _, ok := validColumns[params.OrderBy]; !ok {
-			return nil, 0, fmt.Errorf("invalid orderBy column: %s", params.OrderBy)
-		}
-
-		query = query.Order(fmt.Sprintf("%s %s", params.OrderBy, params.OrderDirection))
-	}
-
-	if err := query.Offset(params.Offset).Limit(params.Limit).Find(&ret).Error; err != nil {
-		return nil, 0, err
-	}
-
-	return ret, totalData, nil
-}
-
-func (r *repo) Update(m domainrole.Role) error {
-	return r.DB.Save(&m).Error
-}
-
-func (r *repo) Delete(id string) error {
-	return r.DB.Where("id = ?", id).Delete(&domainrole.Role{}).Error
+	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
+		Search:         repositorybase.BuildSearchFunc("name", "display_name", "description"),
+		AllowedFilters: []string{"id", "name", "display_name", "is_system", "created_at", "updated_at"},
+		AllowedOrderColumns: []string{
+			"name",
+			"display_name",
+			"is_system",
+			"created_at",
+			"updated_at",
+		},
+	})
 }
 
 func (r *repo) AssignPermissions(roleId string, permissionIds []string) error {
