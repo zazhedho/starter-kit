@@ -51,6 +51,15 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		}
 		logPrefix += fmt.Sprintf("[%s][%s]", utils.InterfaceString(dataJWT["jti"]), utils.InterfaceString(dataJWT["user_id"]))
 
+		tokenType := strings.TrimSpace(utils.InterfaceString(dataJWT["token_type"]))
+		if strings.EqualFold(tokenType, "refresh") {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Refresh token used on protected route", logPrefix))
+			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
+			res.Error = "invalid token type"
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
+			return
+		}
+
 		_, err = m.BlacklistRepo.GetByToken(tokenString)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; blacklistRepo.GetByToken; Error: %+v", logPrefix, err))

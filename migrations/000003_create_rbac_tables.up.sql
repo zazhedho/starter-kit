@@ -101,7 +101,8 @@ INSERT INTO menu_items (id, name, display_name, path, icon, order_index) VALUES
     (gen_random_uuid(), 'profile', 'Profile', '/profile', 'bi-person-circle', 2),
     (gen_random_uuid(), 'users', 'Users', '/users', 'bi-people', 900),
     (gen_random_uuid(), 'roles', 'Roles', '/roles', 'bi-shield-lock', 901),
-    (gen_random_uuid(), 'menus', 'Menus', '/menus', 'bi-list-ul', 902)
+    (gen_random_uuid(), 'menus', 'Menus', '/menus', 'bi-list-ul', 902),
+    (gen_random_uuid(), 'audits', 'Audit Trails', '/audits', 'bi-journal-text', 904)
 ON CONFLICT (name) DO NOTHING;
 
 -- Insert permissions
@@ -142,6 +143,10 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     (gen_random_uuid(), 'update_permissions', 'Update Permissions', 'permissions', 'update'),
     (gen_random_uuid(), 'delete_permissions', 'Delete Permissions', 'permissions', 'delete'),
 
+    -- Audit permissions
+    (gen_random_uuid(), 'list_audits', 'List Audit Trails', 'audits', 'list'),
+    (gen_random_uuid(), 'view_audits', 'View Audit Trail Detail', 'audits', 'view'),
+
     -- Profile permissions
     (gen_random_uuid(), 'view_profile', 'View Profile', 'profile', 'view'),
     (gen_random_uuid(), 'update_profile', 'Update Profile', 'profile', 'update'),
@@ -164,7 +169,7 @@ FROM roles r
 CROSS JOIN permissions p
 WHERE r.name = 'staff'
 AND p.action IN ('list', 'view', 'create', 'update')
-AND p.resource NOT IN ('users', 'roles', 'permissions')
+AND p.resource NOT IN ('users', 'roles', 'permissions', 'audits')
 ON CONFLICT DO NOTHING;
 
 -- Assign view profile permission to staff
@@ -183,7 +188,7 @@ FROM roles r
 CROSS JOIN permissions p
 WHERE r.name = 'viewer'
 AND p.action IN ('list', 'view')
-AND p.resource NOT IN ('users', 'roles', 'permissions')
+AND p.resource NOT IN ('users', 'roles', 'permissions', 'audits')
 ON CONFLICT DO NOTHING;
 
 -- Assign view profile permission to viewer

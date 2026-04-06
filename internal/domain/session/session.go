@@ -5,9 +5,11 @@ import "time"
 type Session struct {
 	SessionID    string    `json:"session_id"`
 	UserID       string    `json:"user_id"`
+	Username     string    `json:"username"`
 	Email        string    `json:"email"`
 	Role         string    `json:"role"`
-	Token        string    `json:"token"`
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token"`
 	DeviceInfo   string    `json:"device_info,omitempty"`
 	IP           string    `json:"ip,omitempty"`
 	UserAgent    string    `json:"user_agent,omitempty"`

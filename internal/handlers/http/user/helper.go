@@ -7,6 +7,7 @@ import (
 	handlercommon "starter-kit/internal/handlers/http/common"
 	"starter-kit/pkg/messages"
 	"starter-kit/pkg/response"
+	"starter-kit/utils"
 	"strconv"
 	"time"
 
@@ -31,4 +32,33 @@ func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.U
 
 func (h *HandlerUser) writeAudit(ctx *gin.Context, event domainaudit.AuditEvent) {
 	handlercommon.WriteAudit(ctx, h.AuditService, event, "UserHandler")
+}
+
+func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]interface{} {
+	data := map[string]interface{}{
+		"token":            accessToken,
+		"access_token":     accessToken,
+		"token_type":       "Bearer",
+		"expires_in_hours": utils.GetEnv("JWT_EXP", 24),
+	}
+
+	if refreshToken != "" {
+		data["refresh_token"] = refreshToken
+		data["refresh_expires_in_hours"] = utils.GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)
+	}
+
+	return data
+}
+
+func buildImpersonationClaimsOverrideFromClaims(claims map[string]interface{}) *utils.AppClaims {
+	if claims == nil || !utils.InterfaceBool(claims["is_impersonated"]) {
+		return nil
+	}
+
+	return &utils.AppClaims{
+		IsImpersonated:   true,
+		OriginalUserId:   utils.InterfaceString(claims["original_user_id"]),
+		OriginalUsername: utils.InterfaceString(claims["original_username"]),
+		OriginalRole:     utils.InterfaceString(claims["original_role"]),
+	}
 }

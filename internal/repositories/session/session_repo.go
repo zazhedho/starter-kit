@@ -22,15 +22,17 @@ func NewSessionRepository(redisClient *redis.Client) *SessionRepository {
 }
 
 const (
-	sessionKeyPrefix = "session:"
-	userSessionsKey  = "user_sessions:"
-	tokenSessionKey  = "token_session:"
+	sessionKeyPrefix       = "session:"
+	userSessionsKey        = "user_sessions:"
+	accessTokenSessionKey  = "access_token_session:"
+	refreshTokenSessionKey = "refresh_token_session:"
 )
 
 func (r *SessionRepository) Create(ctx context.Context, session *domainsession.Session) error {
 	sessionKey := fmt.Sprintf("%s%s", sessionKeyPrefix, session.SessionID)
 	userSessionKey := fmt.Sprintf("%s%s", userSessionsKey, session.UserID)
-	tokenKey := fmt.Sprintf("%s%s", tokenSessionKey, session.Token)
+	accessTokenKey := fmt.Sprintf("%s%s", accessTokenSessionKey, session.AccessToken)
+	refreshTokenKey := fmt.Sprintf("%s%s", refreshTokenSessionKey, session.RefreshToken)
 
 	sessionData, err := json.Marshal(session)
 	if err != nil {
@@ -46,7 +48,8 @@ func (r *SessionRepository) Create(ctx context.Context, session *domainsession.S
 	pipe.Set(ctx, sessionKey, sessionData, ttl)
 	pipe.SAdd(ctx, userSessionKey, session.SessionID)
 	pipe.Expire(ctx, userSessionKey, ttl)
-	pipe.Set(ctx, tokenKey, session.SessionID, ttl)
+	pipe.Set(ctx, accessTokenKey, session.SessionID, ttl)
+	pipe.Set(ctx, refreshTokenKey, session.SessionID, ttl)
 
 	_, err = pipe.Exec(ctx)
 	if err != nil {
@@ -99,7 +102,7 @@ func (r *SessionRepository) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *SessionRepository) GetByToken(ctx context.Context, token string) (*domainsession.Session, error) {
-	tokenKey := fmt.Sprintf("%s%s", tokenSessionKey, token)
+	tokenKey := fmt.Sprintf("%s%s", accessTokenSessionKey, token)
 
 	sessionID, err := r.Redis.Get(ctx, tokenKey).Result()
 	if err == redis.Nil {
@@ -107,6 +110,20 @@ func (r *SessionRepository) GetByToken(ctx context.Context, token string) (*doma
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session by token: %w", err)
+	}
+
+	return r.GetBySessionID(ctx, sessionID)
+}
+
+func (r *SessionRepository) GetByRefreshToken(ctx context.Context, refreshToken string) (*domainsession.Session, error) {
+	tokenKey := fmt.Sprintf("%s%s", refreshTokenSessionKey, refreshToken)
+
+	sessionID, err := r.Redis.Get(ctx, tokenKey).Result()
+	if err == redis.Nil {
+		return nil, fmt.Errorf("session not found for refresh token")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session by refresh token: %w", err)
 	}
 
 	return r.GetBySessionID(ctx, sessionID)
@@ -147,12 +164,14 @@ func (r *SessionRepository) Delete(ctx context.Context, sessionID string) error 
 
 	sessionKey := fmt.Sprintf("%s%s", sessionKeyPrefix, sessionID)
 	userSessionKey := fmt.Sprintf("%s%s", userSessionsKey, session.UserID)
-	tokenKey := fmt.Sprintf("%s%s", tokenSessionKey, session.Token)
+	accessTokenKey := fmt.Sprintf("%s%s", accessTokenSessionKey, session.AccessToken)
+	refreshTokenKey := fmt.Sprintf("%s%s", refreshTokenSessionKey, session.RefreshToken)
 
 	pipe := r.Redis.Pipeline()
 	pipe.Del(ctx, sessionKey)
 	pipe.SRem(ctx, userSessionKey, sessionID)
-	pipe.Del(ctx, tokenKey)
+	pipe.Del(ctx, accessTokenKey)
+	pipe.Del(ctx, refreshTokenKey)
 
 	_, err = pipe.Exec(ctx)
 	if err != nil {
@@ -173,6 +192,50 @@ func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID string) e
 		if err := r.Delete(ctx, session.SessionID); err != nil {
 			logger.WriteLog(logger.LogLevelError, fmt.Sprintf("Failed to delete session %s: %v", session.SessionID, err))
 		}
+	}
+
+	return nil
+}
+
+func (r *SessionRepository) RotateTokens(ctx context.Context, sessionID string, accessToken string, refreshToken string, expiresAt time.Time) error {
+	session, err := r.GetBySessionID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	sessionKey := fmt.Sprintf("%s%s", sessionKeyPrefix, sessionID)
+	oldAccessTokenKey := fmt.Sprintf("%s%s", accessTokenSessionKey, session.AccessToken)
+	oldRefreshTokenKey := fmt.Sprintf("%s%s", refreshTokenSessionKey, session.RefreshToken)
+	newAccessTokenKey := fmt.Sprintf("%s%s", accessTokenSessionKey, accessToken)
+	newRefreshTokenKey := fmt.Sprintf("%s%s", refreshTokenSessionKey, refreshToken)
+
+	session.AccessToken = accessToken
+	session.RefreshToken = refreshToken
+	session.LastActivity = time.Now()
+	session.ExpiresAt = expiresAt
+
+	sessionData, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return fmt.Errorf("session already expired")
+	}
+
+	pipe := r.Redis.Pipeline()
+	pipe.Del(ctx, oldAccessTokenKey)
+	pipe.Del(ctx, oldRefreshTokenKey)
+	pipe.Set(ctx, sessionKey, sessionData, ttl)
+	pipe.Set(ctx, newAccessTokenKey, sessionID, ttl)
+	pipe.Set(ctx, newRefreshTokenKey, sessionID, ttl)
+	userSessionKey := fmt.Sprintf("%s%s", userSessionsKey, session.UserID)
+	pipe.Expire(ctx, userSessionKey, ttl)
+
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to rotate session tokens: %w", err)
 	}
 
 	return nil

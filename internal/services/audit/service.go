@@ -4,6 +4,7 @@ import (
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
+	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"strings"
 	"time"
@@ -60,6 +61,14 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 	}
 
 	return s.AuditRepo.Store(data)
+}
+
+func (s *AuditService) GetAll(params filter.BaseParams) ([]domainaudit.AuditTrail, int64, error) {
+	return s.AuditRepo.GetAll(params)
+}
+
+func (s *AuditService) GetByID(id string) (domainaudit.AuditTrail, error) {
+	return s.AuditRepo.GetByID(id)
 }
 
 func sanitizePayload(input interface{}) interface{} {

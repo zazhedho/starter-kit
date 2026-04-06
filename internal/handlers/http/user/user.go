@@ -7,15 +7,14 @@ import (
 	"net/http"
 	"net/mail"
 	"reflect"
-	"starter-kit/infrastructure/database"
 	domainaudit "starter-kit/internal/domain/audit"
 	domainsession "starter-kit/internal/domain/session"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
+	interfaceauth "starter-kit/internal/interfaces/auth"
+	interfacesession "starter-kit/internal/interfaces/session"
 	interfaceuser "starter-kit/internal/interfaces/user"
-	sessionRepo "starter-kit/internal/repositories/session"
-	sessionSvc "starter-kit/internal/services/session"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/logger"
 	"starter-kit/pkg/messages"
@@ -23,22 +22,27 @@ import (
 	"starter-kit/pkg/security"
 	"starter-kit/utils"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 type HandlerUser struct {
-	Service      interfaceuser.ServiceUserInterface
-	LoginLimiter security.LoginLimiter
-	AuditService interfaceaudit.ServiceAuditInterface
+	Service       interfaceuser.ServiceUserInterface
+	BlacklistRepo interfaceauth.RepoAuthInterface
+	SessionSvc    interfacesession.ServiceSessionInterface
+	LoginLimiter  security.LoginLimiter
+	AuditService  interfaceaudit.ServiceAuditInterface
 }
 
-func NewUserHandler(s interfaceuser.ServiceUserInterface, limiter security.LoginLimiter, auditService interfaceaudit.ServiceAuditInterface) *HandlerUser {
+func NewUserHandler(s interfaceuser.ServiceUserInterface, blacklistRepo interfaceauth.RepoAuthInterface, sessionSvc interfacesession.ServiceSessionInterface, limiter security.LoginLimiter, auditService interfaceaudit.ServiceAuditInterface) *HandlerUser {
 	return &HandlerUser{
-		Service:      s,
-		LoginLimiter: limiter,
-		AuditService: auditService,
+		Service:       s,
+		BlacklistRepo: blacklistRepo,
+		SessionSvc:    sessionSvc,
+		LoginLimiter:  limiter,
+		AuditService:  auditService,
 	}
 }
 
@@ -317,6 +321,18 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		loginUserID = loggedInUser.Id
 	}
 
+	refreshToken := ""
+	if userErr == nil {
+		refreshToken, err = utils.GenerateRefreshJwt(&loggedInUser, logId.String(), nil)
+		if err != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateRefreshJwt; ERROR: %s;", logPrefix, err))
+			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+			res.Error = err.Error()
+			ctx.JSON(http.StatusInternalServerError, res)
+			return
+		}
+	}
+
 	if h.LoginLimiter != nil {
 		if err := h.LoginLimiter.Reset(ctx.Request.Context(), loginIdentifier); err != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.Reset error: %v", logPrefix, err))
@@ -324,20 +340,15 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	}
 
 	// Create session if Redis is available
-	if redisClient := database.GetRedisClient(); redisClient != nil {
-		if userErr == nil {
-			sRepo := sessionRepo.NewSessionRepository(redisClient)
-			sSvc := sessionSvc.NewSessionService(sRepo)
-
-			session, errSession := sSvc.CreateSession(context.Background(), &loggedInUser, token, domainsession.RequestMeta{
-				IP:        ctx.ClientIP(),
-				UserAgent: ctx.GetHeader("User-Agent"),
-			})
-			if errSession != nil {
-				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to create session: %v", logPrefix, errSession))
-			} else {
-				logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Session created: %s", logPrefix, session.SessionID))
-			}
+	if h.SessionSvc != nil && userErr == nil && refreshToken != "" {
+		session, errSession := h.SessionSvc.CreateSession(context.Background(), &loggedInUser, token, refreshToken, domainsession.RequestMeta{
+			IP:        ctx.ClientIP(),
+			UserAgent: ctx.GetHeader("User-Agent"),
+		})
+		if errSession != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to create session: %v", logPrefix, errSession))
+		} else {
+			logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Session created: %s", logPrefix, session.SessionID))
 		}
 	}
 
@@ -352,8 +363,115 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		},
 	})
 
-	res := response.Response(http.StatusOK, "success", logId, map[string]interface{}{"token": token})
+	res := response.Response(http.StatusOK, "success", logId, buildAuthTokenResponse(token, refreshToken))
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(token)))
+	ctx.JSON(http.StatusOK, res)
+}
+
+func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
+	var req dto.RefreshTokenRequest
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := "[UserHandler][RefreshToken]"
+
+	if err := ctx.BindJSON(&req); err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	tokenClaims, err := utils.JwtClaim(req.RefreshToken)
+	if err != nil {
+		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
+		res.Error = "invalid or expired refresh token"
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
+
+	if !strings.EqualFold(utils.InterfaceString(tokenClaims["token_type"]), "refresh") {
+		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
+		res.Error = "invalid token type"
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
+
+	_, err = h.BlacklistRepo.GetByToken(req.RefreshToken)
+	if err == nil {
+		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
+		res.Error = "refresh token has been revoked"
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BlacklistRepo.GetByToken; ERROR: %s;", logPrefix, err))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = "failed to validate refresh token"
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	userID := utils.InterfaceString(tokenClaims["user_id"])
+	user, err := h.Service.GetUserById(userID)
+	if err != nil {
+		statusCode := http.StatusInternalServerError
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			statusCode = http.StatusNotFound
+		}
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
+		res.Error = "user not found"
+		ctx.JSON(statusCode, res)
+		return
+	}
+
+	claimsOverride := buildImpersonationClaimsOverrideFromClaims(tokenClaims)
+	accessToken, err := utils.GenerateJwtWithClaims(&user, logId.String(), claimsOverride)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateJwtWithClaims; ERROR: %s;", logPrefix, err))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	refreshToken, err := utils.GenerateRefreshJwt(&user, logId.String(), claimsOverride)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateRefreshJwt; ERROR: %s;", logPrefix, err))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	if h.SessionSvc != nil {
+		session, sessionErr := h.SessionSvc.GetSessionByRefreshToken(context.Background(), req.RefreshToken)
+		if sessionErr != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; SessionSvc.GetSessionByRefreshToken; ERROR: %s;", logPrefix, sessionErr))
+			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
+			res.Error = "session not found for refresh token"
+			ctx.JSON(http.StatusUnauthorized, res)
+			return
+		}
+
+		refreshExpAt := time.Now().Add(time.Hour * time.Duration(utils.GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)))
+		if sessionErr = h.SessionSvc.RotateSessionTokens(context.Background(), session.SessionID, accessToken, refreshToken, refreshExpAt); sessionErr != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; SessionSvc.RotateSessionTokens; ERROR: %s;", logPrefix, sessionErr))
+			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+			res.Error = "failed to rotate session tokens"
+			ctx.JSON(http.StatusInternalServerError, res)
+			return
+		}
+	}
+
+	if err = h.Service.LogoutUser(req.RefreshToken); err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.LogoutUser(refresh); ERROR: %s;", logPrefix, err))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = "failed to revoke previous refresh token"
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	res := response.Response(http.StatusOK, "Refresh token rotated successfully", logId, buildAuthTokenResponse(accessToken, refreshToken))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -377,12 +495,8 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 		return
 	}
 
-	// Destroy session if Redis is available
-	if redisClient := database.GetRedisClient(); redisClient != nil {
-		sRepo := sessionRepo.NewSessionRepository(redisClient)
-		sSvc := sessionSvc.NewSessionService(sRepo)
-
-		errSession := sSvc.DestroySessionByToken(context.Background(), token.(string))
+	if h.SessionSvc != nil {
+		errSession := h.SessionSvc.DestroySessionByToken(context.Background(), token.(string))
 		if errSession != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to destroy session: %v", logPrefix, errSession))
 		} else {

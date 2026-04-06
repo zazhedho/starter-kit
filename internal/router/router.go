@@ -9,12 +9,14 @@ import (
 
 	"starter-kit/infrastructure/database"
 	appConfigHandler "starter-kit/internal/handlers/http/appconfig"
+	auditHandler "starter-kit/internal/handlers/http/audit"
 	locationHandler "starter-kit/internal/handlers/http/location"
 	menuHandler "starter-kit/internal/handlers/http/menu"
 	permissionHandler "starter-kit/internal/handlers/http/permission"
 	roleHandler "starter-kit/internal/handlers/http/role"
 	sessionHandler "starter-kit/internal/handlers/http/session"
 	userHandler "starter-kit/internal/handlers/http/user"
+	interfacesession "starter-kit/internal/interfaces/session"
 	appConfigRepo "starter-kit/internal/repositories/appconfig"
 	auditRepo "starter-kit/internal/repositories/audit"
 	authRepo "starter-kit/internal/repositories/auth"
@@ -68,6 +70,7 @@ func (r *Routes) UserRoutes() {
 	rRepo := roleRepo.NewRoleRepo(r.DB)
 	pRepo := permissionRepo.NewPermissionRepo(r.DB)
 	uc := userSvc.NewUserService(repo, blacklistRepo, rRepo, pRepo)
+	var userSessionSvc interfacesession.ServiceSessionInterface
 	repoAudit := auditRepo.NewAuditRepo(r.DB)
 	svcAudit := auditSvc.NewAuditService(repoAudit)
 
@@ -81,9 +84,12 @@ func (r *Routes) UserRoutes() {
 			time.Duration(utils.GetEnv("LOGIN_ATTEMPT_WINDOW_SECONDS", 60))*time.Second,
 			time.Duration(utils.GetEnv("LOGIN_BLOCK_DURATION_SECONDS", 300))*time.Second,
 		)
+
+		sRepo := sessionRepo.NewSessionRepository(redisClient)
+		userSessionSvc = sessionSvc.NewSessionService(sRepo)
 	}
 
-	h := userHandler.NewUserHandler(uc, loginLimiter, svcAudit)
+	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, svcAudit)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter
@@ -103,6 +109,7 @@ func (r *Routes) UserRoutes() {
 	{
 		user.POST("/register", registerLimiter, h.Register)
 		user.POST("/login", h.Login)
+		user.POST("/refresh-token", h.RefreshToken)
 		user.POST("/forgot-password", h.ForgotPassword)
 		user.POST("/reset-password", h.ResetPassword)
 
@@ -222,6 +229,22 @@ func (r *Routes) AppConfigRoutes() {
 	{
 		config.GET("/:id", mdw.PermissionMiddleware("configs", "view"), h.GetByID)
 		config.PUT("/:id", mdw.PermissionMiddleware("configs", "update"), h.Update)
+	}
+}
+
+func (r *Routes) AuditRoutes() {
+	repo := auditRepo.NewAuditRepo(r.DB)
+	svc := auditSvc.NewAuditService(repo)
+	h := auditHandler.NewAuditHandler(svc)
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+
+	r.App.GET("/api/audits", mdw.AuthMiddleware(), mdw.PermissionMiddleware("audits", "list"), h.GetAll)
+
+	audit := r.App.Group("/api/audit").Use(mdw.AuthMiddleware())
+	{
+		audit.GET("/:id", mdw.PermissionMiddleware("audits", "view"), h.GetByID)
 	}
 }
 

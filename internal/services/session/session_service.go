@@ -23,11 +23,11 @@ func NewSessionService(sessionRepo interfacesession.RepoSessionInterface) *Servi
 	}
 }
 
-func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Users, token string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
+func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Users, accessToken string, refreshToken string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
 	sessionID := uuid.New().String()
 
-	jwtExpHours := utils.GetEnv("JWT_EXP", 24)
-	expiresAt := time.Now().Add(time.Hour * time.Duration(jwtExpHours))
+	refreshExpHours := utils.GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)
+	expiresAt := time.Now().Add(time.Hour * time.Duration(refreshExpHours))
 
 	userAgent := requestMeta.UserAgent
 	deviceInfo := requestMeta.DeviceInfo
@@ -38,9 +38,11 @@ func (s *ServiceSession) CreateSession(ctx context.Context, user *domainuser.Use
 	session := &domainsession.Session{
 		SessionID:    sessionID,
 		UserID:       user.Id,
+		Username:     user.Name,
 		Email:        user.Email,
 		Role:         user.Role,
-		Token:        token,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 		DeviceInfo:   deviceInfo,
 		IP:           requestMeta.IP,
 		UserAgent:    userAgent,
@@ -114,8 +116,16 @@ func (s *ServiceSession) GetSessionByToken(ctx context.Context, token string) (*
 	return s.SessionRepo.GetByToken(ctx, token)
 }
 
+func (s *ServiceSession) GetSessionByRefreshToken(ctx context.Context, refreshToken string) (*domainsession.Session, error) {
+	return s.SessionRepo.GetByRefreshToken(ctx, refreshToken)
+}
+
 func (s *ServiceSession) GetSessionBySessionID(ctx context.Context, sessionID string) (*domainsession.Session, error) {
 	return s.SessionRepo.GetBySessionID(ctx, sessionID)
+}
+
+func (s *ServiceSession) RotateSessionTokens(ctx context.Context, sessionID string, accessToken string, refreshToken string, expiresAt time.Time) error {
+	return s.SessionRepo.RotateTokens(ctx, sessionID, accessToken, refreshToken, expiresAt)
 }
 
 func (s *ServiceSession) DestroyAllUserSessions(ctx context.Context, userID string) error {

@@ -1,7 +1,10 @@
 package interfaceaudit
 
-import domainaudit "starter-kit/internal/domain/audit"
+import (
+	domainaudit "starter-kit/internal/domain/audit"
+	interfacebase "starter-kit/internal/interfaces/base"
+)
 
 type RepoAuditInterface interface {
-	Store(m domainaudit.AuditTrail) error
+	interfacebase.GenericRepository[domainaudit.AuditTrail]
 }

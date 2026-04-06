@@ -96,6 +96,7 @@ func main() {
 	routes.PermissionRoutes()
 	routes.MenuRoutes()
 	routes.AppConfigRoutes()
+	routes.AuditRoutes()
 	routes.LocationRoutes()
 
 	// Register session routes if Redis is available
