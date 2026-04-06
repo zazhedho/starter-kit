@@ -80,7 +80,7 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 	return data, nil
 }
 
-func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorRole string) (domainuser.Users, error) {
+func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId string, creatorRole string) (domainuser.Users, error) {
 	phone := utils.NormalizePhoneTo62(req.Phone)
 	email := utils.SanitizeEmail(req.Email)
 
@@ -106,9 +106,15 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorRole strin
 	}
 
 	roleName := strings.ToLower(strings.TrimSpace(req.Role))
+	permissions, err := s.PermissionRepo.GetUserPermissions(creatorUserId)
+	if err != nil {
+		return domainuser.Users{}, err
+	}
 
-	// SECURITY: Validate role assignment based on creator's role
-	// Only superadmin can create superadmin users
+	if roleName != utils.RoleViewer && !hasPermission(permissions, "users", "assign_role") {
+		return domainuser.Users{}, errors.New("access denied: missing permission users:assign_role")
+	}
+
 	if roleName == utils.RoleSuperAdmin && creatorRole != utils.RoleSuperAdmin {
 		return domainuser.Users{}, errors.New("only superadmin can create superadmin users")
 	}
@@ -216,13 +222,13 @@ func (s *ServiceUser) GetAllUsers(params filter.BaseParams, currentUserRole stri
 	return users, total, nil
 }
 
-func (s *ServiceUser) Update(id, role string, req dto.UserUpdate) (domainuser.Users, error) {
+func (s *ServiceUser) Update(id, currentUserId, currentUserRole string, req dto.UserUpdate) (domainuser.Users, error) {
 	data, err := s.UserRepo.GetByID(id)
 	if err != nil {
 		return domainuser.Users{}, err
 	}
 
-	if data.Role == utils.RoleSuperAdmin && role != utils.RoleSuperAdmin {
+	if data.Role == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
 		return domainuser.Users{}, errors.New("cannot modify superadmin users")
 	}
 
@@ -239,18 +245,24 @@ func (s *ServiceUser) Update(id, role string, req dto.UserUpdate) (domainuser.Us
 		data.Email = utils.SanitizeEmail(req.Email)
 	}
 
-	if reqRole := strings.TrimSpace(req.Role); reqRole != "" && (role == utils.RoleAdmin || role == utils.RoleSuperAdmin) {
+	if reqRole := strings.TrimSpace(req.Role); reqRole != "" {
 		newRoleName := strings.ToLower(reqRole)
-		if role == utils.RoleAdmin && newRoleName == utils.RoleSuperAdmin {
+		permissions, err := s.PermissionRepo.GetUserPermissions(currentUserId)
+		if err != nil {
+			return domainuser.Users{}, err
+		}
+		if !hasPermission(permissions, "users", "assign_role") {
+			return domainuser.Users{}, errors.New("access denied: missing permission users:assign_role")
+		}
+		if newRoleName == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
 			return domainuser.Users{}, errors.New("cannot assign superadmin role")
 		}
-
-		data.Role = newRoleName
-		if roleID, ok := findRoleIDByName(s.RoleRepo, newRoleName); ok {
-			data.RoleId = roleID
-		} else {
-			data.RoleId = nil
+		roleID, ok := findRoleIDByName(s.RoleRepo, newRoleName)
+		if !ok {
+			return domainuser.Users{}, errors.New("invalid role: " + newRoleName)
 		}
+		data.Role = newRoleName
+		data.RoleId = roleID
 	}
 
 	if err = s.UserRepo.Update(data); err != nil {

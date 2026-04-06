@@ -5,18 +5,22 @@ import (
 	domainmenu "starter-kit/internal/domain/menu"
 	"starter-kit/internal/dto"
 	interfacemenu "starter-kit/internal/interfaces/menu"
+	interfacepermission "starter-kit/internal/interfaces/permission"
+	serviceshared "starter-kit/internal/services/shared"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"time"
 )
 
 type MenuService struct {
-	MenuRepo interfacemenu.RepoMenuInterface
+	MenuRepo       interfacemenu.RepoMenuInterface
+	PermissionRepo interfacepermission.RepoPermissionInterface
 }
 
-func NewMenuService(menuRepo interfacemenu.RepoMenuInterface) *MenuService {
+func NewMenuService(menuRepo interfacemenu.RepoMenuInterface, permissionRepo interfacepermission.RepoPermissionInterface) *MenuService {
 	return &MenuService{
-		MenuRepo: menuRepo,
+		MenuRepo:       menuRepo,
+		PermissionRepo: permissionRepo,
 	}
 }
 
@@ -63,7 +67,25 @@ func (s *MenuService) GetActiveMenus() ([]domainmenu.MenuItem, error) {
 }
 
 func (s *MenuService) GetUserMenus(userId string) ([]domainmenu.MenuItem, error) {
-	return s.MenuRepo.GetUserMenus(userId)
+	activeMenus, err := s.MenuRepo.GetActiveMenus()
+	if err != nil {
+		return nil, err
+	}
+
+	permissions, err := s.PermissionRepo.GetUserPermissions(userId)
+	if err != nil {
+		return nil, err
+	}
+
+	resources := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		if permission.Resource == "" {
+			continue
+		}
+		resources = append(resources, permission.Resource)
+	}
+
+	return serviceshared.ResolveAccessibleMenus(activeMenus, resources), nil
 }
 
 func (s *MenuService) Update(id string, req dto.MenuUpdate) (domainmenu.MenuItem, error) {

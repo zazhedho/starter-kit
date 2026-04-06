@@ -2,11 +2,13 @@ package servicerole
 
 import (
 	"errors"
+	domainpermission "starter-kit/internal/domain/permission"
 	domainrole "starter-kit/internal/domain/role"
 	"starter-kit/internal/dto"
 	interfacemenu "starter-kit/internal/interfaces/menu"
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	interfacerole "starter-kit/internal/interfaces/role"
+	serviceshared "starter-kit/internal/services/shared"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"time"
@@ -146,17 +148,20 @@ func (s *RoleService) Delete(id string) error {
 	return s.RoleRepo.Delete(id)
 }
 
-func (s *RoleService) AssignPermissions(roleId string, req dto.AssignPermissions, currentUserRole string) error {
+func (s *RoleService) AssignPermissions(roleId string, req dto.AssignPermissions, currentUserId string, currentUserRole string) error {
 	role, err := s.RoleRepo.GetByID(roleId)
 	if err != nil {
 		return err
 	}
 
 	if role.IsSystem {
-		if currentUserRole != utils.RoleSuperAdmin && currentUserRole != utils.RoleAdmin {
-			return errors.New("access denied: only superadmin and admin can modify system roles")
+		permissions, err := s.PermissionRepo.GetUserPermissions(currentUserId)
+		if err != nil {
+			return err
 		}
-
+		if !hasPermission(permissions, "roles", "manage_system") {
+			return errors.New("access denied: missing permission roles:manage_system")
+		}
 		if role.Name == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
 			return errors.New("access denied: cannot modify superadmin role")
 		}
@@ -189,8 +194,7 @@ func (s *RoleService) GetRoleMenus(roleId string) ([]string, error) {
 }
 
 func (s *RoleService) deriveMenuIDsFromPermissions(permissionIds []string) ([]string, error) {
-	menuIDSet := make(map[string]struct{})
-	menuIDs := make([]string, 0)
+	resources := make([]string, 0, len(permissionIds))
 
 	for _, permissionId := range permissionIds {
 		permission, err := s.PermissionRepo.GetByID(permissionId)
@@ -202,43 +206,25 @@ func (s *RoleService) deriveMenuIDsFromPermissions(permissionIds []string) ([]st
 			continue
 		}
 
-		menu, err := s.MenuRepo.GetByName(permission.Resource)
-		if err != nil {
-			continue
-		}
+		resources = append(resources, permission.Resource)
+	}
 
-		if !menu.IsActive || menu.DeletedAt.Valid {
-			continue
-		}
+	activeMenus, err := s.MenuRepo.GetActiveMenus()
+	if err != nil {
+		return nil, err
+	}
 
-		if _, exists := menuIDSet[menu.Id]; exists {
-			continue
-		}
+	return serviceshared.ResolveAccessibleMenuIDs(activeMenus, resources), nil
+}
 
-		menuIDSet[menu.Id] = struct{}{}
-		menuIDs = append(menuIDs, menu.Id)
-
-		parentID := menu.ParentId
-		for parentID != nil && *parentID != "" {
-			parentMenu, err := s.MenuRepo.GetByID(*parentID)
-			if err != nil {
-				break
-			}
-
-			if !parentMenu.IsActive || parentMenu.DeletedAt.Valid {
-				break
-			}
-
-			if _, exists := menuIDSet[parentMenu.Id]; !exists {
-				menuIDSet[parentMenu.Id] = struct{}{}
-				menuIDs = append(menuIDs, parentMenu.Id)
-			}
-
-			parentID = parentMenu.ParentId
+func hasPermission(permissions []domainpermission.Permission, resource, action string) bool {
+	for _, permission := range permissions {
+		if permission.Resource == resource && permission.Action == action {
+			return true
 		}
 	}
 
-	return menuIDs, nil
+	return false
 }
 
 var _ interfacerole.ServiceRoleInterface = (*RoleService)(nil)

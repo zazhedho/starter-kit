@@ -179,12 +179,12 @@ func (r *Routes) PermissionRoutes() {
 
 func (r *Routes) MenuRoutes() {
 	repo := menuRepo.NewMenuRepo(r.DB)
-	svc := menuSvc.NewMenuService(repo)
+	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	svc := menuSvc.NewMenuService(repo, pRepo)
 	repoAudit := auditRepo.NewAuditRepo(r.DB)
 	svcAudit := auditSvc.NewAuditService(repoAudit)
 	h := menuHandler.NewMenuHandler(svc, svcAudit)
 	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Public endpoints for authenticated users

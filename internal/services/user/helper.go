@@ -3,6 +3,7 @@ package serviceuser
 import (
 	"errors"
 	"regexp"
+	domainpermission "starter-kit/internal/domain/permission"
 	domainuser "starter-kit/internal/domain/user"
 	interfacerole "starter-kit/internal/interfaces/role"
 )
@@ -59,4 +60,14 @@ func findRoleIDByName(roleRepo interfacerole.RepoRoleInterface, roleName string)
 	}
 
 	return &roleEntity.Id, true
+}
+
+func hasPermission(permissions []domainpermission.Permission, resource, action string) bool {
+	for _, permission := range permissions {
+		if permission.Resource == resource && permission.Action == action {
+			return true
+		}
+	}
+
+	return false
 }

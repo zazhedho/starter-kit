@@ -216,6 +216,7 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][AssignPermissions]"
 
 	authData := utils.GetAuthData(ctx)
+	currentUserID := utils.InterfaceString(authData["user_id"])
 	currentUserRole := utils.InterfaceString(authData["role"])
 
 	if err := ctx.BindJSON(&req); err != nil {
@@ -229,7 +230,7 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
 	beforeIDs, _ := h.Service.GetRolePermissions(id)
-	if err := h.Service.AssignPermissions(id, req, currentUserRole); err != nil {
+	if err := h.Service.AssignPermissions(id, req, currentUserID, currentUserRole); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
 			Resource:     "role_permissions",
@@ -244,7 +245,7 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignPermissions; Error: %+v", logPrefix, err))
 		statusCode := http.StatusInternalServerError
-		if err.Error() == "access denied: cannot modify superadmin role" || err.Error() == "access denied: only superadmin and admin can modify system roles" {
+		if len(err.Error()) >= len("access denied:") && err.Error()[:len("access denied:")] == "access denied:" {
 			statusCode = http.StatusForbidden
 		}
 		res := response.Response(statusCode, err.Error(), logId, nil)
@@ -304,7 +305,7 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignMenus; Error: %+v", logPrefix, err))
 		statusCode := http.StatusBadRequest
-		if err.Error() == "access denied: cannot modify superadmin role" || err.Error() == "access denied: only superadmin and admin can modify system roles" {
+		if len(err.Error()) >= len("access denied:") && err.Error()[:len("access denied:")] == "access denied:" {
 			statusCode = http.StatusForbidden
 		}
 		res := response.Response(statusCode, err.Error(), logId, nil)

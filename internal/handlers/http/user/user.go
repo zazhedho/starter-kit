@@ -125,8 +125,9 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 		return
 	}
 	creatorRole := authData["role"].(string)
+	creatorUserID := utils.InterfaceString(authData["user_id"])
 
-	data, err := h.Service.AdminCreateUser(req, creatorRole)
+	data, err := h.Service.AdminCreateUser(req, creatorUserID, creatorRole)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
@@ -149,9 +150,13 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		statusCode := http.StatusBadRequest
+		if strings.HasPrefix(err.Error(), "access denied:") {
+			statusCode = http.StatusForbidden
+		}
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
-		ctx.JSON(http.StatusBadRequest, res)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -470,7 +475,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 	}
 
 	before, _ := h.Service.GetUserById(userId)
-	data, err := h.Service.Update(userId, role, req)
+	data, err := h.Service.Update(userId, userId, role, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -490,9 +495,13 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		statusCode := http.StatusBadRequest
+		if strings.HasPrefix(err.Error(), "access denied:") {
+			statusCode = http.StatusForbidden
+		}
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
-		ctx.JSON(http.StatusBadRequest, res)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -513,6 +522,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	var req dto.UserUpdate
 	authData := utils.GetAuthData(ctx)
+	currentUserID := utils.InterfaceString(authData["user_id"])
 	role := utils.InterfaceString(authData["role"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][UpdateUserById]"
@@ -533,7 +543,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
 	before, _ := h.Service.GetUserById(id)
-	data, err := h.Service.Update(id, role, req)
+	data, err := h.Service.Update(id, currentUserID, role, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -553,9 +563,13 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		statusCode := http.StatusBadRequest
+		if strings.HasPrefix(err.Error(), "access denied:") {
+			statusCode = http.StatusForbidden
+		}
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
 		res.Error = err.Error()
-		ctx.JSON(http.StatusBadRequest, res)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{

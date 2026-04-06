@@ -1,0 +1,151 @@
+package serviceuser
+
+import (
+	"errors"
+	domainauth "starter-kit/internal/domain/auth"
+	domainpermission "starter-kit/internal/domain/permission"
+	domainrole "starter-kit/internal/domain/role"
+	domainuser "starter-kit/internal/domain/user"
+	"starter-kit/internal/dto"
+	"starter-kit/pkg/filter"
+	"starter-kit/utils"
+	"testing"
+)
+
+type userRepoMock struct {
+	user      domainuser.Users
+	updated   domainuser.Users
+	emailUser domainuser.Users
+	phoneUser domainuser.Users
+}
+
+func (m *userRepoMock) Store(data domainuser.Users) error           { m.user = data; return nil }
+func (m *userRepoMock) GetByID(id string) (domainuser.Users, error) { return m.user, nil }
+func (m *userRepoMock) GetAll(params filter.BaseParams) ([]domainuser.Users, int64, error) {
+	return nil, 0, nil
+}
+func (m *userRepoMock) Update(data domainuser.Users) error {
+	m.updated = data
+	m.user = data
+	return nil
+}
+func (m *userRepoMock) Delete(id string) error                            { return nil }
+func (m *userRepoMock) GetByEmail(email string) (domainuser.Users, error) { return m.emailUser, nil }
+func (m *userRepoMock) GetByPhone(phone string) (domainuser.Users, error) { return m.phoneUser, nil }
+
+type authRepoMock struct{}
+
+func (m *authRepoMock) Store(data domainauth.Blacklist) error { return nil }
+func (m *authRepoMock) GetByToken(token string) (domainauth.Blacklist, error) {
+	return domainauth.Blacklist{}, nil
+}
+
+type roleRepoUserMock struct {
+	roles map[string]domainrole.Role
+}
+
+func (m *roleRepoUserMock) Store(data domainrole.Role) error { return nil }
+func (m *roleRepoUserMock) GetByID(id string) (domainrole.Role, error) {
+	return domainrole.Role{}, errors.New("not implemented")
+}
+func (m *roleRepoUserMock) GetAll(params filter.BaseParams) ([]domainrole.Role, int64, error) {
+	return nil, 0, nil
+}
+func (m *roleRepoUserMock) Update(data domainrole.Role) error { return nil }
+func (m *roleRepoUserMock) Delete(id string) error            { return nil }
+func (m *roleRepoUserMock) GetByName(name string) (domainrole.Role, error) {
+	role, ok := m.roles[name]
+	if !ok {
+		return domainrole.Role{}, errors.New("not found")
+	}
+	return role, nil
+}
+func (m *roleRepoUserMock) AssignPermissions(roleId string, permissionIds []string) error { return nil }
+func (m *roleRepoUserMock) RemovePermissions(roleId string, permissionIds []string) error { return nil }
+func (m *roleRepoUserMock) GetRolePermissions(roleId string) ([]string, error)            { return nil, nil }
+func (m *roleRepoUserMock) AssignMenus(roleId string, menuIds []string) error             { return nil }
+func (m *roleRepoUserMock) RemoveMenus(roleId string, menuIds []string) error             { return nil }
+func (m *roleRepoUserMock) GetRoleMenus(roleId string) ([]string, error)                  { return nil, nil }
+
+type permissionRepoUserMock struct {
+	userPermissions []domainpermission.Permission
+}
+
+func (m *permissionRepoUserMock) Store(data domainpermission.Permission) error { return nil }
+func (m *permissionRepoUserMock) GetByID(id string) (domainpermission.Permission, error) {
+	return domainpermission.Permission{}, errors.New("not implemented")
+}
+func (m *permissionRepoUserMock) GetAll(params filter.BaseParams) ([]domainpermission.Permission, int64, error) {
+	return nil, 0, nil
+}
+func (m *permissionRepoUserMock) Update(data domainpermission.Permission) error { return nil }
+func (m *permissionRepoUserMock) Delete(id string) error                        { return nil }
+func (m *permissionRepoUserMock) GetByName(name string) (domainpermission.Permission, error) {
+	return domainpermission.Permission{}, errors.New("not implemented")
+}
+func (m *permissionRepoUserMock) GetByResource(resource string) ([]domainpermission.Permission, error) {
+	return nil, nil
+}
+func (m *permissionRepoUserMock) GetUserPermissions(userId string) ([]domainpermission.Permission, error) {
+	return append([]domainpermission.Permission{}, m.userPermissions...), nil
+}
+
+func TestAdminCreateUserRequiresAssignRolePermissionForNonViewer(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo:      &userRepoMock{},
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleStaff: {Id: "role-staff", Name: utils.RoleStaff},
+		}},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	_, err := service.AdminCreateUser(dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+		Role:     utils.RoleStaff,
+	}, "creator-1", utils.RoleAdmin)
+	if err == nil || err.Error() != "access denied: missing permission users:assign_role" {
+		t.Fatalf("expected assign_role access error, got %v", err)
+	}
+}
+
+func TestUpdateRequiresAssignRolePermissionWhenChangingRole(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer},
+		},
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleStaff: {Id: "role-staff", Name: utils.RoleStaff},
+		}},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	_, err := service.Update("user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleStaff})
+	if err == nil || err.Error() != "access denied: missing permission users:assign_role" {
+		t.Fatalf("expected assign_role access error, got %v", err)
+	}
+}
+
+func TestUpdateRejectsSuperadminAssignmentForNonSuperadmin(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer},
+		},
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleSuperAdmin: {Id: "role-superadmin", Name: utils.RoleSuperAdmin},
+		}},
+		PermissionRepo: &permissionRepoUserMock{
+			userPermissions: []domainpermission.Permission{{Resource: "users", Action: "assign_role"}},
+		},
+	}
+
+	_, err := service.Update("user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleSuperAdmin})
+	if err == nil || err.Error() != "cannot assign superadmin role" {
+		t.Fatalf("expected superadmin assignment error, got %v", err)
+	}
+}
