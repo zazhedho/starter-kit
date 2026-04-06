@@ -12,6 +12,12 @@ import (
 	"strings"
 )
 
+var (
+	ErrGoogleNotConfigured = errors.New("google login is not configured")
+	ErrGoogleTokenInvalid  = errors.New("invalid google token")
+	ErrGoogleEmailMissing  = errors.New("google account email is not available")
+)
+
 func ValidatePasswordStrength(password string) error {
 	if len(password) < 8 {
 		return errors.New("password must be at least 8 characters long")

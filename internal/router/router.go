@@ -109,6 +109,7 @@ func (r *Routes) UserRoutes() {
 	{
 		user.POST("/register", registerLimiter, h.Register)
 		user.POST("/login", h.Login)
+		user.POST("/google/login", h.GoogleLogin)
 		user.POST("/refresh-token", h.RefreshToken)
 		user.POST("/forgot-password", h.ForgotPassword)
 		user.POST("/reset-password", h.ResetPassword)

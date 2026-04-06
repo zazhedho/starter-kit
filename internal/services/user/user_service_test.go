@@ -1,6 +1,7 @@
 package serviceuser
 
 import (
+	"context"
 	"errors"
 	domainauth "starter-kit/internal/domain/auth"
 	domainpermission "starter-kit/internal/domain/permission"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type userRepoMock struct {
@@ -19,7 +21,9 @@ type userRepoMock struct {
 	usersByID map[string]domainuser.Users
 	updated   domainuser.Users
 	emailUser domainuser.Users
+	emailErr  error
 	phoneUser domainuser.Users
+	phoneErr  error
 }
 
 func (m *userRepoMock) Store(data domainuser.Users) error { m.user = data; return nil }
@@ -41,9 +45,19 @@ func (m *userRepoMock) Update(data domainuser.Users) error {
 	m.user = data
 	return nil
 }
-func (m *userRepoMock) Delete(id string) error                            { return nil }
-func (m *userRepoMock) GetByEmail(email string) (domainuser.Users, error) { return m.emailUser, nil }
-func (m *userRepoMock) GetByPhone(phone string) (domainuser.Users, error) { return m.phoneUser, nil }
+func (m *userRepoMock) Delete(id string) error { return nil }
+func (m *userRepoMock) GetByEmail(email string) (domainuser.Users, error) {
+	if m.emailErr != nil {
+		return domainuser.Users{}, m.emailErr
+	}
+	return m.emailUser, nil
+}
+func (m *userRepoMock) GetByPhone(phone string) (domainuser.Users, error) {
+	if m.phoneErr != nil {
+		return domainuser.Users{}, m.phoneErr
+	}
+	return m.phoneUser, nil
+}
 
 type authRepoMock struct{}
 
@@ -421,5 +435,85 @@ func TestStopImpersonationReturnsOriginalUserToken(t *testing.T) {
 	}
 	if _, exists := claims["is_impersonated"]; exists {
 		t.Fatalf("expected impersonation flag to be absent after stop, got %v", claims["is_impersonated"])
+	}
+}
+
+func TestLoginWithGoogleReturnsExistingUser(t *testing.T) {
+	originalVerifier := googleIDTokenVerifier
+	googleIDTokenVerifier = func(_ context.Context, idToken string) (googleTokenInfo, error) {
+		return googleTokenInfo{
+			Email:         "Jane.Doe@Example.COM",
+			EmailVerified: "true",
+			Subject:       "google-sub-1",
+			Name:          "Jane Doe",
+			Audience:      "client-id",
+		}, nil
+	}
+	defer func() { googleIDTokenVerifier = originalVerifier }()
+
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			emailUser: domainuser.Users{
+				Id:    "user-1",
+				Name:  "Jane Doe",
+				Email: "jane.doe@example.com",
+				Role:  utils.RoleViewer,
+			},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if isNewUser {
+		t.Fatal("expected existing user login, got isNewUser=true")
+	}
+	if user.Id != "user-1" {
+		t.Fatalf("expected existing user, got %+v", user)
+	}
+}
+
+func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
+	originalVerifier := googleIDTokenVerifier
+	googleIDTokenVerifier = func(_ context.Context, idToken string) (googleTokenInfo, error) {
+		return googleTokenInfo{
+			Email:         "New.User@Example.COM",
+			EmailVerified: "true",
+			Subject:       "google-sub-2",
+			Name:          "new user",
+			Audience:      "client-id",
+		}, nil
+	}
+	defer func() { googleIDTokenVerifier = originalVerifier }()
+
+	userRepo := &userRepoMock{emailErr: gorm.ErrRecordNotFound}
+	service := &ServiceUser{
+		UserRepo:      userRepo,
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+		}},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !isNewUser {
+		t.Fatal("expected new user registration, got isNewUser=false")
+	}
+	if user.Email != "new.user@example.com" {
+		t.Fatalf("expected normalized email, got %s", user.Email)
+	}
+	if user.Role != utils.RoleViewer {
+		t.Fatalf("expected viewer role, got %s", user.Role)
+	}
+	if userRepo.user.Password == "" {
+		t.Fatal("expected generated password hash for google user")
 	}
 }

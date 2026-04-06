@@ -15,6 +15,7 @@ import (
 	interfaceauth "starter-kit/internal/interfaces/auth"
 	interfacesession "starter-kit/internal/interfaces/session"
 	interfaceuser "starter-kit/internal/interfaces/user"
+	serviceuser "starter-kit/internal/services/user"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/logger"
 	"starter-kit/pkg/messages"
@@ -365,6 +366,102 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 
 	res := response.Response(http.StatusOK, "success", logId, buildAuthTokenResponse(token, refreshToken))
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(token)))
+	ctx.JSON(http.StatusOK, res)
+}
+
+func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
+	var req dto.GoogleLogin
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := "[UserHandler][GoogleLogin]"
+
+	if err := ctx.BindJSON(&req); err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	user, isNewUser, err := h.Service.LoginWithGoogle(req)
+	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionLogin,
+			Resource:     "auth",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Google login failed",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"provider": "google",
+			},
+		})
+
+		statusCode := http.StatusBadRequest
+		switch {
+		case errors.Is(err, serviceuser.ErrGoogleNotConfigured):
+			statusCode = http.StatusServiceUnavailable
+		case errors.Is(err, serviceuser.ErrGoogleTokenInvalid), errors.Is(err, serviceuser.ErrGoogleEmailMissing):
+			statusCode = http.StatusUnauthorized
+		}
+
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(statusCode, res)
+		return
+	}
+
+	accessToken, err := utils.GenerateJwt(&user, logId.String())
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateJwt; ERROR: %s;", logPrefix, err))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	refreshToken, err := utils.GenerateRefreshJwt(&user, logId.String(), nil)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateRefreshJwt; ERROR: %s;", logPrefix, err))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	if h.SessionSvc != nil {
+		session, errSession := h.SessionSvc.CreateSession(context.Background(), &user, accessToken, refreshToken, domainsession.RequestMeta{
+			IP:        ctx.ClientIP(),
+			UserAgent: ctx.GetHeader("User-Agent"),
+		})
+		if errSession != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to create session: %v", logPrefix, errSession))
+		} else {
+			logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Session created: %s", logPrefix, session.SessionID))
+		}
+	}
+
+	successMessage := "Google login success"
+	if isNewUser {
+		successMessage = "Google registration success"
+	}
+
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionLogin,
+		Resource:   "auth",
+		ResourceID: user.Id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    successMessage,
+		AfterData: map[string]interface{}{
+			"provider":    "google",
+			"email":       user.Email,
+			"is_new_user": isNewUser,
+		},
+	})
+
+	data := buildAuthTokenResponse(accessToken, refreshToken)
+	data["is_new_user"] = isNewUser
+	data["provider"] = "google"
+
+	res := response.Response(http.StatusOK, successMessage, logId, data)
 	ctx.JSON(http.StatusOK, res)
 }
 

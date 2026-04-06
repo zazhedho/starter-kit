@@ -36,6 +36,19 @@ Use this for values such as:
 - integration settings
 - module-specific runtime configuration
 
+The starter kit now includes a typed helper on top of `app_configs`, so services do not need to parse raw strings manually for common cases such as:
+- `GetString`
+- `GetBool`
+- `GetInt`
+- `GetDuration`
+- `IsEnabled`
+- `DecodeJSON`
+
+Behavior:
+- if a config key does not exist, the helper returns the provided fallback
+- if a config exists but `is_active = false`, the helper also returns the fallback
+- parsing errors are returned only when an active config exists but contains an invalid value
+
 ## Current Modules
 
 System modules currently included:
@@ -101,6 +114,7 @@ Minimum required variables:
 Optional but recommended:
 - Redis settings for sessions and rate limiting
 - storage settings for file upload use cases
+- `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
 
 ## Run Locally
 
@@ -129,6 +143,7 @@ The current route set includes:
 
 - `POST /api/user/register`
 - `POST /api/user/login`
+- `POST /api/user/google/login`
 - `POST /api/user/refresh-token`
 - `POST /api/user/logout`
 - `GET /api/user`
