@@ -468,8 +468,145 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 		return
 	}
 
+	if isImpersonated, ok := authData["is_impersonated"].(bool); ok {
+		data["is_impersonated"] = isImpersonated
+		if isImpersonated {
+			data["impersonator"] = map[string]interface{}{
+				"user_id":  utils.InterfaceString(authData["original_user_id"]),
+				"username": utils.InterfaceString(authData["original_username"]),
+				"role":     utils.InterfaceString(authData["original_role"]),
+			}
+		}
+	} else {
+		data["is_impersonated"] = false
+	}
+
 	res := response.Response(http.StatusOK, "success", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
+	ctx.JSON(http.StatusOK, res)
+}
+
+func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := "[UserHandler][ImpersonateUser]"
+
+	id, err := utils.ValidateUUID(ctx, logId)
+	if err != nil {
+		return
+	}
+
+	authData := utils.GetAuthData(ctx)
+	currentUserID := utils.InterfaceString(authData["user_id"])
+	currentUserName := utils.InterfaceString(authData["username"])
+	currentUserRole := utils.InterfaceString(authData["role"])
+	alreadyImpersonated, _ := authData["is_impersonated"].(bool)
+
+	token, err := h.Service.ImpersonateUser(id, currentUserID, currentUserName, currentUserRole, alreadyImpersonated, logId.String())
+	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionLogin,
+			Resource:     "user_impersonation",
+			ResourceID:   id,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to impersonate user",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"target_user_id": id,
+			},
+		})
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ImpersonateUser; ERROR: %s;", logPrefix, err))
+
+		statusCode := http.StatusBadRequest
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			statusCode = http.StatusNotFound
+		} else if strings.HasPrefix(err.Error(), "cannot impersonate") {
+			statusCode = http.StatusForbidden
+		}
+
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(statusCode, res)
+		return
+	}
+
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionLogin,
+		Resource:   "user_impersonation",
+		ResourceID: id,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Started impersonation session",
+		AfterData: map[string]interface{}{
+			"target_user_id": id,
+		},
+		Metadata: map[string]interface{}{
+			"impersonation_action": "start",
+			"target_user_id":       id,
+		},
+	})
+
+	res := response.Response(http.StatusOK, "Impersonation started successfully", logId, map[string]interface{}{
+		"token": token,
+	})
+	ctx.JSON(http.StatusOK, res)
+}
+
+func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := "[UserHandler][StopImpersonation]"
+
+	authData := utils.GetAuthData(ctx)
+	currentUserID := utils.InterfaceString(authData["user_id"])
+	originalUserID := utils.InterfaceString(authData["original_user_id"])
+	isImpersonated, _ := authData["is_impersonated"].(bool)
+	if !isImpersonated || originalUserID == "" {
+		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		res.Error = "current session is not impersonated"
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	token, err := h.Service.StopImpersonation(originalUserID, currentUserID, logId.String())
+	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionLogout,
+			Resource:     "user_impersonation",
+			ResourceID:   originalUserID,
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to stop impersonation",
+			ErrorMessage: err.Error(),
+		})
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.StopImpersonation; ERROR: %s;", logPrefix, err))
+
+		statusCode := http.StatusBadRequest
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			statusCode = http.StatusNotFound
+		}
+
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(statusCode, res)
+		return
+	}
+
+	if tokenString, ok := ctx.Get("token"); ok {
+		_ = h.Service.LogoutUser(tokenString.(string))
+	}
+
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:     domainaudit.ActionLogout,
+		Resource:   "user_impersonation",
+		ResourceID: originalUserID,
+		Status:     domainaudit.StatusSuccess,
+		Message:    "Stopped impersonation session",
+		Metadata: map[string]interface{}{
+			"impersonation_action": "stop",
+			"restored_user_id":     originalUserID,
+		},
+	})
+
+	res := response.Response(http.StatusOK, "Impersonation stopped successfully", logId, map[string]interface{}{
+		"token": token,
+	})
 	ctx.JSON(http.StatusOK, res)
 }
 

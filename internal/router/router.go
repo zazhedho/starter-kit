@@ -111,6 +111,8 @@ func (r *Routes) UserRoutes() {
 			userPriv.POST("/logout", h.Logout)
 			userPriv.GET("", h.GetUserByAuth)
 			userPriv.GET("/:id", mdw.PermissionMiddleware("users", "view"), h.GetUserById)
+			userPriv.POST("/:id/impersonate", mdw.PermissionMiddleware("users", "impersonate"), h.ImpersonateUser)
+			userPriv.POST("/stop-impersonation", h.StopImpersonation)
 			userPriv.PUT("", h.Update)
 			userPriv.PUT("/:id", mdw.PermissionMiddleware("users", "update"), h.UpdateUserById)
 			userPriv.PUT("/change/password", h.ChangePassword)

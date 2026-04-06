@@ -11,6 +11,8 @@ type ServiceUserInterface interface {
 	AdminCreateUser(req dto.AdminCreateUser, creatorUserId string, creatorRole string) (domainuser.Users, error)
 	LoginUser(req dto.Login, logId string) (string, error)
 	LogoutUser(token string) error
+	ImpersonateUser(targetUserId, impersonatorUserId, impersonatorName, impersonatorRole string, alreadyImpersonated bool, logId string) (string, error)
+	StopImpersonation(originalUserId, currentUserId string, logId string) (string, error)
 	GetUserById(id string) (domainuser.Users, error)
 	GetUserByEmail(email string) (domainuser.Users, error)
 	GetUserByPhone(phone string) (domainuser.Users, error)

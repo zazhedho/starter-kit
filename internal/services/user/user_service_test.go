@@ -16,13 +16,23 @@ import (
 
 type userRepoMock struct {
 	user      domainuser.Users
+	usersByID map[string]domainuser.Users
 	updated   domainuser.Users
 	emailUser domainuser.Users
 	phoneUser domainuser.Users
 }
 
-func (m *userRepoMock) Store(data domainuser.Users) error           { m.user = data; return nil }
-func (m *userRepoMock) GetByID(id string) (domainuser.Users, error) { return m.user, nil }
+func (m *userRepoMock) Store(data domainuser.Users) error { m.user = data; return nil }
+func (m *userRepoMock) GetByID(id string) (domainuser.Users, error) {
+	if m.usersByID != nil {
+		user, ok := m.usersByID[id]
+		if !ok {
+			return domainuser.Users{}, errors.New("not found")
+		}
+		return user, nil
+	}
+	return m.user, nil
+}
 func (m *userRepoMock) GetAll(params filter.BaseParams) ([]domainuser.Users, int64, error) {
 	return nil, 0, nil
 }
@@ -313,5 +323,103 @@ func TestLoginUserRejectsInvalidRandomIdentifier(t *testing.T) {
 	}, "log-1")
 	if err == nil || err.Error() != "identifier must be a valid email or phone number" {
 		t.Fatalf("expected invalid identifier error, got %v", err)
+	}
+}
+
+func TestImpersonateUserGeneratesTokenWithOriginalUserClaims(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret")
+
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			usersByID: map[string]domainuser.Users{
+				"target-1": {
+					Id:    "target-1",
+					Name:  "Target User",
+					Role:  utils.RoleStaff,
+					Email: "target@example.com",
+				},
+			},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	token, err := service.ImpersonateUser("target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	claims, err := utils.JwtClaim(token)
+	if err != nil {
+		t.Fatalf("failed to parse token claims: %v", err)
+	}
+
+	if claims["user_id"] != "target-1" {
+		t.Fatalf("expected target user id in claims, got %v", claims["user_id"])
+	}
+	if claims["is_impersonated"] != true {
+		t.Fatalf("expected impersonation flag in claims, got %v", claims["is_impersonated"])
+	}
+	if claims["original_user_id"] != "admin-1" {
+		t.Fatalf("expected original user id in claims, got %v", claims["original_user_id"])
+	}
+}
+
+func TestImpersonateUserRejectsSuperadminTargetForNonSuperadmin(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			usersByID: map[string]domainuser.Users{
+				"target-1": {
+					Id:   "target-1",
+					Name: "Superadmin User",
+					Role: utils.RoleSuperAdmin,
+				},
+			},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	_, err := service.ImpersonateUser("target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
+	if err == nil || err.Error() != "cannot impersonate superadmin users" {
+		t.Fatalf("expected superadmin impersonation error, got %v", err)
+	}
+}
+
+func TestStopImpersonationReturnsOriginalUserToken(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret")
+
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			usersByID: map[string]domainuser.Users{
+				"admin-1": {
+					Id:   "admin-1",
+					Name: "Admin User",
+					Role: utils.RoleAdmin,
+				},
+			},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	token, err := service.StopImpersonation("admin-1", "target-1", "log-1")
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	claims, err := utils.JwtClaim(token)
+	if err != nil {
+		t.Fatalf("failed to parse token claims: %v", err)
+	}
+
+	if claims["user_id"] != "admin-1" {
+		t.Fatalf("expected original user id in claims, got %v", claims["user_id"])
+	}
+	if _, exists := claims["is_impersonated"]; exists {
+		t.Fatalf("expected impersonation flag to be absent after stop, got %v", claims["is_impersonated"])
 	}
 }

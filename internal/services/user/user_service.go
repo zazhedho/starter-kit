@@ -188,6 +188,50 @@ func (s *ServiceUser) LogoutUser(token string) error {
 	return nil
 }
 
+func (s *ServiceUser) ImpersonateUser(targetUserId, impersonatorUserId, impersonatorName, impersonatorRole string, alreadyImpersonated bool, logId string) (string, error) {
+	if alreadyImpersonated {
+		return "", errors.New("cannot start nested impersonation")
+	}
+	if strings.TrimSpace(targetUserId) == "" {
+		return "", errors.New("target user id is required")
+	}
+	if targetUserId == impersonatorUserId {
+		return "", errors.New("cannot impersonate your own account")
+	}
+
+	targetUser, err := s.UserRepo.GetByID(targetUserId)
+	if err != nil {
+		return "", err
+	}
+
+	if targetUser.Role == utils.RoleSuperAdmin && impersonatorRole != utils.RoleSuperAdmin {
+		return "", errors.New("cannot impersonate superadmin users")
+	}
+
+	return utils.GenerateJwtWithClaims(&targetUser, logId, &utils.AppClaims{
+		IsImpersonated:   true,
+		OriginalUserId:   impersonatorUserId,
+		OriginalUsername: impersonatorName,
+		OriginalRole:     impersonatorRole,
+	})
+}
+
+func (s *ServiceUser) StopImpersonation(originalUserId, currentUserId string, logId string) (string, error) {
+	if strings.TrimSpace(originalUserId) == "" {
+		return "", errors.New("original user id is required")
+	}
+	if originalUserId == currentUserId {
+		return "", errors.New("current session is not impersonated")
+	}
+
+	originalUser, err := s.UserRepo.GetByID(originalUserId)
+	if err != nil {
+		return "", err
+	}
+
+	return utils.GenerateJwt(&originalUser, logId)
+}
+
 func (s *ServiceUser) GetUserById(id string) (domainuser.Users, error) {
 	return s.UserRepo.GetByID(id)
 }

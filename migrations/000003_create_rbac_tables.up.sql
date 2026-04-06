@@ -113,6 +113,7 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     (gen_random_uuid(), 'list_users', 'List Users', 'users', 'list'),
     (gen_random_uuid(), 'view_users', 'View User Detail', 'users', 'view'),
     (gen_random_uuid(), 'create_users', 'Create Users', 'users', 'create'),
+    (gen_random_uuid(), 'impersonate_users', 'Impersonate Users', 'users', 'impersonate'),
     (gen_random_uuid(), 'update_users', 'Update Users', 'users', 'update'),
     (gen_random_uuid(), 'assign_role_users', 'Assign User Roles', 'users', 'assign_role'),
     (gen_random_uuid(), 'update_password_users', 'Update Password Users', 'users', 'update_password'),

@@ -13,13 +13,21 @@ import (
 )
 
 type AppClaims struct {
-	UserId   string `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserId           string `json:"user_id"`
+	Username         string `json:"username"`
+	Role             string `json:"role"`
+	IsImpersonated   bool   `json:"is_impersonated,omitempty"`
+	OriginalUserId   string `json:"original_user_id,omitempty"`
+	OriginalUsername string `json:"original_username,omitempty"`
+	OriginalRole     string `json:"original_role,omitempty"`
 	*jwt.RegisteredClaims
 }
 
 func GenerateJwt(user *domainuser.Users, logId string) (string, error) {
+	return GenerateJwtWithClaims(user, logId, nil)
+}
+
+func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride *AppClaims) (string, error) {
 	claims := AppClaims{
 		UserId:   user.Id,
 		Username: user.Name,
@@ -29,6 +37,12 @@ func GenerateJwt(user *domainuser.Users, logId string) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(GetEnv("JWT_EXP", 24)))),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
+	}
+	if claimsOverride != nil {
+		claims.IsImpersonated = claimsOverride.IsImpersonated
+		claims.OriginalUserId = claimsOverride.OriginalUserId
+		claims.OriginalUsername = claimsOverride.OriginalUsername
+		claims.OriginalRole = claimsOverride.OriginalRole
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
