@@ -206,10 +206,8 @@ func (r *Routes) MenuRoutes() {
 	// CRUD endpoints
 	menu := r.App.Group("/api/menu").Use(mdw.AuthMiddleware())
 	{
-		menu.POST("", mdw.PermissionMiddleware("menus", "create"), h.Create)
 		menu.GET("/:id", mdw.PermissionMiddleware("menus", "view"), h.GetByID)
 		menu.PUT("/:id", mdw.PermissionMiddleware("menus", "update"), h.Update)
-		menu.DELETE("/:id", mdw.PermissionMiddleware("menus", "delete"), h.Delete)
 	}
 }
 

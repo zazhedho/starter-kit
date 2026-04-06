@@ -29,51 +29,6 @@ func NewMenuHandler(s interfacemenu.ServiceMenuInterface, auditService interface
 	}
 }
 
-func (h *MenuHandler) Create(ctx *gin.Context) {
-	var req dto.MenuCreate
-	logId := utils.GenerateLogId(ctx)
-	logPrefix := "[MenuHandler][Create]"
-
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
-		return
-	}
-
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
-
-	data, err := h.Service.Create(req)
-	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
-			Action:       domainaudit.ActionCreate,
-			Resource:     "menu",
-			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to create menu",
-			ErrorMessage: err.Error(),
-			AfterData:    req,
-		})
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Create; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
-		res.Error = err.Error()
-		ctx.JSON(http.StatusInternalServerError, res)
-		return
-	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionCreate,
-		Resource:   "menu",
-		ResourceID: data.Id,
-		Status:     domainaudit.StatusSuccess,
-		Message:    "Created menu",
-		AfterData:  data,
-	})
-
-	res := response.Response(http.StatusCreated, "Menu created successfully", logId, data)
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
-	ctx.JSON(http.StatusCreated, res)
-}
-
 func (h *MenuHandler) GetByID(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
@@ -223,41 +178,5 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 
 	res := response.Response(http.StatusOK, "Menu updated successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
-	ctx.JSON(http.StatusOK, res)
-}
-
-func (h *MenuHandler) Delete(ctx *gin.Context) {
-	id := ctx.Param("id")
-	logId := utils.GenerateLogId(ctx)
-	logPrefix := "[MenuHandler][Delete]"
-	before, _ := h.Service.GetByID(id)
-
-	if err := h.Service.Delete(id); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
-			Action:       domainaudit.ActionDelete,
-			Resource:     "menu",
-			ResourceID:   id,
-			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to delete menu",
-			ErrorMessage: err.Error(),
-			BeforeData:   before,
-		})
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
-		res.Error = err.Error()
-		ctx.JSON(http.StatusInternalServerError, res)
-		return
-	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionDelete,
-		Resource:   "menu",
-		ResourceID: id,
-		Status:     domainaudit.StatusSuccess,
-		Message:    "Deleted menu",
-		BeforeData: before,
-	})
-
-	res := response.Response(http.StatusOK, "Menu deleted successfully", logId, nil)
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: Menu deleted", logPrefix))
 	ctx.JSON(http.StatusOK, res)
 }

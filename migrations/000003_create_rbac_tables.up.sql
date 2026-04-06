@@ -132,9 +132,7 @@ INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     -- Menu permissions
     (gen_random_uuid(), 'list_menus', 'List Menus', 'menus', 'list'),
     (gen_random_uuid(), 'view_menu', 'View Menu Detail', 'menus', 'view'),
-    (gen_random_uuid(), 'create_menu', 'Create Menu', 'menus', 'create'),
     (gen_random_uuid(), 'update_menu', 'Update Menu', 'menus', 'update'),
-    (gen_random_uuid(), 'delete_menu', 'Delete Menu', 'menus', 'delete'),
 
     -- Permission management permissions
     (gen_random_uuid(), 'list_permissions', 'List Permissions', 'permissions', 'list'),

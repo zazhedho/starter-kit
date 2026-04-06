@@ -1,14 +1,12 @@
 package servicemenu
 
 import (
-	"errors"
 	domainmenu "starter-kit/internal/domain/menu"
 	"starter-kit/internal/dto"
 	interfacemenu "starter-kit/internal/interfaces/menu"
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	serviceshared "starter-kit/internal/services/shared"
 	"starter-kit/pkg/filter"
-	"starter-kit/utils"
 	"time"
 )
 
@@ -22,36 +20,6 @@ func NewMenuService(menuRepo interfacemenu.RepoMenuInterface, permissionRepo int
 		MenuRepo:       menuRepo,
 		PermissionRepo: permissionRepo,
 	}
-}
-
-func (s *MenuService) Create(req dto.MenuCreate) (domainmenu.MenuItem, error) {
-	existing, _ := s.MenuRepo.GetByName(req.Name)
-	if existing.Id != "" {
-		return domainmenu.MenuItem{}, errors.New("menu with this name already exists")
-	}
-
-	isActive := true
-	if req.IsActive != nil {
-		isActive = *req.IsActive
-	}
-
-	data := domainmenu.MenuItem{
-		Id:          utils.CreateUUID(),
-		Name:        req.Name,
-		DisplayName: req.DisplayName,
-		Path:        req.Path,
-		Icon:        req.Icon,
-		ParentId:    req.ParentId,
-		OrderIndex:  req.OrderIndex,
-		IsActive:    isActive,
-		CreatedAt:   time.Now(),
-	}
-
-	if err := s.MenuRepo.Store(data); err != nil {
-		return domainmenu.MenuItem{}, err
-	}
-
-	return data, nil
 }
 
 func (s *MenuService) GetByID(id string) (domainmenu.MenuItem, error) {
@@ -119,10 +87,6 @@ func (s *MenuService) Update(id string, req dto.MenuUpdate) (domainmenu.MenuItem
 	}
 
 	return menu, nil
-}
-
-func (s *MenuService) Delete(id string) error {
-	return s.MenuRepo.Delete(id)
 }
 
 var _ interfacemenu.ServiceMenuInterface = (*MenuService)(nil)

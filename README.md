@@ -129,6 +129,7 @@ The current route set includes:
 
 - `POST /api/user/register`
 - `POST /api/user/login`
+- `POST /api/user/refresh-token`
 - `POST /api/user/logout`
 - `GET /api/user`
 - `GET /api/users`
@@ -150,10 +151,8 @@ The current route set includes:
 - `GET /api/menus/active`
 - `GET /api/menus/me`
 - `GET /api/menus`
-- `POST /api/menu`
 - `GET /api/menu/:id`
 - `PUT /api/menu/:id`
-- `DELETE /api/menu/:id`
 
 - `GET /api/configs`
 - `GET /api/config/:id`
@@ -165,6 +164,36 @@ The current route set includes:
 - `GET /api/location/village`
 
 Additional session routes are registered only when Redis is available.
+
+## Module Seed Helper
+
+To avoid writing menu and permission seed SQL manually for every new module, the starter kit includes a helper command:
+
+```bash
+go run ./cmd/module-seed \
+  --name projects \
+  --display-name "Projects" \
+  --path /projects \
+  --icon bi-folder \
+  --order-index 905
+```
+
+The command prints SQL for:
+- one `menu_items` row
+- matching `permissions` rows for the same resource
+- optional default `role_permissions` grants
+
+This helps prevent mismatch bugs such as:
+- `menu_items.name = projects`
+- `permissions.resource = project`
+
+Optional flags:
+- `--parent-name education`
+- `--resource reports`
+- `--actions list,view,export`
+- `--grant-roles admin,superadmin`
+
+For nested menus, `--parent-name` generates a `parent_id` subquery so the migration stays declarative and consistent.
 
 ## How To Add A New Module
 
@@ -203,6 +232,9 @@ Important:
 
 This is what allows menus to be derived automatically from permissions.
 
+Tip:
+- use `go run ./cmd/module-seed ...` to generate the menu and permission seed block before pasting it into the migration
+
 ### 3. Protect routes with permissions
 
 Use:
@@ -225,6 +257,11 @@ Recommended admin flow:
 2. Assign permissions to the role.
 3. Do not assign menus manually.
 4. Let menu visibility be derived from permissions automatically.
+
+Menu management note:
+- `menus` is code-defined, but selected presentation fields may still be updated at runtime
+- do not create or delete menus through admin API
+- structural changes such as adding new menus should still go through code and migration
 
 This prevents drift between:
 - what a user can see
