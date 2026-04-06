@@ -3,7 +3,7 @@ package repositorypermission
 import (
 	domainpermission "starter-kit/internal/domain/permission"
 	interfacepermission "starter-kit/internal/interfaces/permission"
-	repositorybase "starter-kit/internal/repositories/base"
+	repositorygeneric "starter-kit/internal/repositories/generic"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 
@@ -11,11 +11,11 @@ import (
 )
 
 type repo struct {
-	*repositorybase.GenericRepository[domainpermission.Permission]
+	*repositorygeneric.GenericRepository[domainpermission.Permission]
 }
 
 func NewPermissionRepo(db *gorm.DB) interfacepermission.RepoPermissionInterface {
-	return &repo{GenericRepository: repositorybase.New[domainpermission.Permission](db)}
+	return &repo{GenericRepository: repositorygeneric.New[domainpermission.Permission](db)}
 }
 
 func (r *repo) GetByName(name string) (ret domainpermission.Permission, err error) {
@@ -23,8 +23,8 @@ func (r *repo) GetByName(name string) (ret domainpermission.Permission, err erro
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainpermission.Permission, totalData int64, err error) {
-	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
-		Search:         repositorybase.BuildSearchFunc("name", "display_name", "description", "resource"),
+	return r.GenericRepository.GetAll(params, repositorygeneric.QueryOptions{
+		Search:         repositorygeneric.BuildSearchFunc("name", "display_name", "description", "resource"),
 		AllowedFilters: []string{"id", "name", "display_name", "resource", "action", "created_at", "updated_at"},
 		AllowedOrderColumns: []string{
 			"name",

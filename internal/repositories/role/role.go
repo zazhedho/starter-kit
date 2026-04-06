@@ -3,7 +3,7 @@ package repositoryrole
 import (
 	domainrole "starter-kit/internal/domain/role"
 	interfacerole "starter-kit/internal/interfaces/role"
-	repositorybase "starter-kit/internal/repositories/base"
+	repositorygeneric "starter-kit/internal/repositories/generic"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 
@@ -11,11 +11,11 @@ import (
 )
 
 type repo struct {
-	*repositorybase.GenericRepository[domainrole.Role]
+	*repositorygeneric.GenericRepository[domainrole.Role]
 }
 
 func NewRoleRepo(db *gorm.DB) interfacerole.RepoRoleInterface {
-	return &repo{GenericRepository: repositorybase.New[domainrole.Role](db)}
+	return &repo{GenericRepository: repositorygeneric.New[domainrole.Role](db)}
 }
 
 func (r *repo) GetByName(name string) (ret domainrole.Role, err error) {
@@ -23,8 +23,8 @@ func (r *repo) GetByName(name string) (ret domainrole.Role, err error) {
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainrole.Role, totalData int64, err error) {
-	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
-		Search:         repositorybase.BuildSearchFunc("name", "display_name", "description"),
+	return r.GenericRepository.GetAll(params, repositorygeneric.QueryOptions{
+		Search:         repositorygeneric.BuildSearchFunc("name", "display_name", "description"),
 		AllowedFilters: []string{"id", "name", "display_name", "is_system", "created_at", "updated_at"},
 		AllowedOrderColumns: []string{
 			"name",

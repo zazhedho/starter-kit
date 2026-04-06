@@ -2,9 +2,9 @@ package interfaceaudit
 
 import (
 	domainaudit "starter-kit/internal/domain/audit"
-	interfacebase "starter-kit/internal/interfaces/base"
+	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
 
 type RepoAuditInterface interface {
-	interfacebase.GenericRepository[domainaudit.AuditTrail]
+	interfacegeneric.GenericRepository[domainaudit.AuditTrail]
 }

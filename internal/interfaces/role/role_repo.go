@@ -2,11 +2,11 @@ package interfacerole
 
 import (
 	domainrole "starter-kit/internal/domain/role"
-	interfacebase "starter-kit/internal/interfaces/base"
+	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
 
 type RepoRoleInterface interface {
-	interfacebase.GenericRepository[domainrole.Role]
+	interfacegeneric.GenericRepository[domainrole.Role]
 
 	GetByName(name string) (domainrole.Role, error)
 

@@ -90,7 +90,7 @@ route -> handler -> service -> repository -> database
 ```
 
 Repository layer convention:
-- use the generic repository in `internal/repositories/base` for common CRUD and list query behavior
+- use the generic repository in `internal/repositories/generic` for common CRUD and list query behavior
 - keep module repository files focused on custom query cases only, such as joins, aggregates, or transactional assignment logic
 
 ## Environment
@@ -226,9 +226,9 @@ Create these parts:
 - route registration in `internal/router/router.go`
 
 For repository implementation:
-- reuse `internal/repositories/base.GenericRepository[T]` for `Store`, `GetByID`, `GetAll`, `Update`, and `Delete`
-- embed `interfacebase.GenericRepository[T]` in module repository interfaces for the common contract
-- configure searchable columns, allowed filters, and sortable columns through `repositorybase.QueryOptions`
+- reuse `internal/repositories/generic.GenericRepository[T]` for `Store`, `GetByID`, `GetAll`, `Update`, and `Delete`
+- embed `interfacegeneric.GenericRepository[T]` in module repository interfaces for the common contract
+- configure searchable columns, allowed filters, and sortable columns through `repositorygeneric.QueryOptions`
 - add custom methods in the module repo only when the query is business-specific
 
 ### 2. Add migration

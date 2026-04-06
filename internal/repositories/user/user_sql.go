@@ -3,18 +3,18 @@ package repositoryuser
 import (
 	domainuser "starter-kit/internal/domain/user"
 	interfaceuser "starter-kit/internal/interfaces/user"
-	repositorybase "starter-kit/internal/repositories/base"
+	repositorygeneric "starter-kit/internal/repositories/generic"
 	"starter-kit/pkg/filter"
 
 	"gorm.io/gorm"
 )
 
 type repo struct {
-	*repositorybase.GenericRepository[domainuser.Users]
+	*repositorygeneric.GenericRepository[domainuser.Users]
 }
 
 func NewUserRepo(db *gorm.DB) interfaceuser.RepoUserInterface {
-	return &repo{GenericRepository: repositorybase.New[domainuser.Users](db)}
+	return &repo{GenericRepository: repositorygeneric.New[domainuser.Users](db)}
 }
 
 func (r *repo) GetByEmail(email string) (ret domainuser.Users, err error) {
@@ -26,8 +26,8 @@ func (r *repo) GetByPhone(phone string) (ret domainuser.Users, err error) {
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainuser.Users, totalData int64, err error) {
-	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
-		Search:         repositorybase.BuildSearchFunc("name", "email", "phone"),
+	return r.GenericRepository.GetAll(params, repositorygeneric.QueryOptions{
+		Search:         repositorygeneric.BuildSearchFunc("name", "email", "phone"),
 		AllowedFilters: []string{"id", "name", "email", "phone", "role", "role_id", "created_at", "updated_at"},
 		AllowedOrderColumns: []string{
 			"name",

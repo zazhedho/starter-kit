@@ -2,11 +2,11 @@ package interfacepermission
 
 import (
 	domainpermission "starter-kit/internal/domain/permission"
-	interfacebase "starter-kit/internal/interfaces/base"
+	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
 
 type RepoPermissionInterface interface {
-	interfacebase.GenericRepository[domainpermission.Permission]
+	interfacegeneric.GenericRepository[domainpermission.Permission]
 
 	GetByName(name string) (domainpermission.Permission, error)
 	GetByResource(resource string) ([]domainpermission.Permission, error)

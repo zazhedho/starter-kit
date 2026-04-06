@@ -1,4 +1,4 @@
-package repositorybase
+package repositorygeneric
 
 import (
 	"fmt"

@@ -1,4 +1,4 @@
-package interfacebase
+package interfacegeneric
 
 import "starter-kit/pkg/filter"
 

@@ -2,11 +2,11 @@ package interfaceappconfig
 
 import (
 	domainappconfig "starter-kit/internal/domain/appconfig"
-	interfacebase "starter-kit/internal/interfaces/base"
+	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
 
 type RepoAppConfigInterface interface {
-	interfacebase.GenericRepository[domainappconfig.AppConfig]
+	interfacegeneric.GenericRepository[domainappconfig.AppConfig]
 
 	GetByKey(configKey string) (domainappconfig.AppConfig, error)
 }

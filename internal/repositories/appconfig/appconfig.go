@@ -3,23 +3,23 @@ package repositoryappconfig
 import (
 	domainappconfig "starter-kit/internal/domain/appconfig"
 	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
-	repositorybase "starter-kit/internal/repositories/base"
+	repositorygeneric "starter-kit/internal/repositories/generic"
 	"starter-kit/pkg/filter"
 
 	"gorm.io/gorm"
 )
 
 type repo struct {
-	*repositorybase.GenericRepository[domainappconfig.AppConfig]
+	*repositorygeneric.GenericRepository[domainappconfig.AppConfig]
 }
 
 func NewAppConfigRepo(db *gorm.DB) interfaceappconfig.RepoAppConfigInterface {
-	return &repo{GenericRepository: repositorybase.New[domainappconfig.AppConfig](db)}
+	return &repo{GenericRepository: repositorygeneric.New[domainappconfig.AppConfig](db)}
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainappconfig.AppConfig, totalData int64, err error) {
-	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
-		Search:          repositorybase.BuildSearchFunc("config_key", "display_name", "category"),
+	return r.GenericRepository.GetAll(params, repositorygeneric.QueryOptions{
+		Search:          repositorygeneric.BuildSearchFunc("config_key", "display_name", "category"),
 		AllowedFilters:  []string{"category", "is_active"},
 		FilterSanitizer: filter.WhitelistStringFilter,
 		AllowedOrderColumns: []string{

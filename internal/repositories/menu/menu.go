@@ -4,7 +4,7 @@ import (
 	"sort"
 	domainmenu "starter-kit/internal/domain/menu"
 	interfacemenu "starter-kit/internal/interfaces/menu"
-	repositorybase "starter-kit/internal/repositories/base"
+	repositorygeneric "starter-kit/internal/repositories/generic"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 
@@ -12,11 +12,11 @@ import (
 )
 
 type repo struct {
-	*repositorybase.GenericRepository[domainmenu.MenuItem]
+	*repositorygeneric.GenericRepository[domainmenu.MenuItem]
 }
 
 func NewMenuRepo(db *gorm.DB) interfacemenu.RepoMenuInterface {
-	return &repo{GenericRepository: repositorybase.New[domainmenu.MenuItem](db)}
+	return &repo{GenericRepository: repositorygeneric.New[domainmenu.MenuItem](db)}
 }
 
 func (r *repo) GetByName(name string) (ret domainmenu.MenuItem, err error) {
@@ -24,8 +24,8 @@ func (r *repo) GetByName(name string) (ret domainmenu.MenuItem, err error) {
 }
 
 func (r *repo) GetAll(params filter.BaseParams) (ret []domainmenu.MenuItem, totalData int64, err error) {
-	return r.GenericRepository.GetAll(params, repositorybase.QueryOptions{
-		Search:         repositorybase.BuildSearchFunc("name", "display_name", "path"),
+	return r.GenericRepository.GetAll(params, repositorygeneric.QueryOptions{
+		Search:         repositorygeneric.BuildSearchFunc("name", "display_name", "path"),
 		AllowedFilters: []string{"id", "name", "display_name", "path", "parent_id", "order_index", "is_active", "created_at", "updated_at"},
 		AllowedOrderColumns: []string{
 			"name",

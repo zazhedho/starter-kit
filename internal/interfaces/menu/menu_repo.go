@@ -2,11 +2,11 @@ package interfacemenu
 
 import (
 	domainmenu "starter-kit/internal/domain/menu"
-	interfacebase "starter-kit/internal/interfaces/base"
+	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
 
 type RepoMenuInterface interface {
-	interfacebase.GenericRepository[domainmenu.MenuItem]
+	interfacegeneric.GenericRepository[domainmenu.MenuItem]
 
 	GetByName(name string) (domainmenu.MenuItem, error)
 	GetActiveMenus() ([]domainmenu.MenuItem, error)
