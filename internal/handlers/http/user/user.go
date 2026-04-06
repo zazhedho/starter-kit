@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"reflect"
 	"starter-kit/infrastructure/database"
 	domainaudit "starter-kit/internal/domain/audit"
 	domainsession "starter-kit/internal/domain/session"
+	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfaceuser "starter-kit/internal/interfaces/user"
@@ -194,7 +196,37 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	loginIdentifier := fmt.Sprintf("%s:%s", ctx.ClientIP(), strings.ToLower(req.Email))
+	rawIdentifier := strings.TrimSpace(req.Identifier)
+	if rawIdentifier == "" {
+		rawIdentifier = strings.TrimSpace(req.Email)
+	}
+	if rawIdentifier == "" {
+		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "identifier or email is required"}
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	var normalizedIdentifier string
+	if strings.Contains(rawIdentifier, "@") {
+		normalizedIdentifier = utils.SanitizeEmail(rawIdentifier)
+		if _, err := mail.ParseAddress(normalizedIdentifier); err != nil {
+			res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "identifier must be a valid email or phone number"}
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
+	} else {
+		normalizedIdentifier = utils.NormalizePhoneTo62(rawIdentifier)
+		if len(normalizedIdentifier) < 9 || len(normalizedIdentifier) > 15 {
+			res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "identifier must be a valid email or phone number"}
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
+	}
+
+	loginIdentifier := fmt.Sprintf("%s:%s", ctx.ClientIP(), normalizedIdentifier)
 	if h.LoginLimiter != nil {
 		blocked, ttl, limiterErr := h.LoginLimiter.IsBlocked(ctx.Request.Context(), loginIdentifier)
 		if limiterErr != nil {
@@ -206,7 +238,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 				Status:   domainaudit.StatusFailed,
 				Message:  "Login blocked due to too many attempts",
 				AfterData: map[string]interface{}{
-					"email": req.Email,
+					"identifier": normalizedIdentifier,
 				},
 			})
 			logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; Too many attempts", logPrefix))
@@ -231,7 +263,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 						Status:   domainaudit.StatusFailed,
 						Message:  "Login blocked after repeated failures",
 						AfterData: map[string]interface{}{
-							"email": req.Email,
+							"identifier": normalizedIdentifier,
 						},
 					})
 					logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; Account temporarily locked after repeated failures", logPrefix))
@@ -246,7 +278,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 				Status:   domainaudit.StatusFailed,
 				Message:  "Login failed due to invalid credentials",
 				AfterData: map[string]interface{}{
-					"email": req.Email,
+					"identifier": normalizedIdentifier,
 				},
 			})
 			res := response.Response(http.StatusBadRequest, messages.InvalidCred, logId, nil)
@@ -262,7 +294,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 			Message:      "Login failed due to internal error",
 			ErrorMessage: err.Error(),
 			AfterData: map[string]interface{}{
-				"email": req.Email,
+				"identifier": normalizedIdentifier,
 			},
 		})
 		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
@@ -271,7 +303,15 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		return
 	}
 
-	loggedInUser, userErr := h.Service.GetUserByEmail(req.Email)
+	var (
+		loggedInUser domainuser.Users
+		userErr      error
+	)
+	if strings.Contains(normalizedIdentifier, "@") {
+		loggedInUser, userErr = h.Service.GetUserByEmail(normalizedIdentifier)
+	} else {
+		loggedInUser, userErr = h.Service.GetUserByPhone(normalizedIdentifier)
+	}
 	loginUserID := ""
 	if userErr == nil {
 		loginUserID = loggedInUser.Id
@@ -308,7 +348,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		Status:     domainaudit.StatusSuccess,
 		Message:    "Login success",
 		AfterData: map[string]interface{}{
-			"email": req.Email,
+			"identifier": normalizedIdentifier,
 		},
 	})
 

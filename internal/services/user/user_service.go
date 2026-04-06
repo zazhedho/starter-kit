@@ -143,9 +143,22 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId str
 }
 
 func (s *ServiceUser) LoginUser(req dto.Login, logId string) (string, error) {
-	data, err := s.UserRepo.GetByEmail(utils.SanitizeEmail(req.Email))
+	identifier, err := resolveLoginIdentifier(req)
 	if err != nil {
 		return "", err
+	}
+
+	var (
+		data     domainuser.Users
+		loginErr error
+	)
+	if strings.Contains(identifier, "@") {
+		data, loginErr = s.UserRepo.GetByEmail(identifier)
+	} else {
+		data, loginErr = s.UserRepo.GetByPhone(identifier)
+	}
+	if loginErr != nil {
+		return "", loginErr
 	}
 
 	if err = bcrypt.CompareHashAndPassword([]byte(data.Password), []byte(req.Password)); err != nil {
@@ -181,6 +194,10 @@ func (s *ServiceUser) GetUserById(id string) (domainuser.Users, error) {
 
 func (s *ServiceUser) GetUserByEmail(email string) (domainuser.Users, error) {
 	return s.UserRepo.GetByEmail(email)
+}
+
+func (s *ServiceUser) GetUserByPhone(phone string) (domainuser.Users, error) {
+	return s.UserRepo.GetByPhone(phone)
 }
 
 func (s *ServiceUser) GetUserByAuth(id string) (map[string]interface{}, error) {

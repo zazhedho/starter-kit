@@ -2,10 +2,14 @@ package serviceuser
 
 import (
 	"errors"
+	"net/mail"
 	"regexp"
 	domainpermission "starter-kit/internal/domain/permission"
 	domainuser "starter-kit/internal/domain/user"
+	"starter-kit/internal/dto"
 	interfacerole "starter-kit/internal/interfaces/role"
+	"starter-kit/utils"
+	"strings"
 )
 
 func ValidatePasswordStrength(password string) error {
@@ -70,4 +74,30 @@ func hasPermission(permissions []domainpermission.Permission, resource, action s
 	}
 
 	return false
+}
+
+func resolveLoginIdentifier(req dto.Login) (string, error) {
+	identifier := strings.TrimSpace(req.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.Email)
+	}
+
+	if identifier == "" {
+		return "", errors.New("identifier or email is required")
+	}
+
+	if strings.Contains(identifier, "@") {
+		sanitizedEmail := utils.SanitizeEmail(identifier)
+		if _, err := mail.ParseAddress(sanitizedEmail); err != nil {
+			return "", errors.New("identifier must be a valid email or phone number")
+		}
+		return sanitizedEmail, nil
+	}
+
+	normalizedPhone := utils.NormalizePhoneTo62(identifier)
+	if len(normalizedPhone) < 9 || len(normalizedPhone) > 15 {
+		return "", errors.New("identifier must be a valid email or phone number")
+	}
+
+	return normalizedPhone, nil
 }

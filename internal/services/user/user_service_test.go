@@ -10,6 +10,8 @@ import (
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type userRepoMock struct {
@@ -147,5 +149,169 @@ func TestUpdateRejectsSuperadminAssignmentForNonSuperadmin(t *testing.T) {
 	_, err := service.Update("user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleSuperAdmin})
 	if err == nil || err.Error() != "cannot assign superadmin role" {
 		t.Fatalf("expected superadmin assignment error, got %v", err)
+	}
+}
+
+func TestRegisterUserNormalizesEmailToLowercase(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo:      &userRepoMock{},
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+		}},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	user, err := service.RegisterUser(dto.UserRegister{
+		Name:     "Jane Doe",
+		Email:    "Jane.Doe@Example.COM",
+		Phone:    "08123456789",
+		Password: "Password1!",
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if user.Email != "jane.doe@example.com" {
+		t.Fatalf("expected normalized lowercase email, got %s", user.Email)
+	}
+}
+
+func TestAdminCreateUserNormalizesEmailToLowercase(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo:      &userRepoMock{},
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleStaff: {Id: "role-staff", Name: utils.RoleStaff},
+		}},
+		PermissionRepo: &permissionRepoUserMock{
+			userPermissions: []domainpermission.Permission{{Resource: "users", Action: "assign_role"}},
+		},
+	}
+
+	user, err := service.AdminCreateUser(dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "Jane.Doe@Example.COM",
+		Phone:    "08123456789",
+		Password: "Password1!",
+		Role:     utils.RoleStaff,
+	}, "creator-1", utils.RoleAdmin)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if user.Email != "jane.doe@example.com" {
+		t.Fatalf("expected normalized lowercase email, got %s", user.Email)
+	}
+}
+
+func TestUpdateNormalizesEmailToLowercase(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer, Email: "old@example.com"},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	user, err := service.Update("user-1", "user-1", utils.RoleViewer, dto.UserUpdate{
+		Email: "Jane.Doe@Example.COM",
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if user.Email != "jane.doe@example.com" {
+		t.Fatalf("expected normalized lowercase email, got %s", user.Email)
+	}
+}
+
+func TestLoginUserAcceptsEmailIdentifier(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret")
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("Password1!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			emailUser: domainuser.Users{
+				Id:       "user-1",
+				Name:     "Jane Doe",
+				Email:    "jane.doe@example.com",
+				Password: string(hashedPassword),
+				Role:     utils.RoleViewer,
+			},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	token, err := service.LoginUser(dto.Login{
+		Identifier: "Jane.Doe@Example.COM",
+		Password:   "Password1!",
+	}, "log-1")
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if token == "" {
+		t.Fatal("expected non-empty token")
+	}
+}
+
+func TestLoginUserAcceptsPhoneIdentifier(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret")
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("Password1!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	service := &ServiceUser{
+		UserRepo: &userRepoMock{
+			phoneUser: domainuser.Users{
+				Id:       "user-1",
+				Name:     "Jane Doe",
+				Phone:    "628123456789",
+				Password: string(hashedPassword),
+				Role:     utils.RoleViewer,
+			},
+		},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	token, err := service.LoginUser(dto.Login{
+		Identifier: "08123456789",
+		Password:   "Password1!",
+	}, "log-1")
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if token == "" {
+		t.Fatal("expected non-empty token")
+	}
+}
+
+func TestLoginUserRejectsInvalidRandomIdentifier(t *testing.T) {
+	service := &ServiceUser{
+		UserRepo:       &userRepoMock{},
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	_, err := service.LoginUser(dto.Login{
+		Identifier: "randomtext",
+		Password:   "Password1!",
+	}, "log-1")
+	if err == nil || err.Error() != "identifier must be a valid email or phone number" {
+		t.Fatalf("expected invalid identifier error, got %v", err)
 	}
 }

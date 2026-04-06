@@ -7,7 +7,7 @@ const (
 	MsgFail        = "Something Went Wrong"
 	MsgDenied      = "Access Denied"
 	MsgForbidden   = "Forbidden"
-	MsgCredential  = "Invalid Credentials. Please input the correct credentials and try again."
+	MsgCredential  = "Invalid Credentials. Please input the correct email or phone and password, then try again."
 	MsgRequired    = "Please fill the %s field."
 	MsgExists      = "Already exists."
 	MsgNotFound    = "Data Not Found"
@@ -15,7 +15,7 @@ const (
 	MsgSuccess     = "Success"
 	MsgUpdated     = "Updated"
 	NoProperties   = "No properties to update has been provided in request. Please specify at least one property which needs to be updated."
-	InvalidCred    = "Invalid email or password"
+	InvalidCred    = "Invalid email, phone, or password"
 	AccessDenied   = "Access denied. You do not have the required permissions."
 )
 
