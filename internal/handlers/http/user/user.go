@@ -144,16 +144,8 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 			},
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.RegisterUser; Error: %+v", logPrefix, err))
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Error: email or phone already exists", logPrefix))
-			res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
-			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "email or phone already exists"}
-			ctx.JSON(http.StatusBadRequest, res)
-			return
-		}
-
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := userMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -234,15 +226,15 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 			h.respondThrottle(ctx, logId, throttle.RetryAfter, "OTP request is throttled. Please try again later.")
 			return
 		}
-		statusCode := http.StatusInternalServerError
-		message := "failed to send registration OTP"
 		if errors.Is(err, serviceotp.ErrOTPNotConfigured) || errors.Is(err, serviceotp.ErrOTPDeliveryFailed) {
-			statusCode = http.StatusServiceUnavailable
-			message = err.Error()
+			statusCode := http.StatusServiceUnavailable
+			res := response.ErrorResponse(statusCode, messages.MsgFail, logId, "Registration OTP service is temporarily unavailable.")
+			ctx.JSON(statusCode, res)
+			return
 		}
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = response.Errors{Code: statusCode, Message: message}
-		ctx.JSON(statusCode, res)
+
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
 

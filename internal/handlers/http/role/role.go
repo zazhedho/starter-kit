@@ -55,8 +55,8 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Create; Error: %+v", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := roleMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -151,8 +151,8 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; Error: %+v", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := roleMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -187,8 +187,8 @@ func (h *RoleHandler) Delete(ctx *gin.Context) {
 			BeforeData:   before,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %+v", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := roleMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -240,14 +240,7 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 			AfterData: req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignPermissions; Error: %+v", logPrefix, err))
-		statusCode := http.StatusInternalServerError
-		if len(err.Error()) >= len("access denied:") && err.Error()[:len("access denied:")] == "access denied:" {
-			statusCode = http.StatusForbidden
-		}
-		res := response.InternalServerError(logId)
-		if statusCode == http.StatusForbidden {
-			res = response.Forbidden(logId, messages.AccessDenied)
-		}
+		statusCode, res := roleMutationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -302,14 +295,7 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 			AfterData: req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignMenus; Error: %+v", logPrefix, err))
-		statusCode := http.StatusBadRequest
-		if len(err.Error()) >= len("access denied:") && err.Error()[:len("access denied:")] == "access denied:" {
-			statusCode = http.StatusForbidden
-		}
-		res := response.InternalServerError(logId)
-		if statusCode == http.StatusForbidden {
-			res = response.Forbidden(logId, messages.AccessDenied)
-		}
+		statusCode, res := roleMutationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}

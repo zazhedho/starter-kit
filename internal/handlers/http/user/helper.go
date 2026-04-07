@@ -98,9 +98,16 @@ func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
 	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgExists, logId, "email or phone already exists")
+	}
 
 	errMsg := err.Error()
 	switch {
+	case errMsg == "user not found":
+		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
+	case errMsg == "invalid or expired token":
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, "invalid or expired reset token")
 	case strings.HasPrefix(errMsg, "access denied:"),
 		strings.Contains(errMsg, "superadmin"):
 		return http.StatusForbidden, response.Forbidden(logId, messages.AccessDenied)

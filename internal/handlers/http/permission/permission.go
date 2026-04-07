@@ -55,8 +55,8 @@ func (h *PermissionHandler) Create(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Create; Error: %+v", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := permissionMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -148,8 +148,8 @@ func (h *PermissionHandler) Update(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; Error: %+v", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := permissionMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -184,8 +184,8 @@ func (h *PermissionHandler) Delete(ctx *gin.Context) {
 			BeforeData:   before,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %+v", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		statusCode, res := permissionMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
