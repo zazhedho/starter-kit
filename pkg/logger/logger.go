@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +57,7 @@ func WriteLog(level int, msg ...any) {
 	attrs := []slog.Attr{
 		slog.String("server_ip", os.Getenv("ServerIP")),
 	}
+	attrs = append(attrs, callerAttrs(2)...)
 	if node := os.Getenv("NODE"); node != "" {
 		attrs = append(attrs, slog.String("node", node))
 	}
@@ -85,6 +88,7 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 	attrs := []slog.Attr{
 		slog.String("server_ip", os.Getenv("ServerIP")),
 	}
+	attrs = append(attrs, callerAttrs(2)...)
 	if node := os.Getenv("NODE"); node != "" {
 		attrs = append(attrs, slog.String("node", node))
 	}
@@ -152,6 +156,36 @@ func mapLevelToSlog(level int) slog.Level {
 	}
 }
 
+func callerAttrs(skip int) []slog.Attr {
+	pc, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return nil
+	}
+
+	sourceFile := normalizeSourceFile(file)
+	sourceFunction := ""
+	if fn := runtime.FuncForPC(pc); fn != nil {
+		sourceFunction = fn.Name()
+	}
+
+	return []slog.Attr{
+		slog.String("source_file", sourceFile),
+		slog.Int("source_line", line),
+		slog.String("source_function", sourceFunction),
+	}
+}
+
+func normalizeSourceFile(file string) string {
+	wd, err := os.Getwd()
+	if err == nil {
+		if rel, relErr := filepath.Rel(wd, file); relErr == nil && rel != "" && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+
+	return filepath.ToSlash(file)
+}
+
 type stringHandler struct {
 	mu     sync.Mutex
 	writer io.Writer
@@ -213,6 +247,9 @@ func (h *stringHandler) Handle(_ context.Context, record slog.Record) error {
 	}
 	if userID := fields["user_id"]; userID != "" {
 		prefix += fmt.Sprintf("[%s]", userID)
+	}
+	if sourceFile := fields["source_file"]; sourceFile != "" {
+		prefix += fmt.Sprintf("[%s:%s]", sourceFile, fields["source_line"])
 	}
 
 	ts := record.Time
