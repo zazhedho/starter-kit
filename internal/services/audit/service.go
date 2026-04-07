@@ -45,10 +45,10 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 		OccurredAt:   occurredAt,
 		ActorUserID:  utils.NormalizeUUIDPointer(req.ActorUserID),
 		ActorRole:    strings.TrimSpace(req.ActorRole),
-		Action:       strings.TrimSpace(req.Action),
+		Action:       humanizeAuditValue(req.Action),
 		Resource:     strings.TrimSpace(req.Resource),
 		ResourceID:   strings.TrimSpace(req.ResourceID),
-		Status:       strings.TrimSpace(req.Status),
+		Status:       humanizeAuditValue(req.Status),
 		Message:      strings.TrimSpace(req.Message),
 		ErrorMessage: strings.TrimSpace(req.ErrorMessage),
 		RequestID:    strings.TrimSpace(req.RequestID),
@@ -114,6 +114,17 @@ func isSensitiveKey(key string) bool {
 		strings.Contains(k, "token") ||
 		strings.Contains(k, "secret") ||
 		strings.Contains(k, "otp")
+}
+
+func humanizeAuditValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+
+	value = strings.ReplaceAll(value, "_", " ")
+	value = strings.ReplaceAll(value, "-", " ")
+	return strings.Join(strings.Fields(value), " ")
 }
 
 var _ interfaceaudit.ServiceAuditInterface = (*AuditService)(nil)

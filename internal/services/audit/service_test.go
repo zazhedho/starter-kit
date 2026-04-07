@@ -4,6 +4,7 @@ import (
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/pkg/filter"
+	"strings"
 	"testing"
 )
 
@@ -79,5 +80,42 @@ func TestGetByIDReturnsRepositoryError(t *testing.T) {
 	_, err := service.GetByID("missing")
 	if err == nil || err.Error() != "not found" {
 		t.Fatalf("expected not found error, got %v", err)
+	}
+}
+
+func TestStoreSanitizesSensitivePayloadAndHumanizesValues(t *testing.T) {
+	repo := &auditRepoMock{}
+	service := NewAuditService(repo)
+
+	err := service.Store(domainaudit.AuditEvent{
+		Action:   "refresh_token",
+		Resource: "auth_token",
+		Status:   "failed",
+		AfterData: map[string]interface{}{
+			"email":        "user@example.com",
+			"password":     "SecretPassword1!",
+			"refreshToken": "sensitive-refresh-token",
+			"nested": map[string]interface{}{
+				"otp_code": "123456",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if repo.stored.Action != "refresh token" {
+		t.Fatalf("expected humanized action, got %q", repo.stored.Action)
+	}
+	if repo.stored.Resource != "auth_token" {
+		t.Fatalf("expected raw resource to remain queryable, got %q", repo.stored.Resource)
+	}
+	if repo.stored.Status != "failed" {
+		t.Fatalf("expected status failed, got %q", repo.stored.Status)
+	}
+	if strings.Contains(repo.stored.AfterData, "SecretPassword1!") ||
+		strings.Contains(repo.stored.AfterData, "sensitive-refresh-token") ||
+		strings.Contains(repo.stored.AfterData, "123456") {
+		t.Fatalf("expected sensitive values to be redacted, got %s", repo.stored.AfterData)
 	}
 }

@@ -275,7 +275,9 @@ func (r *Routes) SessionRoutes() {
 
 	repo := sessionRepo.NewSessionRepository(redisClient)
 	svc := sessionSvc.NewSessionService(repo)
-	h := sessionHandler.NewSessionHandler(svc)
+	repoAudit := auditRepo.NewAuditRepo(r.DB)
+	svcAudit := auditSvc.NewAuditService(repoAudit)
+	h := sessionHandler.NewSessionHandler(svc, svcAudit)
 	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
 	pRepo := permissionRepo.NewPermissionRepo(r.DB)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)

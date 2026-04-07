@@ -45,12 +45,13 @@ type AuditEvent struct {
 }
 
 const (
-	ActionCreate = "create"
-	ActionUpdate = "update"
-	ActionDelete = "delete"
-	ActionAssign = "assign"
-	ActionLogin  = "login"
-	ActionLogout = "logout"
+	ActionCreate  = "create"
+	ActionUpdate  = "update"
+	ActionDelete  = "delete"
+	ActionAssign  = "assign"
+	ActionLogin   = "login"
+	ActionLogout  = "logout"
+	ActionRefresh = "refresh"
 )
 
 const (
