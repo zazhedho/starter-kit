@@ -2,7 +2,6 @@ package servicerole
 
 import (
 	"errors"
-	domainpermission "starter-kit/internal/domain/permission"
 	domainrole "starter-kit/internal/domain/role"
 	"starter-kit/internal/dto"
 	interfacemenu "starter-kit/internal/interfaces/menu"
@@ -215,16 +214,6 @@ func (s *RoleService) deriveMenuIDsFromPermissions(permissionIds []string) ([]st
 	}
 
 	return serviceshared.ResolveAccessibleMenuIDs(activeMenus, resources), nil
-}
-
-func hasPermission(permissions []domainpermission.Permission, resource, action string) bool {
-	for _, permission := range permissions {
-		if permission.Resource == resource && permission.Action == action {
-			return true
-		}
-	}
-
-	return false
 }
 
 var _ interfacerole.ServiceRoleInterface = (*RoleService)(nil)

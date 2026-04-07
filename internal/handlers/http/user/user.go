@@ -159,11 +159,13 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionCreate,
-		Resource:   "user",
-		ResourceID: data.Id,
-		Status:     domainaudit.StatusSuccess,
-		Message:    "Registered user",
+		ActorUserID: data.Id,
+		ActorRole:   data.Role,
+		Action:      domainaudit.ActionCreate,
+		Resource:    "user",
+		ResourceID:  data.Id,
+		Status:      domainaudit.StatusSuccess,
+		Message:     "Registered user",
 		AfterData: map[string]interface{}{
 			"id":    data.Id,
 			"name":  data.Name,
@@ -504,11 +506,13 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	}
 
 	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionLogin,
-		Resource:   "auth",
-		ResourceID: loginUserID,
-		Status:     domainaudit.StatusSuccess,
-		Message:    "Login success",
+		ActorUserID: loginUserID,
+		ActorRole:   loggedInUser.Role,
+		Action:      domainaudit.ActionLogin,
+		Resource:    "auth",
+		ResourceID:  loginUserID,
+		Status:      domainaudit.StatusSuccess,
+		Message:     "Login success",
 		AfterData: map[string]interface{}{
 			"identifier": normalizedIdentifier,
 		},
@@ -595,11 +599,13 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	}
 
 	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionLogin,
-		Resource:   "auth",
-		ResourceID: user.Id,
-		Status:     domainaudit.StatusSuccess,
-		Message:    successMessage,
+		ActorUserID: user.Id,
+		ActorRole:   user.Role,
+		Action:      domainaudit.ActionLogin,
+		Resource:    "auth",
+		ResourceID:  user.Id,
+		Status:      domainaudit.StatusSuccess,
+		Message:     successMessage,
 		AfterData: map[string]interface{}{
 			"provider":    "google",
 			"email":       user.Email,
@@ -645,6 +651,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 	if !strings.EqualFold(utils.InterfaceString(tokenClaims["token_type"]), "refresh") {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
+			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
@@ -660,6 +668,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	_, err = h.BlacklistRepo.GetByToken(req.RefreshToken)
 	if err == nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
+			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
@@ -673,6 +683,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
+			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
@@ -687,9 +699,12 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	}
 
 	userID := utils.InterfaceString(tokenClaims["user_id"])
+	userRole := utils.InterfaceString(tokenClaims["role"])
 	user, err := h.Service.GetUserById(userID)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  userID,
+			ActorRole:    userRole,
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			ResourceID:   userID,
@@ -711,6 +726,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	accessToken, err := utils.GenerateJwtWithClaims(&user, logId.String(), claimsOverride)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  userID,
+			ActorRole:    user.Role,
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			ResourceID:   userID,
@@ -728,6 +745,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	refreshToken, err := utils.GenerateRefreshJwt(&user, logId.String(), claimsOverride)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  userID,
+			ActorRole:    user.Role,
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			ResourceID:   userID,
@@ -746,6 +765,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		session, sessionErr := h.SessionSvc.GetSessionByRefreshToken(context.Background(), req.RefreshToken)
 		if sessionErr != nil {
 			h.writeAudit(ctx, domainaudit.AuditEvent{
+				ActorUserID:  userID,
+				ActorRole:    user.Role,
 				Action:       domainaudit.ActionRefresh,
 				Resource:     "auth_token",
 				ResourceID:   userID,
@@ -763,6 +784,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		refreshExpAt := time.Now().Add(time.Hour * time.Duration(utils.GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)))
 		if sessionErr = h.SessionSvc.RotateSessionTokens(context.Background(), session.SessionID, accessToken, refreshToken, refreshExpAt); sessionErr != nil {
 			h.writeAudit(ctx, domainaudit.AuditEvent{
+				ActorUserID:  userID,
+				ActorRole:    user.Role,
 				Action:       domainaudit.ActionRefresh,
 				Resource:     "auth_token",
 				ResourceID:   userID,
@@ -783,6 +806,8 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 	if err = h.Service.LogoutUser(req.RefreshToken); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  userID,
+			ActorRole:    user.Role,
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			ResourceID:   userID,
@@ -798,11 +823,13 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	}
 
 	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionRefresh,
-		Resource:   "auth_token",
-		ResourceID: userID,
-		Status:     domainaudit.StatusSuccess,
-		Message:    "Renewed login session",
+		ActorUserID: userID,
+		ActorRole:   user.Role,
+		Action:      domainaudit.ActionRefresh,
+		Resource:    "auth_token",
+		ResourceID:  userID,
+		Status:      domainaudit.StatusSuccess,
+		Message:     "Renewed login session",
 	})
 
 	res := response.Response(http.StatusOK, "Refresh token rotated successfully", logId, buildAuthTokenResponse(accessToken, refreshToken))

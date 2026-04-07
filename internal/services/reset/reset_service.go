@@ -2,10 +2,6 @@ package servicereset
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	interfacereset "starter-kit/internal/interfaces/reset"
@@ -123,37 +119,6 @@ func (s *ServiceReset) VerifyReset(ctx context.Context, token string) (string, e
 	_ = s.Repo.ClearCooldown(ctx, email)
 	_ = s.Repo.ClearSendCount(ctx, email)
 	return email, nil
-}
-
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
-
-func generateResetToken() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-func hashToken(token, secret string) string {
-	h := sha256.Sum256([]byte(token + secret))
-	return hex.EncodeToString(h[:])
-}
-
-func buildResetURL(template, token string) string {
-	template = strings.TrimSpace(template)
-	if template == "" {
-		return ""
-	}
-	if strings.Contains(template, "{token}") {
-		return strings.ReplaceAll(template, "{token}", token)
-	}
-	if strings.Contains(template, "?") {
-		return template + "&token=" + token
-	}
-	return template + "?token=" + token
 }
 
 var _ interfacereset.ServicePasswordResetInterface = (*ServiceReset)(nil)

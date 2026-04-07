@@ -41,7 +41,14 @@ func (m *auditRepoMock) Delete(id string) error                   { return nil }
 func TestGetAllDelegatesToRepository(t *testing.T) {
 	repo := &auditRepoMock{
 		items: []domainaudit.AuditTrail{
-			{ID: "audit-1", Action: "create", Resource: "users", Status: domainaudit.StatusSuccess},
+			{
+				ID:        "audit-1",
+				Action:    "refresh token",
+				Resource:  "auth_token",
+				Status:    domainaudit.StatusSuccess,
+				Message:   "Renewed login session",
+				AfterData: `{"email":"user@example.com"}`,
+			},
 		},
 		total: 1,
 	}
@@ -57,6 +64,16 @@ func TestGetAllDelegatesToRepository(t *testing.T) {
 	if len(items) != 1 || items[0].ID != "audit-1" {
 		t.Fatalf("unexpected items: %+v", items)
 	}
+	if items[0].ResourceLabel != "Auth Token" {
+		t.Fatalf("expected readable resource label, got %q", items[0].ResourceLabel)
+	}
+	if items[0].Summary != "Success: Renewed login session" {
+		t.Fatalf("expected readable summary, got %q", items[0].Summary)
+	}
+	after, ok := items[0].AfterData.(map[string]interface{})
+	if !ok || after["email"] != "user@example.com" {
+		t.Fatalf("expected decoded after data, got %#v", items[0].AfterData)
+	}
 }
 
 func TestGetByIDDelegatesToRepository(t *testing.T) {
@@ -71,6 +88,9 @@ func TestGetByIDDelegatesToRepository(t *testing.T) {
 	}
 	if item.ID != "audit-1" {
 		t.Fatalf("expected audit-1, got %s", item.ID)
+	}
+	if item.ActionLabel != "Login" {
+		t.Fatalf("expected action label Login, got %q", item.ActionLabel)
 	}
 }
 

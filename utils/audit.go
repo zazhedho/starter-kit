@@ -27,6 +27,15 @@ func GetActorContext(ctx *gin.Context) (string, string) {
 		return "", ""
 	}
 
+	isImpersonated, _ := authData["is_impersonated"].(bool)
+	if isImpersonated {
+		originalUserID := strings.TrimSpace(InterfaceString(authData["original_user_id"]))
+		originalRole := strings.TrimSpace(InterfaceString(authData["original_role"]))
+		if originalUserID != "" {
+			return originalUserID, originalRole
+		}
+	}
+
 	userID := strings.TrimSpace(InterfaceString(authData["user_id"]))
 	role := strings.TrimSpace(InterfaceString(authData["role"]))
 	return userID, role
@@ -44,10 +53,13 @@ func GetImpersonationMetadata(ctx *gin.Context) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"is_impersonated":   true,
-		"original_user_id":  strings.TrimSpace(InterfaceString(authData["original_user_id"])),
-		"original_username": strings.TrimSpace(InterfaceString(authData["original_username"])),
-		"original_role":     strings.TrimSpace(InterfaceString(authData["original_role"])),
+		"is_impersonated":      true,
+		"original_user_id":     strings.TrimSpace(InterfaceString(authData["original_user_id"])),
+		"original_username":    strings.TrimSpace(InterfaceString(authData["original_username"])),
+		"original_role":        strings.TrimSpace(InterfaceString(authData["original_role"])),
+		"impersonated_user_id": strings.TrimSpace(InterfaceString(authData["user_id"])),
+		"impersonated_user":    strings.TrimSpace(InterfaceString(authData["username"])),
+		"impersonated_role":    strings.TrimSpace(InterfaceString(authData["role"])),
 	}
 }
 

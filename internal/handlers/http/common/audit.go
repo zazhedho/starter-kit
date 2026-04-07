@@ -16,8 +16,12 @@ func WriteAudit(ctx *gin.Context, auditService interfaceaudit.ServiceAuditInterf
 	}
 
 	actorUserID, actorRole := utils.GetActorContext(ctx)
-	event.ActorUserID = actorUserID
-	event.ActorRole = actorRole
+	if event.ActorUserID == "" && actorUserID != "" {
+		event.ActorUserID = actorUserID
+	}
+	if event.ActorRole == "" && actorRole != "" {
+		event.ActorRole = actorRole
+	}
 	event.RequestID = utils.GetRequestID(ctx)
 	event.IPAddress = ctx.ClientIP()
 	event.UserAgent = ctx.GetHeader("User-Agent")

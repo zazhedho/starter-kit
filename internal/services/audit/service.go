@@ -3,6 +3,7 @@ package serviceaudit
 import (
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
+	"starter-kit/internal/dto"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
@@ -63,68 +64,22 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 	return s.AuditRepo.Store(data)
 }
 
-func (s *AuditService) GetAll(params filter.BaseParams) ([]domainaudit.AuditTrail, int64, error) {
-	return s.AuditRepo.GetAll(params)
-}
-
-func (s *AuditService) GetByID(id string) (domainaudit.AuditTrail, error) {
-	return s.AuditRepo.GetByID(id)
-}
-
-func sanitizePayload(input interface{}) interface{} {
-	normalized := utils.NormalizePayload(input)
-	return sanitizeValue(normalized)
-}
-
-func sanitizeValue(input interface{}) interface{} {
-	switch v := input.(type) {
-	case map[string]interface{}:
-		return sanitizeMap(v)
-	case []interface{}:
-		return sanitizeSlice(v)
-	default:
-		return v
-	}
-}
-
-func sanitizeMap(in map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(in))
-	for k, val := range in {
-		if isSensitiveKey(k) {
-			out[k] = "[REDACTED]"
-			continue
-		}
-
-		out[k] = sanitizeValue(val)
-	}
-	return out
-}
-
-func sanitizeSlice(values []interface{}) []interface{} {
-	out := make([]interface{}, 0, len(values))
-	for _, val := range values {
-		out = append(out, sanitizeValue(val))
-	}
-	return out
-}
-
-func isSensitiveKey(key string) bool {
-	k := strings.ToLower(strings.TrimSpace(key))
-	return strings.Contains(k, "password") ||
-		strings.Contains(k, "token") ||
-		strings.Contains(k, "secret") ||
-		strings.Contains(k, "otp")
-}
-
-func humanizeAuditValue(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return value
+func (s *AuditService) GetAll(params filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {
+	items, total, err := s.AuditRepo.GetAll(params)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	value = strings.ReplaceAll(value, "_", " ")
-	value = strings.ReplaceAll(value, "-", " ")
-	return strings.Join(strings.Fields(value), " ")
+	return toAuditResponses(items), total, nil
+}
+
+func (s *AuditService) GetByID(id string) (dto.AuditTrailResponse, error) {
+	item, err := s.AuditRepo.GetByID(id)
+	if err != nil {
+		return dto.AuditTrailResponse{}, err
+	}
+
+	return toAuditResponse(item), nil
 }
 
 var _ interfaceaudit.ServiceAuditInterface = (*AuditService)(nil)
