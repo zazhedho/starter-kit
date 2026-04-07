@@ -44,8 +44,7 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		tokenString, dataJWT, err := utils.JwtClaims(ctx)
 		if err != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid Token: %s; Error: %s;", logPrefix, tokenString, err.Error()))
-			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-			res.Error = err.Error()
+			res := response.Unauthorized(logId, "Invalid or expired token. Please login again.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
 			return
 		}
@@ -54,8 +53,7 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		tokenType := strings.TrimSpace(utils.InterfaceString(dataJWT["token_type"]))
 		if strings.EqualFold(tokenType, "refresh") {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Refresh token used on protected route", logPrefix))
-			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-			res.Error = "invalid token type"
+			res := response.Unauthorized(logId, "Invalid token type. Please use an access token.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
 			return
 		}
@@ -63,16 +61,14 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		_, err = m.BlacklistRepo.GetByToken(tokenString)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; blacklistRepo.GetByToken; Error: %+v", logPrefix, err))
-			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-			res.Error = err.Error()
+			res := response.InternalServerError(logId)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
 			return
 		}
 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid Token: %s; Error: token is blacklisted;", logPrefix, tokenString))
-			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-			res.Error = "Please login and try again"
+			res := response.Unauthorized(logId, "Your session is no longer valid. Please login again.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
 			return
 		}
@@ -98,16 +94,14 @@ func (m *Middleware) RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		authData, exists := ctx.Get(utils.CtxKeyAuthData)
 		if !exists {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; AuthData not found", logPrefix))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = "auth data not found"
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
 		dataJWT, ok := authData.(map[string]interface{})
 		if !ok {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = "invalid auth data type"
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
@@ -115,8 +109,7 @@ func (m *Middleware) RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		userRole := strings.TrimSpace(utils.InterfaceString(dataJWT["role"]))
 		if userRole == "" {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; there is no role user", logPrefix))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = "there is no role user"
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
@@ -129,8 +122,7 @@ func (m *Middleware) RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		isAllowed := slices.Contains(allowedRoles, userRole)
 		if !isAllowed {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; User with role '%s' tried to access a restricted route;", logPrefix, userRole))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = response.Errors{Code: http.StatusForbidden, Message: messages.AccessDenied}
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
@@ -152,16 +144,14 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 		authData, exists := ctx.Get(utils.CtxKeyAuthData)
 		if !exists {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; AuthData not found", logPrefix))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = "auth data not found"
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
 		dataJWT, ok := authData.(map[string]interface{})
 		if !ok {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = "invalid auth data type"
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
@@ -169,8 +159,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 		userRole := strings.TrimSpace(utils.InterfaceString(dataJWT["role"]))
 		if userRole == "" {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; there is no role user", logPrefix))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = "there is no role user"
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
@@ -184,8 +173,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 		userId := strings.TrimSpace(utils.InterfaceString(dataJWT["user_id"]))
 		if userId == "" {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid token claims: user_id is empty", logPrefix))
-			res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-			res.Error = "invalid token claims"
+			res := response.Unauthorized(logId, "Invalid or expired token. Please login again.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
 			return
 		}
@@ -194,15 +182,13 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))
-				res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-				res.Error = response.Errors{Code: http.StatusForbidden, Message: messages.AccessDenied}
+				res := response.Forbidden(logId, messages.AccessDenied)
 				ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 				return
 			}
 
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
-			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-			res.Error = "failed to check permissions"
+			res := response.InternalServerError(logId)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
 			return
 		}
@@ -220,8 +206,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 
 		if !hasPermission {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; User '%s' lacks permission '%s:%s'", logPrefix, userId, targetResource, targetAction))
-			res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-			res.Error = response.Errors{Code: http.StatusForbidden, Message: messages.AccessDenied}
+			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}

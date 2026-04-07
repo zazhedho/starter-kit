@@ -1,6 +1,7 @@
 package handleruser
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	domainaudit "starter-kit/internal/domain/audit"
@@ -9,10 +10,12 @@ import (
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
@@ -89,6 +92,46 @@ func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]
 	}
 
 	return data
+}
+
+func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiResponse) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
+	}
+
+	errMsg := err.Error()
+	switch {
+	case strings.HasPrefix(errMsg, "access denied:"),
+		strings.Contains(errMsg, "superadmin"):
+		return http.StatusForbidden, response.Forbidden(logId, messages.AccessDenied)
+	case strings.Contains(errMsg, "already exists"):
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgExists, logId, errMsg)
+	case strings.HasPrefix(errMsg, "invalid role:"),
+		strings.HasPrefix(errMsg, "password must "),
+		strings.HasPrefix(errMsg, "new password must "):
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, errMsg)
+	default:
+		return http.StatusInternalServerError, response.InternalServerError(logId)
+	}
+}
+
+func impersonationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiResponse) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
+	}
+
+	errMsg := err.Error()
+	switch {
+	case strings.HasPrefix(errMsg, "cannot impersonate"):
+		return http.StatusForbidden, response.Forbidden(logId, messages.AccessDenied)
+	case strings.HasPrefix(errMsg, "cannot start"),
+		strings.HasPrefix(errMsg, "target user id"),
+		strings.HasPrefix(errMsg, "original user id"),
+		strings.HasPrefix(errMsg, "current session"):
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, errMsg)
+	default:
+		return http.StatusInternalServerError, response.InternalServerError(logId)
+	}
 }
 
 func buildImpersonationClaimsOverrideFromClaims(claims map[string]interface{}) *utils.AppClaims {

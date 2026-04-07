@@ -5,7 +5,6 @@ import (
 	"net/http"
 	interfacelocation "starter-kit/internal/interfaces/location"
 	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
 
@@ -32,8 +31,7 @@ func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 	data, err := h.Service.GetProvince(year)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetProvince; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -63,8 +61,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 	data, err := h.Service.GetCity(year, lvl, pro)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetCity; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -102,8 +99,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 	data, err := h.Service.GetDistrict(year, lvl, pro, kab)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetDistrict; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -149,8 +145,7 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 	data, err := h.Service.GetVillage(year, lvl, pro, kab, kec)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetVillage; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}

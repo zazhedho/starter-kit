@@ -36,8 +36,7 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 	userID, ok := ctx.Get("userId")
 	if !ok {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
-		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-		res.Error = "user not authenticated"
+		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
 		ctx.JSON(http.StatusUnauthorized, res)
 		return
 	}
@@ -52,8 +51,7 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 	sessions, err := h.Service.GetUserSessions(context.Background(), userID.(string), currentSessionID)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserSessions; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -87,8 +85,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 	userID, ok := ctx.Get("userId")
 	if !ok {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
-		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-		res.Error = "user not authenticated"
+		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
 		ctx.JSON(http.StatusUnauthorized, res)
 		return
 	}
@@ -123,8 +120,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			},
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; unauthorized session revocation attempt", logPrefix))
-		res := response.Response(http.StatusForbidden, messages.MsgDenied, logId, nil)
-		res.Error = "unauthorized"
+		res := response.Forbidden(logId, messages.AccessDenied)
 		ctx.JSON(http.StatusForbidden, res)
 		return
 	}
@@ -139,8 +135,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.DestroySession; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -164,8 +159,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	userID, ok := ctx.Get("userId")
 	if !ok {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
-		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
-		res.Error = "user not authenticated"
+		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
 		ctx.JSON(http.StatusUnauthorized, res)
 		return
 	}
@@ -181,8 +175,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 			ErrorMessage: "Could not identify the current session",
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetSessionByToken; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = "failed to get current session"
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -197,8 +190,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.DestroyOtherSessions; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}

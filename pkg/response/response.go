@@ -51,6 +51,24 @@ func Response(code int, msg string, logId uuid.UUID, data interface{}) *ApiRespo
 	return res
 }
 
+func ErrorResponse(code int, msg string, logId uuid.UUID, publicError string) *ApiResponse {
+	res := Response(code, msg, logId, nil)
+	res.Error = Errors{Code: code, Message: publicError}
+	return res
+}
+
+func InternalServerError(logId uuid.UUID) *ApiResponse {
+	return ErrorResponse(http.StatusInternalServerError, messages.MsgInternal, logId, "Internal server error")
+}
+
+func Unauthorized(logId uuid.UUID, publicError string) *ApiResponse {
+	return ErrorResponse(http.StatusUnauthorized, messages.MsgFail, logId, publicError)
+}
+
+func Forbidden(logId uuid.UUID, publicError string) *ApiResponse {
+	return ErrorResponse(http.StatusForbidden, messages.MsgDenied, logId, publicError)
+}
+
 func PaginationResponse(code, total, page, perPage int, logId uuid.UUID, data interface{}) *PaginatedResponse {
 	res := new(PaginatedResponse)
 

@@ -5,6 +5,7 @@ const (
 	InvalidHeader  = "Invalid header format. Please ensure the structure is correct and matches the expected data format."
 	MsgErr         = "Something Went Wrong"
 	MsgFail        = "Something Went Wrong"
+	MsgInternal    = "Something went wrong. Please contact support with the log ID."
 	MsgDenied      = "Access Denied"
 	MsgForbidden   = "Forbidden"
 	MsgCredential  = "Invalid Credentials. Please input the correct email or phone and password, then try again."

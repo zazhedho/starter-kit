@@ -85,8 +85,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	otpEnabled, err := h.isRuntimeConfigEnabled(registerOTPConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -153,8 +152,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -196,8 +194,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	otpEnabled, err := h.isRuntimeConfigEnabled(registerOTPConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -302,19 +299,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 			},
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AdminCreateUser; Error: %+v", logPrefix, err))
-		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "already exists") {
-			res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
-			res.Error = response.Errors{Code: http.StatusBadRequest, Message: err.Error()}
-			ctx.JSON(http.StatusBadRequest, res)
-			return
-		}
-
-		statusCode := http.StatusBadRequest
-		if strings.HasPrefix(err.Error(), "access denied:") {
-			statusCode = http.StatusForbidden
-		}
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		statusCode, res := userMutationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -454,8 +439,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 				"identifier": normalizedIdentifier,
 			},
 		})
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -479,8 +463,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		refreshToken, err = utils.GenerateRefreshJwt(&loggedInUser, logId.String(), nil)
 		if err != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateRefreshJwt; ERROR: %s;", logPrefix, err))
-			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-			res.Error = err.Error()
+			res := response.InternalServerError(logId)
 			ctx.JSON(http.StatusInternalServerError, res)
 			return
 		}
@@ -557,8 +540,15 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 			statusCode = http.StatusUnauthorized
 		}
 
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
+		switch {
+		case errors.Is(err, serviceuser.ErrGoogleNotConfigured):
+			res = response.ErrorResponse(statusCode, messages.MsgFail, logId, "Google login is not configured.")
+		case errors.Is(err, serviceuser.ErrGoogleTokenInvalid):
+			res = response.ErrorResponse(statusCode, messages.MsgFail, logId, "Invalid Google token.")
+		case errors.Is(err, serviceuser.ErrGoogleEmailMissing):
+			res = response.ErrorResponse(statusCode, messages.MsgFail, logId, "Google account email is not available.")
+		}
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -566,8 +556,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	accessToken, err := utils.GenerateJwt(&user, logId.String())
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateJwt; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -575,8 +564,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	refreshToken, err := utils.GenerateRefreshJwt(&user, logId.String(), nil)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateRefreshJwt; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -692,8 +680,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BlacklistRepo.GetByToken; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = "failed to validate refresh token"
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -736,8 +723,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateJwtWithClaims; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -755,8 +741,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GenerateRefreshJwt; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -797,8 +782,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 				},
 			})
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; SessionSvc.RotateSessionTokens; ERROR: %s;", logPrefix, sessionErr))
-			res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-			res.Error = "failed to rotate session tokens"
+			res := response.InternalServerError(logId)
 			ctx.JSON(http.StatusInternalServerError, res)
 			return
 		}
@@ -816,8 +800,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.LogoutUser(refresh); ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = "failed to revoke previous refresh token"
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -850,8 +833,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 			ErrorMessage: "token not found",
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; token not found in context", logPrefix))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = "token not found"
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -874,8 +856,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.LogoutUser; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -910,8 +891,7 @@ func (h *HandlerUser) GetUserById(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -937,8 +917,7 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -991,15 +970,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ImpersonateUser; ERROR: %s;", logPrefix, err))
 
-		statusCode := http.StatusBadRequest
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			statusCode = http.StatusNotFound
-		} else if strings.HasPrefix(err.Error(), "cannot impersonate") {
-			statusCode = http.StatusForbidden
-		}
-
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		statusCode, res := impersonationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -1050,13 +1021,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.StopImpersonation; ERROR: %s;", logPrefix, err))
 
-		statusCode := http.StatusBadRequest
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			statusCode = http.StatusNotFound
-		}
-
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		statusCode, res := impersonationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -1094,8 +1059,7 @@ func (h *HandlerUser) GetAllUsers(ctx *gin.Context) {
 	users, totalData, err := h.Service.GetAllUsers(params, currentUserRole)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetAllUsers; ERROR: %+v;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -1143,12 +1107,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 			return
 		}
 
-		statusCode := http.StatusBadRequest
-		if strings.HasPrefix(err.Error(), "access denied:") {
-			statusCode = http.StatusForbidden
-		}
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		statusCode, res := userMutationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -1211,12 +1170,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 			return
 		}
 
-		statusCode := http.StatusBadRequest
-		if strings.HasPrefix(err.Error(), "access denied:") {
-			statusCode = http.StatusForbidden
-		}
-		res := response.Response(statusCode, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		statusCode, res := userMutationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -1279,9 +1233,8 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
-		ctx.JSON(http.StatusBadRequest, res)
+		statusCode, res := userMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -1317,8 +1270,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 	emailResetEnabled, err := h.isRuntimeConfigEnabled(passwordResetEmailConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -1348,10 +1300,10 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 					return
 				}
 				statusCode := http.StatusInternalServerError
-				message := "failed to send password reset email"
+				message := "Failed to send password reset email. Please contact support with the log ID."
 				if errors.Is(err, servicereset.ErrResetNotConfigured) || errors.Is(err, servicereset.ErrResetDeliveryFailed) {
 					statusCode = http.StatusServiceUnavailable
-					message = err.Error()
+					message = "Password reset email service is temporarily unavailable."
 				}
 				res := response.Response(statusCode, messages.MsgFail, logId, nil)
 				res.Error = response.Errors{Code: statusCode, Message: message}
@@ -1387,8 +1339,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 			},
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ForgotPassword; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -1424,8 +1375,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 	emailResetEnabled, err := h.isRuntimeConfigEnabled(passwordResetEmailConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -1468,9 +1418,8 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 					"email": email,
 				},
 			})
-			res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
-			res.Error = err.Error()
-			ctx.JSON(http.StatusBadRequest, res)
+			statusCode, res := userMutationErrorResponse(logId, err)
+			ctx.JSON(statusCode, res)
 			return
 		}
 
@@ -1498,9 +1447,8 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.ResetPassword; ERROR: %s;", logPrefix, err))
-		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
-		ctx.JSON(http.StatusBadRequest, res)
+		statusCode, res := userMutationErrorResponse(logId, err)
+		ctx.JSON(statusCode, res)
 		return
 	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -1542,8 +1490,7 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -1589,8 +1536,7 @@ func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 			return
 		}
 
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}

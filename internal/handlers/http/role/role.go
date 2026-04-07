@@ -55,8 +55,7 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Create; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -83,7 +82,7 @@ func (h *RoleHandler) GetByID(ctx *gin.Context) {
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByIDWithDetails; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Role not found", logId, nil)
-		res.Error = err.Error()
+		res.Error = response.Errors{Code: http.StatusNotFound, Message: "role not found"}
 		ctx.JSON(http.StatusNotFound, res)
 		return
 	}
@@ -104,7 +103,7 @@ func (h *RoleHandler) GetAll(ctx *gin.Context) {
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = err.Error()
+		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "invalid query parameters"}
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
@@ -112,8 +111,7 @@ func (h *RoleHandler) GetAll(ctx *gin.Context) {
 	data, total, err := h.Service.GetAll(params, currentUserRole)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -153,8 +151,7 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -190,8 +187,7 @@ func (h *RoleHandler) Delete(ctx *gin.Context) {
 			BeforeData:   before,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -248,8 +244,10 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 		if len(err.Error()) >= len("access denied:") && err.Error()[:len("access denied:")] == "access denied:" {
 			statusCode = http.StatusForbidden
 		}
-		res := response.Response(statusCode, err.Error(), logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
+		if statusCode == http.StatusForbidden {
+			res = response.Forbidden(logId, messages.AccessDenied)
+		}
 		ctx.JSON(statusCode, res)
 		return
 	}
@@ -308,8 +306,10 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 		if len(err.Error()) >= len("access denied:") && err.Error()[:len("access denied:")] == "access denied:" {
 			statusCode = http.StatusForbidden
 		}
-		res := response.Response(statusCode, err.Error(), logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
+		if statusCode == http.StatusForbidden {
+			res = response.Forbidden(logId, messages.AccessDenied)
+		}
 		ctx.JSON(statusCode, res)
 		return
 	}

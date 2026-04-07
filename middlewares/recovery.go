@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
 
@@ -15,6 +14,6 @@ func ErrorHandler(c *gin.Context, err any) {
 	logId := utils.GenerateLogId(c)
 	logger.WriteLogWithContext(c, logger.LogLevelPanic, fmt.Sprintf("RECOVERY; Error: %+v;", err))
 
-	res := response.Response(http.StatusInternalServerError, fmt.Sprintf("%s (%s)", messages.MsgFail, logId.String()), logId, nil)
+	res := response.InternalServerError(logId)
 	c.AbortWithStatusJSON(http.StatusInternalServerError, res)
 }

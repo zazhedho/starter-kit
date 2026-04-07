@@ -38,7 +38,7 @@ func (h *MenuHandler) GetByID(ctx *gin.Context) {
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByID; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Menu not found", logId, nil)
-		res.Error = err.Error()
+		res.Error = response.Errors{Code: http.StatusNotFound, Message: "menu not found"}
 		ctx.JSON(http.StatusNotFound, res)
 		return
 	}
@@ -56,7 +56,7 @@ func (h *MenuHandler) GetAll(ctx *gin.Context) {
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = err.Error()
+		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "invalid query parameters"}
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
@@ -64,8 +64,7 @@ func (h *MenuHandler) GetAll(ctx *gin.Context) {
 	data, total, err := h.Service.GetAll(params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -82,8 +81,7 @@ func (h *MenuHandler) GetActiveMenus(ctx *gin.Context) {
 	data, err := h.Service.GetActiveMenus()
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetActiveMenus; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -120,8 +118,7 @@ func (h *MenuHandler) GetUserMenus(ctx *gin.Context) {
 	data, err := h.Service.GetUserMenus(userId.(string))
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserMenus; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
@@ -161,8 +158,7 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 			AfterData:    req,
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Update; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusInternalServerError, err.Error(), logId, nil)
-		res.Error = err.Error()
+		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
