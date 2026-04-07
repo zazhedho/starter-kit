@@ -32,3 +32,25 @@ FROM roles r
 JOIN permissions p ON p.resource = 'configs'
 WHERE r.name IN ('admin', 'superadmin')
 ON CONFLICT DO NOTHING;
+
+INSERT INTO app_configs (id, config_key, display_name, category, value, description, is_active)
+VALUES
+    (
+        gen_random_uuid(),
+        'auth.register_otp_enabled',
+        'Register OTP Enabled',
+        'auth',
+        'false',
+        'Enable OTP verification for public user registration.',
+        TRUE
+    ),
+    (
+        gen_random_uuid(),
+        'auth.password_reset_email_enabled',
+        'Password Reset Email Enabled',
+        'auth',
+        'false',
+        'Enable password reset tokens to be sent through the email sender service.',
+        TRUE
+    )
+ON CONFLICT (config_key) DO NOTHING;

@@ -23,5 +23,6 @@ type ServiceUserInterface interface {
 	ChangePassword(id string, req dto.ChangePassword) (domainuser.Users, error)
 	ForgotPassword(req dto.ForgotPasswordRequest) (string, error)
 	ResetPassword(req dto.ResetPasswordRequest) error
+	ResetPasswordByEmail(email, newPassword string) error
 	Delete(id string) error
 }

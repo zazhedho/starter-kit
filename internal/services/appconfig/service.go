@@ -42,7 +42,8 @@ func (s *AppConfigService) Update(id string, req dto.UpdateAppConfig) (domainapp
 	if req.IsActive != nil {
 		config.IsActive = *req.IsActive
 	}
-	config.UpdatedAt = new(time.Now())
+	now := time.Now()
+	config.UpdatedAt = &now
 
 	if err := s.Repo.Update(config); err != nil {
 		return domainappconfig.AppConfig{}, err

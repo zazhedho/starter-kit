@@ -517,3 +517,36 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 		t.Fatal("expected generated password hash for google user")
 	}
 }
+
+func TestResetPasswordByEmailNormalizesEmailAndUpdatesPassword(t *testing.T) {
+	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash old password: %v", err)
+	}
+
+	userRepo := &userRepoMock{
+		emailUser: domainuser.Users{
+			Id:       "user-1",
+			Email:    "jane.doe@example.com",
+			Password: string(oldPassword),
+			Role:     utils.RoleViewer,
+		},
+	}
+	service := &ServiceUser{
+		UserRepo:       userRepo,
+		BlacklistRepo:  &authRepoMock{},
+		RoleRepo:       &roleRepoUserMock{},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	if err := service.ResetPasswordByEmail(" Jane.Doe@Example.COM ", "NewPassword1!"); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if userRepo.updated.Email != "jane.doe@example.com" {
+		t.Fatalf("expected existing normalized email to be updated, got %s", userRepo.updated.Email)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(userRepo.updated.Password), []byte("NewPassword1!")); err != nil {
+		t.Fatalf("expected password to be updated, got %v", err)
+	}
+}

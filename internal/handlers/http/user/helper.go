@@ -15,6 +15,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	defaultConfigRegisterOTPEnabled        = "auth.register_otp_enabled"
+	defaultConfigPasswordResetEmailEnabled = "auth.password_reset_email_enabled"
+)
+
 func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.UUID, ttl time.Duration) {
 	if ttl > 0 {
 		ctx.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
@@ -30,13 +35,49 @@ func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.U
 	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
 }
 
+func (h *HandlerUser) respondThrottle(ctx *gin.Context, logId uuid.UUID, ttl time.Duration, message string) {
+	if ttl > 0 {
+		ctx.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
+	}
+
+	if message == "" {
+		message = "Too many requests. Please try again later."
+	}
+
+	res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
+	res.Error = response.Errors{Code: http.StatusTooManyRequests, Message: message}
+	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
+}
+
 func (h *HandlerUser) writeAudit(ctx *gin.Context, event domainaudit.AuditEvent) {
 	handlercommon.WriteAudit(ctx, h.AuditService, event, "UserHandler")
 }
 
+func (h *HandlerUser) isRuntimeConfigEnabled(configKey string, fallback bool) (bool, error) {
+	if h.AppConfigService == nil {
+		return fallback, nil
+	}
+	return h.AppConfigService.IsEnabled(configKey, fallback)
+}
+
+func registerOTPConfigKey() string {
+	return utils.GetEnv("CONFIG_REGISTER_OTP", defaultConfigRegisterOTPEnabled)
+}
+
+func passwordResetEmailConfigKey() string {
+	return utils.GetEnv("CONFIG_PASSWORD_RESET_EMAIL", defaultConfigPasswordResetEmailEnabled)
+}
+
+func authEmailAppName() string {
+	appName := utils.GetEnv("AUTH_EMAIL_APP_NAME", "")
+	if appName != "" {
+		return appName
+	}
+	return utils.GetEnv("APP_NAME", "STARTER-KIT")
+}
+
 func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]interface{} {
 	data := map[string]interface{}{
-		"token":            accessToken,
 		"access_token":     accessToken,
 		"token_type":       "Bearer",
 		"expires_in_hours": utils.GetEnv("JWT_EXP", 24),

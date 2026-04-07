@@ -412,6 +412,30 @@ func (s *ServiceUser) ResetPassword(req dto.ResetPasswordRequest) error {
 	return nil
 }
 
+func (s *ServiceUser) ResetPasswordByEmail(email, newPassword string) error {
+	if err := ValidatePasswordStrength(newPassword); err != nil {
+		return err
+	}
+
+	data, err := s.UserRepo.GetByEmail(utils.SanitizeEmail(email))
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	data.Password = string(hashedPwd)
+
+	if err = s.UserRepo.Update(data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *ServiceUser) Delete(id string) error {
 	return s.UserRepo.Delete(id)
 }

@@ -21,7 +21,9 @@ import (
 	auditRepo "starter-kit/internal/repositories/audit"
 	authRepo "starter-kit/internal/repositories/auth"
 	menuRepo "starter-kit/internal/repositories/menu"
+	otpRepo "starter-kit/internal/repositories/otp"
 	permissionRepo "starter-kit/internal/repositories/permission"
+	resetRepo "starter-kit/internal/repositories/reset"
 	roleRepo "starter-kit/internal/repositories/role"
 	sessionRepo "starter-kit/internal/repositories/session"
 	userRepo "starter-kit/internal/repositories/user"
@@ -29,12 +31,16 @@ import (
 	auditSvc "starter-kit/internal/services/audit"
 	locationSvc "starter-kit/internal/services/location"
 	menuSvc "starter-kit/internal/services/menu"
+	otpSvc "starter-kit/internal/services/otp"
 	permissionSvc "starter-kit/internal/services/permission"
+	resetSvc "starter-kit/internal/services/reset"
 	roleSvc "starter-kit/internal/services/role"
 	sessionSvc "starter-kit/internal/services/session"
 	userSvc "starter-kit/internal/services/user"
 	"starter-kit/middlewares"
+	"starter-kit/pkg/config"
 	"starter-kit/pkg/logger"
+	"starter-kit/pkg/mailer"
 	"starter-kit/pkg/security"
 	"starter-kit/utils"
 )
@@ -73,10 +79,14 @@ func (r *Routes) UserRoutes() {
 	var userSessionSvc interfacesession.ServiceSessionInterface
 	repoAudit := auditRepo.NewAuditRepo(r.DB)
 	svcAudit := auditSvc.NewAuditService(repoAudit)
+	repoAppConfig := appConfigRepo.NewAppConfigRepo(r.DB)
+	svcAppConfig := appConfigSvc.NewAppConfigService(repoAppConfig)
 
 	// Setup login limiter if Redis is available
 	redisClient := database.GetRedisClient()
 	var loginLimiter security.LoginLimiter
+	var registerOTPService = otpSvc.NewOTPService(nil, nil, config.LoadOTPConfig())
+	var passwordResetService = resetSvc.NewPasswordResetService(nil, nil, config.LoadPasswordResetConfig())
 	if redisClient != nil {
 		loginLimiter = security.NewRedisLoginLimiter(
 			redisClient,
@@ -87,9 +97,17 @@ func (r *Routes) UserRoutes() {
 
 		sRepo := sessionRepo.NewSessionRepository(redisClient)
 		userSessionSvc = sessionSvc.NewSessionService(sRepo)
+
+		sender, err := mailer.NewBrevoSenderFromEnv()
+		if err != nil {
+			logger.WriteLog(logger.LogLevelWarn, "Email sender not configured: ", err)
+		} else {
+			registerOTPService = otpSvc.NewOTPService(otpRepo.NewOTPRepository(redisClient), sender, config.LoadOTPConfig())
+			passwordResetService = resetSvc.NewPasswordResetService(resetRepo.NewPasswordResetRepository(redisClient), sender, config.LoadPasswordResetConfig())
+		}
 	}
 
-	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, svcAudit)
+	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, svcAudit, svcAppConfig, registerOTPService, passwordResetService)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter
@@ -108,6 +126,7 @@ func (r *Routes) UserRoutes() {
 	user := r.App.Group("/api/user")
 	{
 		user.POST("/register", registerLimiter, h.Register)
+		user.POST("/register/otp/send", registerLimiter, h.SendRegisterOTP)
 		user.POST("/login", h.Login)
 		user.POST("/google/login", h.GoogleLogin)
 		user.POST("/refresh-token", h.RefreshToken)

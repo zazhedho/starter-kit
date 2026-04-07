@@ -5,6 +5,7 @@ type UserRegister struct {
 	Email    string `json:"email" binding:"required,email"`
 	Phone    string `json:"phone" binding:"required,min=9,max=15"`
 	Password string `json:"password" binding:"required,min=8,max=64"`
+	OTPCode  string `json:"otp_code" binding:"omitempty,len=6,numeric"`
 }
 
 type AdminCreateUser struct {
@@ -48,4 +49,8 @@ type ResetPasswordRequest struct {
 
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type SendRegisterOTPRequest struct {
+	Email string `json:"email" binding:"required,email"`
 }

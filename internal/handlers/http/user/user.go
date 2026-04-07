@@ -11,10 +11,15 @@ import (
 	domainsession "starter-kit/internal/domain/session"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
+	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfaceauth "starter-kit/internal/interfaces/auth"
+	interfaceotp "starter-kit/internal/interfaces/otp"
+	interfacereset "starter-kit/internal/interfaces/reset"
 	interfacesession "starter-kit/internal/interfaces/session"
 	interfaceuser "starter-kit/internal/interfaces/user"
+	serviceotp "starter-kit/internal/services/otp"
+	servicereset "starter-kit/internal/services/reset"
 	serviceuser "starter-kit/internal/services/user"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/logger"
@@ -30,20 +35,35 @@ import (
 )
 
 type HandlerUser struct {
-	Service       interfaceuser.ServiceUserInterface
-	BlacklistRepo interfaceauth.RepoAuthInterface
-	SessionSvc    interfacesession.ServiceSessionInterface
-	LoginLimiter  security.LoginLimiter
-	AuditService  interfaceaudit.ServiceAuditInterface
+	Service          interfaceuser.ServiceUserInterface
+	BlacklistRepo    interfaceauth.RepoAuthInterface
+	SessionSvc       interfacesession.ServiceSessionInterface
+	LoginLimiter     security.LoginLimiter
+	AuditService     interfaceaudit.ServiceAuditInterface
+	AppConfigService interfaceappconfig.ServiceAppConfigInterface
+	OTPService       interfaceotp.ServiceOTPInterface
+	ResetService     interfacereset.ServicePasswordResetInterface
 }
 
-func NewUserHandler(s interfaceuser.ServiceUserInterface, blacklistRepo interfaceauth.RepoAuthInterface, sessionSvc interfacesession.ServiceSessionInterface, limiter security.LoginLimiter, auditService interfaceaudit.ServiceAuditInterface) *HandlerUser {
+func NewUserHandler(
+	s interfaceuser.ServiceUserInterface,
+	blacklistRepo interfaceauth.RepoAuthInterface,
+	sessionSvc interfacesession.ServiceSessionInterface,
+	limiter security.LoginLimiter,
+	auditService interfaceaudit.ServiceAuditInterface,
+	appConfigService interfaceappconfig.ServiceAppConfigInterface,
+	otpService interfaceotp.ServiceOTPInterface,
+	resetService interfacereset.ServicePasswordResetInterface,
+) *HandlerUser {
 	return &HandlerUser{
-		Service:       s,
-		BlacklistRepo: blacklistRepo,
-		SessionSvc:    sessionSvc,
-		LoginLimiter:  limiter,
-		AuditService:  auditService,
+		Service:          s,
+		BlacklistRepo:    blacklistRepo,
+		SessionSvc:       sessionSvc,
+		LoginLimiter:     limiter,
+		AuditService:     auditService,
+		AppConfigService: appConfigService,
+		OTPService:       otpService,
+		ResetService:     resetService,
 	}
 }
 
@@ -61,6 +81,54 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		return
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
+
+	otpEnabled, err := h.isRuntimeConfigEnabled(registerOTPConfigKey(), false)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if otpEnabled {
+		if strings.TrimSpace(req.OTPCode) == "" {
+			res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "otp_code is required"}
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
+		if h.OTPService == nil {
+			res := response.Response(http.StatusServiceUnavailable, messages.MsgFail, logId, nil)
+			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "registration OTP service is not configured"}
+			ctx.JSON(http.StatusServiceUnavailable, res)
+			return
+		}
+		if err := h.OTPService.VerifyRegisterOTP(ctx.Request.Context(), req.Email, req.OTPCode); err != nil {
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:       domainaudit.ActionCreate,
+				Resource:     "user",
+				Status:       domainaudit.StatusFailed,
+				Message:      "Failed to verify registration OTP",
+				ErrorMessage: err.Error(),
+				AfterData: map[string]interface{}{
+					"email": req.Email,
+				},
+			})
+			statusCode := http.StatusBadRequest
+			message := "invalid or expired OTP"
+			if errors.Is(err, serviceotp.ErrOTPTooManyAttempt) {
+				message = "too many OTP attempts"
+			}
+			if errors.Is(err, serviceotp.ErrOTPNotConfigured) {
+				statusCode = http.StatusServiceUnavailable
+				message = "registration OTP service is not configured"
+			}
+			res := response.Response(statusCode, messages.MsgFail, logId, nil)
+			res.Error = response.Errors{Code: statusCode, Message: message}
+			ctx.JSON(statusCode, res)
+			return
+		}
+	}
 
 	data, err := h.Service.RegisterUser(req)
 	if err != nil {
@@ -108,6 +176,88 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	res := response.Response(http.StatusCreated, "User registered successfully", logId, data)
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(data)))
 	ctx.JSON(http.StatusCreated, res)
+}
+
+func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
+	var req dto.SendRegisterOTPRequest
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := "[UserHandler][SendRegisterOTP]"
+
+	if err := ctx.BindJSON(&req); err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
+		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	otpEnabled, err := h.isRuntimeConfigEnabled(registerOTPConfigKey(), false)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if !otpEnabled {
+		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "registration OTP is disabled"}
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+	if h.OTPService == nil {
+		res := response.Response(http.StatusServiceUnavailable, messages.MsgFail, logId, nil)
+		res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "registration OTP service is not configured"}
+		ctx.JSON(http.StatusServiceUnavailable, res)
+		return
+	}
+
+	normalizedEmail := utils.SanitizeEmail(req.Email)
+	if data, err := h.Service.GetUserByEmail(normalizedEmail); err == nil && data.Id != "" {
+		res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
+		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "email already exists"}
+		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, authEmailAppName()); err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:       domainaudit.ActionCreate,
+			Resource:     "user_registration_otp",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to send registration OTP",
+			ErrorMessage: err.Error(),
+			AfterData: map[string]interface{}{
+				"email": normalizedEmail,
+			},
+		})
+		if throttle, ok := errors.AsType[*serviceotp.ThrottleError](err); ok {
+			h.respondThrottle(ctx, logId, throttle.RetryAfter, "OTP request is throttled. Please try again later.")
+			return
+		}
+		statusCode := http.StatusInternalServerError
+		message := "failed to send registration OTP"
+		if errors.Is(err, serviceotp.ErrOTPNotConfigured) || errors.Is(err, serviceotp.ErrOTPDeliveryFailed) {
+			statusCode = http.StatusServiceUnavailable
+			message = err.Error()
+		}
+		res := response.Response(statusCode, messages.MsgFail, logId, nil)
+		res.Error = response.Errors{Code: statusCode, Message: message}
+		ctx.JSON(statusCode, res)
+		return
+	}
+
+	h.writeAudit(ctx, domainaudit.AuditEvent{
+		Action:   domainaudit.ActionCreate,
+		Resource: "user_registration_otp",
+		Status:   domainaudit.StatusSuccess,
+		Message:  "Sent registration OTP",
+		AfterData: map[string]interface{}{
+			"email": normalizedEmail,
+		},
+	})
+	res := response.Response(http.StatusOK, "Registration OTP sent successfully", logId, nil)
+	ctx.JSON(http.StatusOK, res)
 }
 
 func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
@@ -755,9 +905,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 		},
 	})
 
-	res := response.Response(http.StatusOK, "Impersonation started successfully", logId, map[string]interface{}{
-		"token": token,
-	})
+	res := response.Response(http.StatusOK, "Impersonation started successfully", logId, buildAuthTokenResponse(token, ""))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -815,9 +963,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 		},
 	})
 
-	res := response.Response(http.StatusOK, "Impersonation stopped successfully", logId, map[string]interface{}{
-		"token": token,
-	})
+	res := response.Response(http.StatusOK, "Impersonation stopped successfully", logId, buildAuthTokenResponse(token, ""))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -1054,6 +1200,66 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		return
 	}
 
+	emailResetEnabled, err := h.isRuntimeConfigEnabled(passwordResetEmailConfigKey(), false)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if emailResetEnabled {
+		if h.ResetService == nil {
+			res := response.Response(http.StatusServiceUnavailable, messages.MsgFail, logId, nil)
+			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "password reset email service is not configured"}
+			ctx.JSON(http.StatusServiceUnavailable, res)
+			return
+		}
+
+		normalizedEmail := utils.SanitizeEmail(req.Email)
+		if data, err := h.Service.GetUserByEmail(normalizedEmail); err == nil && data.Id != "" {
+			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, authEmailAppName()); err != nil {
+				h.writeAudit(ctx, domainaudit.AuditEvent{
+					Action:       domainaudit.ActionUpdate,
+					Resource:     "user_password_reset",
+					Status:       domainaudit.StatusFailed,
+					Message:      "Failed to request password reset email",
+					ErrorMessage: err.Error(),
+					AfterData: map[string]interface{}{
+						"email": normalizedEmail,
+					},
+				})
+				if throttle, ok := errors.AsType[*servicereset.ThrottleError](err); ok {
+					h.respondThrottle(ctx, logId, throttle.RetryAfter, "Password reset request is throttled. Please try again later.")
+					return
+				}
+				statusCode := http.StatusInternalServerError
+				message := "failed to send password reset email"
+				if errors.Is(err, servicereset.ErrResetNotConfigured) || errors.Is(err, servicereset.ErrResetDeliveryFailed) {
+					statusCode = http.StatusServiceUnavailable
+					message = err.Error()
+				}
+				res := response.Response(statusCode, messages.MsgFail, logId, nil)
+				res.Error = response.Errors{Code: statusCode, Message: message}
+				ctx.JSON(statusCode, res)
+				return
+			}
+		}
+
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:   domainaudit.ActionUpdate,
+			Resource: "user_password_reset",
+			Status:   domainaudit.StatusSuccess,
+			Message:  "Requested password reset email",
+			AfterData: map[string]interface{}{
+				"email": normalizedEmail,
+			},
+		})
+		res := response.Response(http.StatusOK, "Password reset instructions sent to your email", logId, nil)
+		ctx.JSON(http.StatusOK, res)
+		return
+	}
+
 	token, err := h.Service.ForgotPassword(req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -1098,6 +1304,73 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
 		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
 		ctx.JSON(http.StatusBadRequest, res)
+		return
+	}
+
+	emailResetEnabled, err := h.isRuntimeConfigEnabled(passwordResetEmailConfigKey(), false)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.Response(http.StatusInternalServerError, messages.MsgFail, logId, nil)
+		res.Error = err.Error()
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if emailResetEnabled {
+		if h.ResetService == nil {
+			res := response.Response(http.StatusServiceUnavailable, messages.MsgFail, logId, nil)
+			res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "password reset email service is not configured"}
+			ctx.JSON(http.StatusServiceUnavailable, res)
+			return
+		}
+
+		email, err := h.ResetService.VerifyReset(ctx.Request.Context(), req.Token)
+		if err != nil {
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:       domainaudit.ActionUpdate,
+				Resource:     "user_password_reset",
+				Status:       domainaudit.StatusFailed,
+				Message:      "Failed to verify password reset token",
+				ErrorMessage: err.Error(),
+			})
+			statusCode := http.StatusBadRequest
+			message := "invalid or expired reset token"
+			if errors.Is(err, servicereset.ErrResetNotConfigured) {
+				statusCode = http.StatusServiceUnavailable
+				message = "password reset email service is not configured"
+			}
+			res := response.Response(statusCode, messages.MsgFail, logId, nil)
+			res.Error = response.Errors{Code: statusCode, Message: message}
+			ctx.JSON(statusCode, res)
+			return
+		}
+		if err := h.Service.ResetPasswordByEmail(email, req.NewPassword); err != nil {
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:       domainaudit.ActionUpdate,
+				Resource:     "user_password_reset",
+				Status:       domainaudit.StatusFailed,
+				Message:      "Failed to reset password",
+				ErrorMessage: err.Error(),
+				AfterData: map[string]interface{}{
+					"email": email,
+				},
+			})
+			res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+			res.Error = err.Error()
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
+
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			Action:   domainaudit.ActionUpdate,
+			Resource: "user_password_reset",
+			Status:   domainaudit.StatusSuccess,
+			Message:  "Reset password success",
+			AfterData: map[string]interface{}{
+				"email": email,
+			},
+		})
+		res := response.Response(http.StatusOK, "Password reset successfully", logId, nil)
+		ctx.JSON(http.StatusOK, res)
 		return
 	}
 

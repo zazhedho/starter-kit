@@ -36,6 +36,10 @@ Use this for values such as:
 - integration settings
 - module-specific runtime configuration
 
+Built-in auth feature flags:
+- `auth.register_otp_enabled`: require OTP verification for public registration
+- `auth.password_reset_email_enabled`: send password reset tokens through the email sender instead of returning a development token in the API response
+
 The starter kit now includes a typed helper on top of `app_configs`, so services do not need to parse raw strings manually for common cases such as:
 - `GetString`
 - `GetBool`
@@ -115,6 +119,7 @@ Optional but recommended:
 - Redis settings for sessions and rate limiting
 - storage settings for file upload use cases
 - `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
+- SMTP settings for register OTP and password reset email flows
 
 ## Run Locally
 
@@ -142,9 +147,12 @@ GET /healthcheck
 The current route set includes:
 
 - `POST /api/user/register`
+- `POST /api/user/register/otp/send`
 - `POST /api/user/login`
 - `POST /api/user/google/login`
 - `POST /api/user/refresh-token`
+- `POST /api/user/forgot-password`
+- `POST /api/user/reset-password`
 - `POST /api/user/logout`
 - `GET /api/user`
 - `GET /api/users`
