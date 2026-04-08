@@ -1,13 +1,22 @@
 package servicelocation
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	domainlocation "starter-kit/internal/domain/location"
+	"starter-kit/pkg/logger"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
+
+const locationCacheTTL = 180 * 24 * time.Hour
 
 func fetchResponseBody(url, entity string) ([]byte, error) {
 	resp, err := http.Get(url)
@@ -51,4 +60,52 @@ func toSortedLocations(dataMap map[string]string) []domainlocation.Location {
 	})
 
 	return locations
+}
+
+func locationCacheKey(entity string, parts ...string) string {
+	return fmt.Sprintf("cache:location:%s:%s", entity, strings.Join(parts, ":"))
+}
+
+func (s *LocationService) getCachedLocations(cacheKey string) ([]domainlocation.Location, bool) {
+	if s.Redis == nil {
+		return nil, false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cached, err := s.Redis.Get(ctx, cacheKey).Result()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache get failed; key=%s; err=%v", cacheKey, err))
+		}
+		return nil, false
+	}
+
+	var locations []domainlocation.Location
+	if err := json.Unmarshal([]byte(cached), &locations); err != nil {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache unmarshal failed; key=%s; err=%v", cacheKey, err))
+		return nil, false
+	}
+
+	return locations, true
+}
+
+func (s *LocationService) setCachedLocations(cacheKey string, locations []domainlocation.Location) {
+	if s.Redis == nil {
+		return
+	}
+
+	payload, err := json.Marshal(locations)
+	if err != nil {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache marshal failed; key=%s; err=%v", cacheKey, err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := s.Redis.Set(ctx, cacheKey, payload, locationCacheTTL).Err(); err != nil {
+		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache set failed; key=%s; err=%v", cacheKey, err))
+	}
 }

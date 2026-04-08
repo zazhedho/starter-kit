@@ -294,7 +294,7 @@ func (r *Routes) SessionRoutes() {
 }
 
 func (r *Routes) LocationRoutes() {
-	svc := locationSvc.NewLocationService()
+	svc := locationSvc.NewLocationService(database.GetRedisClient())
 	h := locationHandler.NewLocationHandler(svc)
 
 	location := r.App.Group("/api/location")
