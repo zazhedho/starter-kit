@@ -10,13 +10,23 @@ import (
 	"sort"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/pkg/logger"
+	"starter-kit/utils"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-const locationCacheTTL = 180 * 24 * time.Hour
+const defaultLocationCacheTTL = 180 * 24 * time.Hour
+
+func locationCacheTTL() time.Duration {
+	ttl := utils.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
+	if ttl <= 0 {
+		return defaultLocationCacheTTL
+	}
+
+	return ttl
+}
 
 func fetchResponseBody(url, entity string) ([]byte, error) {
 	resp, err := http.Get(url)
@@ -105,7 +115,7 @@ func (s *LocationService) setCachedLocations(cacheKey string, locations []domain
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := s.Redis.Set(ctx, cacheKey, payload, locationCacheTTL).Err(); err != nil {
+	if err := s.Redis.Set(ctx, cacheKey, payload, locationCacheTTL()).Err(); err != nil {
 		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache set failed; key=%s; err=%v", cacheKey, err))
 	}
 }
