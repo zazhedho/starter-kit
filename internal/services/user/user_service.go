@@ -61,16 +61,24 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 	roleName := utils.RoleViewer
 
 	roleId, _ := findRoleIDByName(s.RoleRepo, roleName)
+	var emailVerifiedAt *time.Time
+	if req.EmailVerified {
+		emailVerifiedAt = new(time.Now())
+	}
 
 	data = domainuser.Users{
-		Id:        utils.CreateUUID(),
-		Name:      utils.TitleCase(req.Name),
-		Phone:     phone,
-		Email:     email,
-		Password:  string(hashedPwd),
-		Role:      roleName,
-		RoleId:    roleId,
-		CreatedAt: time.Now(),
+		Id:                utils.CreateUUID(),
+		Name:              utils.TitleCase(req.Name),
+		Phone:             phone,
+		Email:             email,
+		Password:          string(hashedPwd),
+		Role:              roleName,
+		RoleId:            roleId,
+		EmailVerifiedAt:   emailVerifiedAt,
+		PasswordChangedAt: new(time.Now()),
+		LoginProvider:     "local",
+		Metadata:          map[string]any{},
+		CreatedAt:         time.Now(),
 	}
 
 	if err = s.UserRepo.Store(data); err != nil {
@@ -125,14 +133,17 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId str
 	}
 
 	data = domainuser.Users{
-		Id:        utils.CreateUUID(),
-		Name:      utils.TitleCase(req.Name),
-		Phone:     phone,
-		Email:     email,
-		Password:  string(hashedPwd),
-		Role:      roleName,
-		RoleId:    roleId,
-		CreatedAt: time.Now(),
+		Id:                utils.CreateUUID(),
+		Name:              utils.TitleCase(req.Name),
+		Phone:             phone,
+		Email:             email,
+		Password:          string(hashedPwd),
+		Role:              roleName,
+		RoleId:            roleId,
+		PasswordChangedAt: new(time.Now()),
+		LoginProvider:     "local",
+		Metadata:          map[string]any{},
+		CreatedAt:         time.Now(),
 	}
 
 	if err = s.UserRepo.Store(data); err != nil {
@@ -142,7 +153,7 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId str
 	return data, nil
 }
 
-func (s *ServiceUser) LoginUser(req dto.Login, logId string) (string, error) {
+func (s *ServiceUser) LoginUser(req dto.Login, logId string, metadata dto.LoginMetadata) (string, error) {
 	identifier, err := resolveLoginIdentifier(req)
 	if err != nil {
 		return "", err
@@ -162,6 +173,16 @@ func (s *ServiceUser) LoginUser(req dto.Login, logId string) (string, error) {
 	}
 
 	if err = bcrypt.CompareHashAndPassword([]byte(data.Password), []byte(req.Password)); err != nil {
+		return "", err
+	}
+
+	data.LastLoginAt = new(time.Now())
+	data.LastLoginIP = metadata.IP
+	data.LastLoginUserAgent = metadata.UserAgent
+	if data.LoginProvider == "" {
+		data.LoginProvider = "local"
+	}
+	if err = s.UserRepo.Update(data); err != nil {
 		return "", err
 	}
 
@@ -357,6 +378,7 @@ func (s *ServiceUser) ChangePassword(id string, req dto.ChangePassword) (domainu
 	}
 
 	data.Password = string(hashedPwd)
+	data.PasswordChangedAt = new(time.Now())
 
 	if err = s.UserRepo.Update(data); err != nil {
 		return domainuser.Users{}, err
@@ -402,6 +424,7 @@ func (s *ServiceUser) ResetPassword(req dto.ResetPasswordRequest) error {
 	}
 
 	data.Password = string(hashedPwd)
+	data.PasswordChangedAt = new(time.Now())
 
 	if err = s.UserRepo.Update(data); err != nil {
 		return err
@@ -428,6 +451,7 @@ func (s *ServiceUser) ResetPasswordByEmail(email, newPassword string) error {
 	}
 
 	data.Password = string(hashedPwd)
+	data.PasswordChangedAt = new(time.Now())
 
 	if err = s.UserRepo.Update(data); err != nil {
 		return err

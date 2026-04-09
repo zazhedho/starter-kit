@@ -22,12 +22,13 @@ type googleTokenInfo struct {
 	Email         string `json:"email"`
 	EmailVerified string `json:"email_verified"`
 	Name          string `json:"name"`
+	Picture       string `json:"picture"`
 	Subject       string `json:"sub"`
 }
 
 var googleIDTokenVerifier = verifyGoogleIDToken
 
-func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin) (domainuser.Users, bool, error) {
+func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMetadata) (domainuser.Users, bool, error) {
 	identity, err := googleIDTokenVerifier(context.Background(), req.IDToken)
 	if err != nil {
 		return domainuser.Users{}, false, err
@@ -40,6 +41,17 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin) (domainuser.Users, bo
 
 	existing, err := s.UserRepo.GetByEmail(email)
 	if err == nil && existing.Id != "" {
+		existing.EmailVerifiedAt = new(time.Now())
+		existing.LastLoginAt = new(time.Now())
+		existing.LastLoginIP = metadata.IP
+		existing.LastLoginUserAgent = metadata.UserAgent
+		existing.LoginProvider = "google"
+		if strings.TrimSpace(identity.Picture) != "" {
+			existing.AvatarURL = strings.TrimSpace(identity.Picture)
+		}
+		if updateErr := s.UserRepo.Update(existing); updateErr != nil {
+			return domainuser.Users{}, false, updateErr
+		}
 		return existing, false, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -64,13 +76,23 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin) (domainuser.Users, bo
 	}
 
 	user := domainuser.Users{
-		Id:        utils.CreateUUID(),
-		Name:      utils.TitleCase(name),
-		Email:     email,
-		Phone:     "",
-		Password:  string(hashedPwd),
-		Role:      roleName,
-		RoleId:    roleId,
+		Id:                 utils.CreateUUID(),
+		Name:               utils.TitleCase(name),
+		Email:              email,
+		Phone:              "",
+		Password:           string(hashedPwd),
+		Role:               roleName,
+		RoleId:             roleId,
+		EmailVerifiedAt:    new(time.Now()),
+		LastLoginAt:        new(time.Now()),
+		LastLoginIP:        metadata.IP,
+		LastLoginUserAgent: metadata.UserAgent,
+		PasswordChangedAt:  new(time.Now()),
+		LoginProvider:      "google",
+		AvatarURL:          strings.TrimSpace(identity.Picture),
+		Metadata: map[string]any{
+			"google_subject": identity.Subject,
+		},
 		CreatedAt: time.Now(),
 	}
 

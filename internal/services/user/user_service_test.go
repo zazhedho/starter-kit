@@ -277,13 +277,16 @@ func TestLoginUserAcceptsEmailIdentifier(t *testing.T) {
 	token, err := service.LoginUser(dto.Login{
 		Identifier: "Jane.Doe@Example.COM",
 		Password:   "Password1!",
-	}, "log-1")
+	}, "log-1", dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
 	if token == "" {
 		t.Fatal("expected non-empty token")
+	}
+	if service.UserRepo.(*userRepoMock).updated.LastLoginAt == nil {
+		t.Fatal("expected last login timestamp to be updated")
 	}
 }
 
@@ -313,7 +316,7 @@ func TestLoginUserAcceptsPhoneIdentifier(t *testing.T) {
 	token, err := service.LoginUser(dto.Login{
 		Identifier: "08123456789",
 		Password:   "Password1!",
-	}, "log-1")
+	}, "log-1", dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -334,7 +337,7 @@ func TestLoginUserRejectsInvalidRandomIdentifier(t *testing.T) {
 	_, err := service.LoginUser(dto.Login{
 		Identifier: "randomtext",
 		Password:   "Password1!",
-	}, "log-1")
+	}, "log-1", dto.LoginMetadata{})
 	if err == nil || err.Error() != "identifier must be a valid email or phone number" {
 		t.Fatalf("expected invalid identifier error, got %v", err)
 	}
@@ -465,7 +468,7 @@ func TestLoginWithGoogleReturnsExistingUser(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"})
+	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -500,7 +503,7 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"})
+	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}

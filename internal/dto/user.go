@@ -1,11 +1,12 @@
 package dto
 
 type UserRegister struct {
-	Name     string `json:"name" binding:"required,min=3,max=100"`
-	Email    string `json:"email" binding:"required,email"`
-	Phone    string `json:"phone" binding:"required,min=9,max=15"`
-	Password string `json:"password" binding:"required,min=8,max=64"`
-	OTPCode  string `json:"otp_code" binding:"omitempty,len=6,numeric"`
+	Name          string `json:"name" binding:"required,min=3,max=100"`
+	Email         string `json:"email" binding:"required,email"`
+	Phone         string `json:"phone" binding:"required,min=9,max=15"`
+	Password      string `json:"password" binding:"required,min=8,max=64"`
+	OTPCode       string `json:"otp_code" binding:"omitempty,len=6,numeric"`
+	EmailVerified bool   `json:"-"`
 }
 
 type AdminCreateUser struct {
@@ -20,6 +21,11 @@ type Login struct {
 	Identifier string `json:"identifier" binding:"omitempty,min=3,max=100"`
 	Email      string `json:"email" binding:"omitempty,min=3,max=100"`
 	Password   string `json:"password" binding:"required,min=8,max=64"`
+}
+
+type LoginMetadata struct {
+	IP        string
+	UserAgent string
 }
 
 type GoogleLogin struct {

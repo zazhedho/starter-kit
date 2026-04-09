@@ -34,6 +34,8 @@ func (r *repo) GetAll(params filter.BaseParams) (ret []domainuser.Users, totalDa
 			"email",
 			"phone",
 			"role",
+			"last_login_at",
+			"login_provider",
 			"created_at",
 			"updated_at",
 		},

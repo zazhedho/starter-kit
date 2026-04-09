@@ -52,14 +52,20 @@ func buildUserAuthResponse(user domainuser.Users, permissions []string) map[stri
 	}
 
 	return map[string]interface{}{
-		"id":          user.Id,
-		"name":        user.Name,
-		"email":       user.Email,
-		"phone":       user.Phone,
-		"role":        user.Role,
-		"permissions": permissions,
-		"created_at":  user.CreatedAt,
-		"updated_at":  user.UpdatedAt,
+		"id":                  user.Id,
+		"name":                user.Name,
+		"email":               user.Email,
+		"phone":               user.Phone,
+		"role":                user.Role,
+		"permissions":         permissions,
+		"email_verified_at":   user.EmailVerifiedAt,
+		"phone_verified_at":   user.PhoneVerifiedAt,
+		"last_login_at":       user.LastLoginAt,
+		"login_provider":      user.LoginProvider,
+		"avatar_url":          user.AvatarURL,
+		"password_changed_at": user.PasswordChangedAt,
+		"created_at":          user.CreatedAt,
+		"updated_at":          user.UpdatedAt,
 	}
 }
 

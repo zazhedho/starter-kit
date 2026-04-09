@@ -127,6 +127,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 			ctx.JSON(statusCode, res)
 			return
 		}
+		req.EmailVerified = true
 	}
 
 	data, err := h.Service.RegisterUser(req)
@@ -381,7 +382,10 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		}
 	}
 
-	token, err := h.Service.LoginUser(req, logId.String())
+	token, err := h.Service.LoginUser(req, logId.String(), dto.LoginMetadata{
+		IP:        ctx.ClientIP(),
+		UserAgent: ctx.Request.UserAgent(),
+	})
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.LoginUser; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == messages.ErrHashPassword {
@@ -511,7 +515,10 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		return
 	}
 
-	user, isNewUser, err := h.Service.LoginWithGoogle(req)
+	user, isNewUser, err := h.Service.LoginWithGoogle(req, dto.LoginMetadata{
+		IP:        ctx.ClientIP(),
+		UserAgent: ctx.Request.UserAgent(),
+	})
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,

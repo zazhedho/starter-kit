@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8a22c5f4-87f9-4c31-a3b5-8f7c6d1cf7f1",
     "name": "Starter Kit API",
-    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables.",
+    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables. Auth responses use access_token; there is no legacy data.token field.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -119,7 +119,7 @@
       "name": "Auth",
       "item": [
         {
-          "name": "Register",
+          "name": "Register Without OTP",
           "request": {
             "auth": {
               "type": "noauth"
@@ -133,7 +133,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phone\": \"08123456789\",\n  \"password\": \"Password1!\",\n  \"otp_code\": \"123456\"\n}"
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phone\": \"08123456789\",\n  \"password\": \"Password1!\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/user/register",
@@ -146,9 +146,21 @@
                 "register"
               ]
             },
-            "description": "If auth.register_otp_enabled is false, otp_code is optional. If enabled, send OTP first with /api/user/register/otp/send."
+            "description": "Use this when auth.register_otp_enabled=false. If the config is true, this request should fail because otp_code is required."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Send Register OTP",
@@ -180,9 +192,53 @@
                 "send"
               ]
             },
-            "description": "Requires auth.register_otp_enabled=true in app_configs."
+            "description": "Only use this when auth.register_otp_enabled=true. If the config is false, public register does not require OTP."
           },
           "response": []
+        },
+        {
+          "name": "Register With OTP",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane OTP\",\n  \"email\": \"jane.otp@example.com\",\n  \"phone\": \"08123456790\",\n  \"password\": \"Password1!\",\n  \"otp_code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/user/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "register"
+              ]
+            },
+            "description": "Use this when auth.register_otp_enabled=true. First call Send Register OTP, then replace otp_code with the code received by email."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Login",
@@ -230,6 +286,53 @@
             "description": "identifier accepts email or phone."
           },
           "response": []
+        },
+        {
+          "name": "Login With Phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/user/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"08123456789\",\n  \"password\": \"Password1!\"\n}"
+            },
+            "description": "Alternative login flow. identifier accepts phone and will be normalized by the backend."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "  if (json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Google Login",
@@ -364,7 +467,7 @@
                 "forgot-password"
               ]
             },
-            "description": "If auth.password_reset_email_enabled=false, response data can contain a development reset token. If enabled, token is sent by email."
+            "description": "Controlled by auth.password_reset_email_enabled. If false, response data can contain a development reset token and this script stores it as reset_token. If true, the reset token is sent by email in the frontend reset link query param."
           },
           "response": []
         },
@@ -395,7 +498,8 @@
                 "user",
                 "reset-password"
               ]
-            }
+            },
+            "description": "Use the same token from the email reset link query param, for example /reset-password?token=<token>, as the JSON body token."
           },
           "response": []
         },
@@ -418,7 +522,8 @@
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Registration OTP is controlled by app_configs key auth.register_otp_enabled. Use Register Without OTP when it is false. Use Send Register OTP then Register With OTP when it is true. Password reset email delivery is controlled by auth.password_reset_email_enabled."
     },
     {
       "name": "Users",
@@ -439,7 +544,19 @@
               ]
             }
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.id) pm.collectionVariables.set('user_id', json.data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "List Users",
@@ -1262,6 +1379,47 @@
           "response": []
         },
         {
+          "name": "List Auth Configurations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/configs?page=1&limit=50&order_by=config_key&order_direction=asc&filters[category]=auth",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "configs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "order_by",
+                  "value": "config_key"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "asc"
+                },
+                {
+                  "key": "filters[category]",
+                  "value": "auth"
+                }
+              ]
+            },
+            "description": "Use this before testing OTP/password reset flows. Copy the id for auth.register_otp_enabled or auth.password_reset_email_enabled into {{config_id}}, then call Update Configuration."
+          },
+          "response": []
+        },
+        {
           "name": "Get Configuration By ID",
           "request": {
             "method": "GET",
@@ -1305,11 +1463,12 @@
                 "{{config_id}}"
               ]
             },
-            "description": "Use this for keys such as auth.register_otp_enabled and auth.password_reset_email_enabled."
+            "description": "Update an existing config by id. For auth.register_otp_enabled or auth.password_reset_email_enabled, set value to \"true\" to enable the flow or \"false\" to disable it, with is_active=true."
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Runtime configs can be changed without code changes. To test auth flows, list auth configs, copy the config id into {{config_id}}, then update value to \"true\" or \"false\"."
     },
     {
       "name": "Audit Trails",
