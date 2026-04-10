@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrGoogleNotConfigured = errors.New("google login is not configured")
-	ErrGoogleTokenInvalid  = errors.New("invalid google token")
-	ErrGoogleEmailMissing  = errors.New("google account email is not available")
+	ErrGoogleNotConfigured        = errors.New("google login is not configured")
+	ErrGoogleTokenInvalid         = errors.New("invalid google token")
+	ErrGoogleEmailMissing         = errors.New("google account email is not available")
+	ErrPublicRegistrationDisabled = errors.New("public registration is currently disabled")
 )
 
 func ValidatePasswordStrength(password string) error {

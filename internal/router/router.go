@@ -125,6 +125,7 @@ func (r *Routes) UserRoutes() {
 
 	user := r.App.Group("/api/user")
 	{
+		user.GET("/register/status", h.GetRegisterStatus)
 		user.POST("/register", registerLimiter, h.Register)
 		user.POST("/register/otp/send", registerLimiter, h.SendRegisterOTP)
 		user.POST("/login", h.Login)

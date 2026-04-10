@@ -10,7 +10,7 @@ type ServiceUserInterface interface {
 	RegisterUser(req dto.UserRegister) (domainuser.Users, error)
 	AdminCreateUser(req dto.AdminCreateUser, creatorUserId string, creatorRole string) (domainuser.Users, error)
 	LoginUser(req dto.Login, logId string, metadata dto.LoginMetadata) (string, error)
-	LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMetadata) (domainuser.Users, bool, error)
+	LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMetadata, allowRegistration bool) (domainuser.Users, bool, error)
 	LogoutUser(token string) error
 	ImpersonateUser(targetUserId, impersonatorUserId, impersonatorName, impersonatorRole string, alreadyImpersonated bool, logId string) (string, error)
 	StopImpersonation(originalUserId, currentUserId string, logId string) (string, error)

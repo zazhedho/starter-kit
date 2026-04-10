@@ -119,6 +119,30 @@
       "name": "Auth",
       "item": [
         {
+          "name": "Get Register Status",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/register/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "register",
+                "status"
+              ]
+            },
+            "description": "Use this first to check whether public self-registration is enabled. When disabled, Register, Send Register OTP, and first-time Google auto-registration should be rejected."
+          },
+          "response": []
+        },
+        {
           "name": "Register Without OTP",
           "request": {
             "auth": {
@@ -146,7 +170,7 @@
                 "register"
               ]
             },
-            "description": "Use this when auth.register_otp_enabled=false. If the config is true, this request should fail because otp_code is required."
+            "description": "Use this when auth.public_registration_enabled=true and auth.register_otp_enabled=false. If public registration is disabled, this request should return 403."
           },
           "response": [],
           "event": [
@@ -192,7 +216,7 @@
                 "send"
               ]
             },
-            "description": "Only use this when auth.register_otp_enabled=true. If the config is false, public register does not require OTP."
+            "description": "Only use this when auth.public_registration_enabled=true and auth.register_otp_enabled=true. If public registration is disabled, this request should return 403."
           },
           "response": []
         },
@@ -224,7 +248,7 @@
                 "register"
               ]
             },
-            "description": "Use this when auth.register_otp_enabled=true. First call Send Register OTP, then replace otp_code with the code received by email."
+            "description": "Use this when auth.public_registration_enabled=true and auth.register_otp_enabled=true. First call Send Register OTP, then replace otp_code with the code received by email."
           },
           "response": [],
           "event": [
@@ -377,7 +401,8 @@
                 "google",
                 "login"
               ]
-            }
+            },
+            "description": "Existing Google-linked users can still log in. If auth.public_registration_enabled=false, first-time Google login must not auto-create a new user."
           },
           "response": []
         },
@@ -523,7 +548,7 @@
           "response": []
         }
       ],
-      "description": "Registration OTP is controlled by app_configs key auth.register_otp_enabled. Use Register Without OTP when it is false. Use Send Register OTP then Register With OTP when it is true. Password reset email delivery is controlled by auth.password_reset_email_enabled."
+      "description": "Public registration is controlled by app_configs key auth.public_registration_enabled. If false, register-related endpoints and first-time Google login registration are blocked. Registration OTP is controlled separately by auth.register_otp_enabled. Password reset email delivery is controlled by auth.password_reset_email_enabled."
     },
     {
       "name": "Users",
@@ -1415,7 +1440,7 @@
                 }
               ]
             },
-            "description": "Use this before testing OTP/password reset flows. Copy the id for auth.register_otp_enabled or auth.password_reset_email_enabled into {{config_id}}, then call Update Configuration."
+            "description": "Use this before testing public registration, OTP, or password reset flows. Copy the id for auth.public_registration_enabled, auth.register_otp_enabled, or auth.password_reset_email_enabled into {{config_id}}, then call Update Configuration."
           },
           "response": []
         },
@@ -1463,7 +1488,7 @@
                 "{{config_id}}"
               ]
             },
-            "description": "Update an existing config by id. For auth.register_otp_enabled or auth.password_reset_email_enabled, set value to \"true\" to enable the flow or \"false\" to disable it, with is_active=true."
+            "description": "Update an existing config by id. For auth.public_registration_enabled, auth.register_otp_enabled, or auth.password_reset_email_enabled, set value to \"true\" to enable the flow or \"false\" to disable it, with is_active=true."
           },
           "response": []
         }

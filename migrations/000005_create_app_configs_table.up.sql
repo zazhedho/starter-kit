@@ -37,6 +37,15 @@ INSERT INTO app_configs (id, config_key, display_name, category, value, descript
 VALUES
     (
         gen_random_uuid(),
+        'auth.public_registration_enabled',
+        'Public Registration Enabled',
+        'auth',
+        'true',
+        'Enable or disable public self-registration. When disabled, public register-related endpoints reject requests.',
+        TRUE
+    ),
+    (
+        gen_random_uuid(),
         'auth.register_otp_enabled',
         'Register OTP Enabled',
         'auth',

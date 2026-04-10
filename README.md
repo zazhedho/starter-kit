@@ -37,6 +37,7 @@ Use this for values such as:
 - module-specific runtime configuration
 
 Built-in auth feature flags:
+- `auth.public_registration_enabled`: enable or disable public self-registration endpoints
 - `auth.register_otp_enabled`: require OTP verification for public registration
 - `auth.password_reset_email_enabled`: send password reset tokens through the email sender instead of returning a development token in the API response
 

@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	defaultConfigPublicRegistrationEnabled = "auth.public_registration_enabled"
 	defaultConfigRegisterOTPEnabled        = "auth.register_otp_enabled"
 	defaultConfigPasswordResetEmailEnabled = "auth.password_reset_email_enabled"
 )
@@ -61,6 +62,10 @@ func (h *HandlerUser) isRuntimeConfigEnabled(configKey string, fallback bool) (b
 		return fallback, nil
 	}
 	return h.AppConfigService.IsEnabled(configKey, fallback)
+}
+
+func publicRegistrationConfigKey() string {
+	return utils.GetEnv("CONFIG_PUBLIC_REGISTRATION", defaultConfigPublicRegistrationEnabled)
 }
 
 func registerOTPConfigKey() string {

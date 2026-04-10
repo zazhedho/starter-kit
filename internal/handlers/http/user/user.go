@@ -72,6 +72,19 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][Register]"
 
+	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if !registerEnabled {
+		res := response.Forbidden(logId, "Public registration is currently disabled.")
+		ctx.JSON(http.StatusForbidden, res)
+		return
+	}
+
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
 
@@ -171,10 +184,41 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, res)
 }
 
+func (h *HandlerUser) GetRegisterStatus(ctx *gin.Context) {
+	logId := utils.GenerateLogId(ctx)
+	logPrefix := "[UserHandler][GetRegisterStatus]"
+
+	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
+	res := response.Response(http.StatusOK, "Get register status successfully", logId, map[string]interface{}{
+		"enabled": registerEnabled,
+	})
+	ctx.JSON(http.StatusOK, res)
+}
+
 func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	var req dto.SendRegisterOTPRequest
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][SendRegisterOTP]"
+
+	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if !registerEnabled {
+		res := response.Forbidden(logId, "Public registration is currently disabled.")
+		ctx.JSON(http.StatusForbidden, res)
+		return
+	}
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -515,10 +559,18 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		return
 	}
 
+	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+
 	user, isNewUser, err := h.Service.LoginWithGoogle(req, dto.LoginMetadata{
 		IP:        ctx.ClientIP(),
 		UserAgent: ctx.Request.UserAgent(),
-	})
+	}, registerEnabled)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,
@@ -537,6 +589,8 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 			statusCode = http.StatusServiceUnavailable
 		case errors.Is(err, serviceuser.ErrGoogleTokenInvalid), errors.Is(err, serviceuser.ErrGoogleEmailMissing):
 			statusCode = http.StatusUnauthorized
+		case errors.Is(err, serviceuser.ErrPublicRegistrationDisabled):
+			statusCode = http.StatusForbidden
 		}
 
 		res := response.InternalServerError(logId)
@@ -547,6 +601,8 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 			res = response.ErrorResponse(statusCode, messages.MsgFail, logId, "Invalid Google token.")
 		case errors.Is(err, serviceuser.ErrGoogleEmailMissing):
 			res = response.ErrorResponse(statusCode, messages.MsgFail, logId, "Google account email is not available.")
+		case errors.Is(err, serviceuser.ErrPublicRegistrationDisabled):
+			res = response.Forbidden(logId, "Public registration is currently disabled.")
 		}
 		ctx.JSON(statusCode, res)
 		return

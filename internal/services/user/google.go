@@ -28,7 +28,7 @@ type googleTokenInfo struct {
 
 var googleIDTokenVerifier = verifyGoogleIDToken
 
-func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMetadata) (domainuser.Users, bool, error) {
+func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMetadata, allowRegistration bool) (domainuser.Users, bool, error) {
 	identity, err := googleIDTokenVerifier(context.Background(), req.IDToken)
 	if err != nil {
 		return domainuser.Users{}, false, err
@@ -56,6 +56,9 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMet
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return domainuser.Users{}, false, err
+	}
+	if !allowRegistration {
+		return domainuser.Users{}, false, ErrPublicRegistrationDisabled
 	}
 
 	roleName := utils.RoleViewer

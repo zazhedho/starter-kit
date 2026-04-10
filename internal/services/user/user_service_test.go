@@ -468,7 +468,7 @@ func TestLoginWithGoogleReturnsExistingUser(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
+	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -503,7 +503,7 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
+	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -518,6 +518,42 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 	}
 	if userRepo.user.Password == "" {
 		t.Fatal("expected generated password hash for google user")
+	}
+}
+
+func TestLoginWithGoogleRejectsNewUserWhenPublicRegistrationDisabled(t *testing.T) {
+	originalVerifier := googleIDTokenVerifier
+	googleIDTokenVerifier = func(_ context.Context, idToken string) (googleTokenInfo, error) {
+		return googleTokenInfo{
+			Email:         "new.user@example.com",
+			EmailVerified: "true",
+			Subject:       "google-sub-3",
+			Name:          "new user",
+			Audience:      "client-id",
+		}, nil
+	}
+	defer func() { googleIDTokenVerifier = originalVerifier }()
+
+	userRepo := &userRepoMock{emailErr: gorm.ErrRecordNotFound}
+	service := &ServiceUser{
+		UserRepo:      userRepo,
+		BlacklistRepo: &authRepoMock{},
+		RoleRepo: &roleRepoUserMock{roles: map[string]domainrole.Role{
+			utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+		}},
+		PermissionRepo: &permissionRepoUserMock{},
+	}
+
+	_, _, err := service.LoginWithGoogle(
+		dto.GoogleLogin{IDToken: "token"},
+		dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"},
+		false,
+	)
+	if !errors.Is(err, ErrPublicRegistrationDisabled) {
+		t.Fatalf("expected ErrPublicRegistrationDisabled, got %v", err)
+	}
+	if userRepo.user.Id != "" {
+		t.Fatalf("expected no user to be created, got %+v", userRepo.user)
 	}
 }
 
