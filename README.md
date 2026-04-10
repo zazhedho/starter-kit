@@ -183,9 +183,18 @@ The current route set includes:
 - `PUT /api/config/:id`
 
 - `GET /api/location/province`
-- `GET /api/location/city`
-- `GET /api/location/district`
-- `GET /api/location/village`
+- `GET /api/location/city?province_code=11`
+- `GET /api/location/district?city_code=1101`
+- `GET /api/location/village?district_code=110101`
+- `POST /api/location/sync`
+- `GET /api/location/sync/:id`
+
+Location architecture:
+- PostgreSQL is the source of truth for provinces, cities, districts, and villages
+- Redis is used only as runtime cache
+- external location API is used only for sync/import to the database
+- location sync runs asynchronously; start the job with `POST /api/location/sync` and poll its status via `GET /api/location/sync/:id`
+- use scoped sync for regular updates; `level=all` is intended for initial bootstrap because it performs a full hierarchical import
 
 Additional session routes are registered only when Redis is available.
 

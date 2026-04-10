@@ -27,3 +27,11 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_login_provider ON users(login_provider);
 CREATE INDEX IF NOT EXISTS idx_users_last_login_at ON users(last_login_at);
 CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users(locked_until);
+
+CREATE TABLE IF NOT EXISTS blacklist (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_blacklist_token ON blacklist(token);

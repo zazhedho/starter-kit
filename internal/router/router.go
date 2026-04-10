@@ -20,6 +20,7 @@ import (
 	appConfigRepo "starter-kit/internal/repositories/appconfig"
 	auditRepo "starter-kit/internal/repositories/audit"
 	authRepo "starter-kit/internal/repositories/auth"
+	locationRepo "starter-kit/internal/repositories/location"
 	menuRepo "starter-kit/internal/repositories/menu"
 	otpRepo "starter-kit/internal/repositories/otp"
 	permissionRepo "starter-kit/internal/repositories/permission"
@@ -295,8 +296,12 @@ func (r *Routes) SessionRoutes() {
 }
 
 func (r *Routes) LocationRoutes() {
-	svc := locationSvc.NewLocationService(database.GetRedisClient())
+	repo := locationRepo.NewLocationRepo(r.DB)
+	svc := locationSvc.NewLocationService(repo, database.GetRedisClient())
 	h := locationHandler.NewLocationHandler(svc)
+	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
+	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	location := r.App.Group("/api/location")
 	{
@@ -304,5 +309,11 @@ func (r *Routes) LocationRoutes() {
 		location.GET("/city", h.GetCity)
 		location.GET("/district", h.GetDistrict)
 		location.GET("/village", h.GetVillage)
+	}
+
+	locationPriv := r.App.Group("/api/location").Use(mdw.AuthMiddleware())
+	{
+		locationPriv.POST("/sync", mdw.PermissionMiddleware("locations", "sync"), h.Sync)
+		locationPriv.GET("/sync/:id", mdw.PermissionMiddleware("locations", "sync"), h.GetSyncJob)
 	}
 }

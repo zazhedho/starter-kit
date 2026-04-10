@@ -81,6 +81,10 @@
       "value": ""
     },
     {
+      "key": "location_sync_job_id",
+      "value": ""
+    },
+    {
       "key": "reset_token",
       "value": ""
     },
@@ -1639,7 +1643,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/location/province?thn=2025",
+              "raw": "{{base_url}}/api/location/province",
               "host": [
                 "{{base_url}}"
               ],
@@ -1647,14 +1651,9 @@
                 "api",
                 "location",
                 "province"
-              ],
-              "query": [
-                {
-                  "key": "thn",
-                  "value": "2025"
-                }
               ]
-            }
+            },
+            "description": "Read provinces from Redis cache first, then PostgreSQL."
           },
           "response": []
         },
@@ -1667,7 +1666,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/location/city?thn=2025&lvl=11&pro=11",
+              "raw": "{{base_url}}/api/location/city?province_code=11",
               "host": [
                 "{{base_url}}"
               ],
@@ -1678,19 +1677,12 @@
               ],
               "query": [
                 {
-                  "key": "thn",
-                  "value": "2025"
-                },
-                {
-                  "key": "lvl",
-                  "value": "11"
-                },
-                {
-                  "key": "pro",
+                  "key": "province_code",
                   "value": "11"
                 }
               ]
-            }
+            },
+            "description": "Read cities by province_code from Redis cache first, then PostgreSQL."
           },
           "response": []
         },
@@ -1703,7 +1695,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/location/district?thn=2025&lvl=12&pro=11&kab=01",
+              "raw": "{{base_url}}/api/location/district?city_code=1101",
               "host": [
                 "{{base_url}}"
               ],
@@ -1714,23 +1706,12 @@
               ],
               "query": [
                 {
-                  "key": "thn",
-                  "value": "2025"
-                },
-                {
-                  "key": "lvl",
-                  "value": "12"
-                },
-                {
-                  "key": "pro",
-                  "value": "11"
-                },
-                {
-                  "key": "kab",
-                  "value": "01"
+                  "key": "city_code",
+                  "value": "1101"
                 }
               ]
-            }
+            },
+            "description": "Read districts by city_code from Redis cache first, then PostgreSQL."
           },
           "response": []
         },
@@ -1743,7 +1724,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/location/village?thn=2025&lvl=13&pro=11&kab=01&kec=010",
+              "raw": "{{base_url}}/api/location/village?district_code=110101",
               "host": [
                 "{{base_url}}"
               ],
@@ -1754,31 +1735,317 @@
               ],
               "query": [
                 {
-                  "key": "thn",
-                  "value": "2025"
-                },
+                  "key": "district_code",
+                  "value": "110101"
+                }
+              ]
+            },
+            "description": "Read villages by district_code from Redis cache first, then PostgreSQL."
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Provinces",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"province\"\n}"
+            },
+            "description": "Start an asynchronous province-only sync job. Payload requires only `year` and `level=province`. The returned job ID is automatically saved into `location_sync_job_id`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
                 {
-                  "key": "lvl",
-                  "value": "13"
-                },
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Cities",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"city\",\n  \"province_code\": \"11\"\n}"
+            },
+            "description": "Start an asynchronous city sync job for one province. Required payload: `level=city` and `province_code`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
                 {
-                  "key": "pro",
-                  "value": "11"
-                },
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Districts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"district\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\"\n}"
+            },
+            "description": "Start an asynchronous district sync job for one city. Required payload: `level=district`, `province_code`, and `city_code`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
                 {
-                  "key": "kab",
-                  "value": "01"
-                },
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Villages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"village\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\",\n  \"district_code\": \"1101010\"\n}"
+            },
+            "description": "Start an asynchronous village sync job for one district. Required payload: `level=village`, `province_code`, `city_code`, and `district_code`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
                 {
-                  "key": "kec",
-                  "value": "010"
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync All Locations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData && jsonData.data && jsonData.data.id) {",
+                  "  pm.collectionVariables.set('location_sync_job_id', jsonData.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/location/sync",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"all\"\n}"
+            },
+            "description": "Start a full asynchronous hierarchical import. Use this for initial bootstrap only because it is much heavier than scoped sync requests.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Location Sync Job",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/location/sync/{{location_sync_job_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "location",
+                "sync",
+                "{{location_sync_job_id}}"
+              ]
+            },
+            "description": "Read the current status of an asynchronous location sync job. `location_sync_job_id` is filled automatically after running one of the sync requests above. Status values: `queued`, `running`, `completed`, `failed`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
                 }
               ]
             }
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Runtime reads use Redis then PostgreSQL. External API is used only by the sync endpoint to refresh database data."
     }
   ]
 }

@@ -46,7 +46,7 @@ func Response(code int, msg string, logId uuid.UUID, data interface{}) *ApiRespo
 	res.Id = logId
 	res.Message = msg
 	res.Data = data
-	res.Status = code == http.StatusOK || code == http.StatusCreated
+	res.Status = code >= http.StatusOK && code < http.StatusMultipleChoices
 
 	return res
 }
@@ -88,7 +88,7 @@ func PaginationResponse(code, total, page, perPage int, logId uuid.UUID, data in
 
 	res.LogID = logId.String()
 	res.Code = code
-	res.Status = code == http.StatusOK || code == http.StatusCreated
+	res.Status = code >= http.StatusOK && code < http.StatusMultipleChoices
 	res.Message = message
 	res.Data = data
 	res.TotalData = total
