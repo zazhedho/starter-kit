@@ -25,8 +25,8 @@ const (
 	LogLevelFail  = 2
 	LogLevelInfo  = 3
 	LogLevelData  = 4
-	LogLevelDebug = 5
-	LogLevelWarn  = 6
+	LogLevelWarn  = 5
+	LogLevelDebug = 6
 )
 
 var logLevelMap = map[int]string{
@@ -80,7 +80,7 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 		return
 	}
 
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5")); logLevel < level {
+	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "6")); logLevel < level {
 		return
 	}
 

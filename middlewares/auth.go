@@ -58,15 +58,15 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		_, err = m.BlacklistRepo.GetByToken(tokenString)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; blacklistRepo.GetByToken; Error: %+v", logPrefix, err))
+		isBlacklisted, err := m.BlacklistRepo.ExistsByToken(tokenString)
+		if err != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; blacklistRepo.ExistsByToken; Error: %+v", logPrefix, err))
 			res := response.InternalServerError(logId)
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
 			return
 		}
 
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if isBlacklisted {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid Token: %s; Error: token is blacklisted;", logPrefix, tokenString))
 			res := response.Unauthorized(logId, "Your session is no longer valid. Please login again.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)

@@ -26,3 +26,12 @@ func (r *blacklistRepo) GetByToken(token string) (domainauth.Blacklist, error) {
 	err := r.DB.Where("token = ?", token).First(&blacklist).Error
 	return blacklist, err
 }
+
+func (r *blacklistRepo) ExistsByToken(token string) (bool, error) {
+	var count int64
+	if err := r.DB.Model(&domainauth.Blacklist{}).Where("token = ?", token).Count(&count).Error; err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}

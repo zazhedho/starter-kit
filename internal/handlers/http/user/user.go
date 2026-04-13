@@ -293,6 +293,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		},
 	})
 	res := response.Response(http.StatusOK, "Registration OTP sent successfully", logId, nil)
+	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Registration OTP sent successfully", logPrefix))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -661,6 +662,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	data["provider"] = "google"
 
 	res := response.Response(http.StatusOK, successMessage, logId, data)
+	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; %s; Data: %+v", logPrefix, successMessage, data))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -708,8 +710,23 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		return
 	}
 
-	_, err = h.BlacklistRepo.GetByToken(req.RefreshToken)
-	if err == nil {
+	isBlacklisted, err := h.BlacklistRepo.ExistsByToken(req.RefreshToken)
+	if err != nil {
+		h.writeAudit(ctx, domainaudit.AuditEvent{
+			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
+			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
+			Action:       domainaudit.ActionRefresh,
+			Resource:     "auth_token",
+			Status:       domainaudit.StatusFailed,
+			Message:      "Failed to validate login session renewal",
+			ErrorMessage: err.Error(),
+		})
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BlacklistRepo.ExistsByToken; ERROR: %s;", logPrefix, err))
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if isBlacklisted {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
 			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
@@ -722,21 +739,6 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		res := response.Response(http.StatusUnauthorized, messages.MsgFail, logId, nil)
 		res.Error = "refresh token has been revoked"
 		ctx.JSON(http.StatusUnauthorized, res)
-		return
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
-			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
-			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
-			Action:       domainaudit.ActionRefresh,
-			Resource:     "auth_token",
-			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to validate login session renewal",
-			ErrorMessage: err.Error(),
-		})
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BlacklistRepo.GetByToken; ERROR: %s;", logPrefix, err))
-		res := response.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
 

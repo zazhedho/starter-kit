@@ -65,6 +65,7 @@ func (m *authRepoMock) Store(data domainauth.Blacklist) error { return nil }
 func (m *authRepoMock) GetByToken(token string) (domainauth.Blacklist, error) {
 	return domainauth.Blacklist{}, nil
 }
+func (m *authRepoMock) ExistsByToken(token string) (bool, error) { return false, nil }
 
 type roleRepoUserMock struct {
 	roles map[string]domainrole.Role
