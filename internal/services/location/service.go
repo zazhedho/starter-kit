@@ -258,13 +258,12 @@ func (s *LocationService) markSyncJobFailed(jobID, errorMessage string) {
 }
 
 func (s *LocationService) applySyncProgress(job *domainlocation.SyncJob, progress syncProgress) {
-	now := time.Now()
 	job.Message = progress.Message
 	job.ProvinceCount = progress.ProvinceCount
 	job.CityCount = progress.CityCount
 	job.DistrictCount = progress.DistrictCount
 	job.VillageCount = progress.VillageCount
-	job.UpdatedAt = &now
+	job.UpdatedAt = new(time.Now())
 }
 
 func (s *LocationService) sync(req dto.SyncLocationRequest, progress func(syncProgress)) (syncProgress, error) {
