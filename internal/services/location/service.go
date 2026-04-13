@@ -127,7 +127,7 @@ func (s *LocationService) StartSync(req dto.SyncLocationRequest, requestedByUser
 	switch {
 	case err == nil:
 		return mapSyncJob(activeJob), ErrLocationSyncRunning
-	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+	case !errors.Is(err, gorm.ErrRecordNotFound):
 		return dto.LocationSyncJob{}, err
 	}
 
