@@ -245,10 +245,10 @@ func (r *Routes) AppConfigRoutes() {
 
 	r.App.GET("/api/configs", mdw.AuthMiddleware(), mdw.PermissionMiddleware("configs", "list"), h.GetAll)
 
-	config := r.App.Group("/api/config").Use(mdw.AuthMiddleware())
+	appConfig := r.App.Group("/api/config").Use(mdw.AuthMiddleware())
 	{
-		config.GET("/:id", mdw.PermissionMiddleware("configs", "view"), h.GetByID)
-		config.PUT("/:id", mdw.PermissionMiddleware("configs", "update"), h.Update)
+		appConfig.GET("/:id", mdw.PermissionMiddleware("configs", "view"), h.GetByID)
+		appConfig.PUT("/:id", mdw.PermissionMiddleware("configs", "update"), h.Update)
 	}
 }
 

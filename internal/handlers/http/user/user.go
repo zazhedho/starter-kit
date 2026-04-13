@@ -1379,6 +1379,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 			},
 		})
 		res := response.Response(http.StatusOK, "Password reset instructions sent to your email", logId, nil)
+		logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Password reset instructions sent to email: %s", logPrefix, normalizedEmail))
 		ctx.JSON(http.StatusOK, res)
 		return
 	}
