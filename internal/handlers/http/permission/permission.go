@@ -33,6 +33,7 @@ func (h *PermissionHandler) Create(ctx *gin.Context) {
 	var req dto.PermissionCreate
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][Create]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -44,7 +45,7 @@ func (h *PermissionHandler) Create(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	data, err := h.Service.Create(req)
+	data, err := h.Service.Create(reqCtx, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
@@ -77,8 +78,9 @@ func (h *PermissionHandler) GetByID(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][GetByID]"
+	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetByID(id)
+	data, err := h.Service.GetByID(reqCtx, id)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByID; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Permission not found", logId, nil)
@@ -95,6 +97,7 @@ func (h *PermissionHandler) GetByID(ctx *gin.Context) {
 func (h *PermissionHandler) GetAll(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][GetAll]"
+	reqCtx := ctx.Request.Context()
 
 	params, err := filter.GetBaseParams(ctx, "resource", "asc", 10)
 	if err != nil {
@@ -105,7 +108,7 @@ func (h *PermissionHandler) GetAll(ctx *gin.Context) {
 		return
 	}
 
-	data, total, err := h.Service.GetAll(params)
+	data, total, err := h.Service.GetAll(reqCtx, params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -123,6 +126,7 @@ func (h *PermissionHandler) Update(ctx *gin.Context) {
 	var req dto.PermissionUpdate
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][Update]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -134,8 +138,8 @@ func (h *PermissionHandler) Update(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	before, _ := h.Service.GetByID(id)
-	data, err := h.Service.Update(id, req)
+	before, _ := h.Service.GetByID(reqCtx, id)
+	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -171,9 +175,10 @@ func (h *PermissionHandler) Delete(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][Delete]"
-	before, _ := h.Service.GetByID(id)
+	reqCtx := ctx.Request.Context()
+	before, _ := h.Service.GetByID(reqCtx, id)
 
-	if err := h.Service.Delete(id); err != nil {
+	if err := h.Service.Delete(reqCtx, id); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "permission",
@@ -205,6 +210,7 @@ func (h *PermissionHandler) Delete(ctx *gin.Context) {
 func (h *PermissionHandler) GetUserPermissions(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[PermissionHandler][GetUserPermissions]"
+	reqCtx := ctx.Request.Context()
 
 	userId, exists := ctx.Get("userId")
 	if !exists {
@@ -226,7 +232,7 @@ func (h *PermissionHandler) GetUserPermissions(ctx *gin.Context) {
 		}
 	}
 
-	data, err := h.Service.GetUserPermissions(userId.(string))
+	data, err := h.Service.GetUserPermissions(reqCtx, userId.(string))
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserPermissions; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)

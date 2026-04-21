@@ -33,6 +33,7 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 	var req dto.RoleCreate
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][Create]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -44,7 +45,7 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	data, err := h.Service.Create(req)
+	data, err := h.Service.Create(reqCtx, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
@@ -77,8 +78,9 @@ func (h *RoleHandler) GetByID(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][GetByID]"
+	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetByIDWithDetails(id)
+	data, err := h.Service.GetByIDWithDetails(reqCtx, id)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByIDWithDetails; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Role not found", logId, nil)
@@ -95,6 +97,7 @@ func (h *RoleHandler) GetByID(ctx *gin.Context) {
 func (h *RoleHandler) GetAll(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][GetAll]"
+	reqCtx := ctx.Request.Context()
 
 	authData := utils.GetAuthData(ctx)
 	currentUserRole := utils.InterfaceString(authData["role"])
@@ -108,7 +111,7 @@ func (h *RoleHandler) GetAll(ctx *gin.Context) {
 		return
 	}
 
-	data, total, err := h.Service.GetAll(params, currentUserRole)
+	data, total, err := h.Service.GetAll(reqCtx, params, currentUserRole)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -126,6 +129,7 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 	var req dto.RoleUpdate
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][Update]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -137,8 +141,8 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	before, _ := h.Service.GetByID(id)
-	data, err := h.Service.Update(id, req)
+	before, _ := h.Service.GetByID(reqCtx, id)
+	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -174,9 +178,10 @@ func (h *RoleHandler) Delete(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][Delete]"
-	before, _ := h.Service.GetByID(id)
+	reqCtx := ctx.Request.Context()
+	before, _ := h.Service.GetByID(reqCtx, id)
 
-	if err := h.Service.Delete(id); err != nil {
+	if err := h.Service.Delete(reqCtx, id); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "role",
@@ -210,6 +215,7 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 	var req dto.AssignPermissions
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][AssignPermissions]"
+	reqCtx := ctx.Request.Context()
 
 	authData := utils.GetAuthData(ctx)
 	currentUserID := utils.InterfaceString(authData["user_id"])
@@ -225,8 +231,8 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	beforeIDs, _ := h.Service.GetRolePermissions(id)
-	if err := h.Service.AssignPermissions(id, req, currentUserID, currentUserRole); err != nil {
+	beforeIDs, _ := h.Service.GetRolePermissions(reqCtx, id)
+	if err := h.Service.AssignPermissions(reqCtx, id, req, currentUserID, currentUserRole); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
 			Resource:     "role_permissions",
@@ -266,6 +272,7 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 	var req dto.AssignMenus
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[RoleHandler][AssignMenus]"
+	reqCtx := ctx.Request.Context()
 
 	authData := utils.GetAuthData(ctx)
 	currentUserRole := utils.InterfaceString(authData["role"])
@@ -280,8 +287,8 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	beforeIDs, _ := h.Service.GetRoleMenus(id)
-	if err := h.Service.AssignMenus(id, req, currentUserRole); err != nil {
+	beforeIDs, _ := h.Service.GetRoleMenus(reqCtx, id)
+	if err := h.Service.AssignMenus(reqCtx, id, req, currentUserRole); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
 			Resource:     "role_menus",

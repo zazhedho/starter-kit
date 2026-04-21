@@ -33,8 +33,9 @@ func (h *MenuHandler) GetByID(ctx *gin.Context) {
 	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[MenuHandler][GetByID]"
+	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetByID(id)
+	data, err := h.Service.GetByID(reqCtx, id)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByID; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Menu not found", logId, nil)
@@ -51,6 +52,7 @@ func (h *MenuHandler) GetByID(ctx *gin.Context) {
 func (h *MenuHandler) GetAll(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[MenuHandler][GetAll]"
+	reqCtx := ctx.Request.Context()
 
 	params, err := filter.GetBaseParams(ctx, "order_index", "asc", 100)
 	if err != nil {
@@ -61,7 +63,7 @@ func (h *MenuHandler) GetAll(ctx *gin.Context) {
 		return
 	}
 
-	data, total, err := h.Service.GetAll(params)
+	data, total, err := h.Service.GetAll(reqCtx, params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -77,8 +79,9 @@ func (h *MenuHandler) GetAll(ctx *gin.Context) {
 func (h *MenuHandler) GetActiveMenus(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[MenuHandler][GetActiveMenus]"
+	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetActiveMenus()
+	data, err := h.Service.GetActiveMenus(reqCtx)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetActiveMenus; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -94,6 +97,7 @@ func (h *MenuHandler) GetActiveMenus(ctx *gin.Context) {
 func (h *MenuHandler) GetUserMenus(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[MenuHandler][GetUserMenus]"
+	reqCtx := ctx.Request.Context()
 
 	userId, exists := ctx.Get("userId")
 	if !exists {
@@ -115,7 +119,7 @@ func (h *MenuHandler) GetUserMenus(ctx *gin.Context) {
 		}
 	}
 
-	data, err := h.Service.GetUserMenus(userId.(string))
+	data, err := h.Service.GetUserMenus(reqCtx, userId.(string))
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserMenus; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -133,6 +137,7 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 	var req dto.MenuUpdate
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[MenuHandler][Update]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -144,8 +149,8 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	before, _ := h.Service.GetByID(id)
-	data, err := h.Service.Update(id, req)
+	before, _ := h.Service.GetByID(reqCtx, id)
+	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
