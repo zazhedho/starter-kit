@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"starter-kit/internal/authscope"
 	interfaceauth "starter-kit/internal/interfaces/auth"
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	"starter-kit/pkg/logger"
@@ -76,6 +77,7 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		ctx.Set(utils.CtxKeyAuthData, dataJWT)
 		ctx.Set("token", tokenString)
 		ctx.Set("userId", utils.InterfaceString(dataJWT["user_id"]))
+		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.NewFromClaims(dataJWT, nil)))
 
 		ctx.Next()
 	}
@@ -91,24 +93,31 @@ func (m *Middleware) RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		logId = utils.GenerateLogId(ctx)
 		logPrefix = "[RoleMiddleware]"
 
-		authData, exists := ctx.Get(utils.CtxKeyAuthData)
-		if !exists {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; AuthData not found", logPrefix))
-			res := response.Forbidden(logId, messages.AccessDenied)
-			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
-			return
-		}
-		dataJWT, ok := authData.(map[string]interface{})
-		if !ok {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
-			res := response.Forbidden(logId, messages.AccessDenied)
-			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
-			return
+		scope := authscope.FromContext(ctx.Request.Context())
+		if strings.TrimSpace(scope.Role) == "" {
+			authData, exists := ctx.Get(utils.CtxKeyAuthData)
+			if !exists {
+				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; AuthData not found", logPrefix))
+				res := response.Forbidden(logId, messages.AccessDenied)
+				ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+				return
+			}
+
+			dataJWT, ok := authData.(map[string]interface{})
+			if !ok {
+				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
+				res := response.Forbidden(logId, messages.AccessDenied)
+				ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+				return
+			}
+
+			scope = authscope.NewFromClaims(dataJWT, nil)
+			ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), scope))
 		}
 
-		userRole := strings.TrimSpace(utils.InterfaceString(dataJWT["role"]))
+		userRole := strings.TrimSpace(scope.Role)
 		if userRole == "" {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; there is no role user", logPrefix))
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; AuthData not found", logPrefix))
 			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
@@ -195,16 +204,22 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 
 		targetResource := strings.TrimSpace(resource)
 		targetAction := strings.TrimSpace(action)
-		hasPermission := false
+		permissionKeys := make([]string, 0, len(permissions))
 		for _, perm := range permissions {
-			if strings.EqualFold(strings.TrimSpace(perm.Resource), targetResource) &&
-				strings.EqualFold(strings.TrimSpace(perm.Action), targetAction) {
-				hasPermission = true
-				break
+			permissionKey := authscope.PermissionKey(perm.Resource, perm.Action)
+			if permissionKey != "" {
+				permissionKeys = append(permissionKeys, permissionKey)
 			}
 		}
 
-		if !hasPermission {
+		dataJWT["permissions"] = permissionKeys
+		ctx.Set(utils.CtxKeyAuthData, dataJWT)
+		ctx.Set("permissions", permissionKeys)
+
+		scope := authscope.NewFromClaims(dataJWT, permissionKeys)
+		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), scope))
+
+		if !scope.Has(targetResource, targetAction) {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; User '%s' lacks permission '%s:%s'", logPrefix, userId, targetResource, targetAction))
 			res := response.Forbidden(logId, messages.AccessDenied)
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)

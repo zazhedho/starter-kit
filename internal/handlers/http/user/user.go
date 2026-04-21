@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/mail"
 	"reflect"
+	"starter-kit/internal/authscope"
 	domainaudit "starter-kit/internal/domain/audit"
 	domainsession "starter-kit/internal/domain/session"
 	domainuser "starter-kit/internal/domain/user"
@@ -314,17 +315,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	// Get creator's role from auth data
-	authData := utils.GetAuthData(ctx)
-	if authData == nil {
-		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
-		ctx.JSON(http.StatusUnauthorized, res)
-		return
-	}
-	creatorRole := authData["role"].(string)
-	creatorUserID := utils.InterfaceString(authData["user_id"])
-
-	data, err := h.Service.AdminCreateUser(reqCtx, req, creatorUserID, creatorRole)
+	data, err := h.Service.AdminCreateUser(reqCtx, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
@@ -967,13 +958,18 @@ func (h *HandlerUser) GetUserById(ctx *gin.Context) {
 }
 
 func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
-	authData := utils.GetAuthData(ctx)
-	userId := utils.InterfaceString(authData["user_id"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][GetUserByAuth]"
 	reqCtx := ctx.Request.Context()
+	scope := authscope.FromContext(reqCtx)
 
-	data, err := h.Service.GetUserByAuth(reqCtx, userId)
+	if scope.UserID == "" {
+		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
+
+	data, err := h.Service.GetUserByAuth(reqCtx, scope.UserID)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByAuth; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -988,14 +984,12 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 		return
 	}
 
-	if isImpersonated, ok := authData["is_impersonated"].(bool); ok {
-		data["is_impersonated"] = isImpersonated
-		if isImpersonated {
-			data["impersonator"] = map[string]interface{}{
-				"user_id":  utils.InterfaceString(authData["original_user_id"]),
-				"username": utils.InterfaceString(authData["original_username"]),
-				"role":     utils.InterfaceString(authData["original_role"]),
-			}
+	if scope.IsImpersonated {
+		data["is_impersonated"] = true
+		data["impersonator"] = map[string]interface{}{
+			"user_id":  scope.OriginalUserID,
+			"username": scope.OriginalUsername,
+			"role":     scope.OriginalRole,
 		}
 	} else {
 		data["is_impersonated"] = false
@@ -1016,13 +1010,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 		return
 	}
 
-	authData := utils.GetAuthData(ctx)
-	currentUserID := utils.InterfaceString(authData["user_id"])
-	currentUserName := utils.InterfaceString(authData["username"])
-	currentUserRole := utils.InterfaceString(authData["role"])
-	alreadyImpersonated, _ := authData["is_impersonated"].(bool)
-
-	token, err := h.Service.ImpersonateUser(reqCtx, id, currentUserID, currentUserName, currentUserRole, alreadyImpersonated, logId.String())
+	token, err := h.Service.ImpersonateUser(reqCtx, id, logId.String())
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,
@@ -1066,18 +1054,16 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 	logPrefix := "[UserHandler][StopImpersonation]"
 	reqCtx := ctx.Request.Context()
 
-	authData := utils.GetAuthData(ctx)
-	currentUserID := utils.InterfaceString(authData["user_id"])
-	originalUserID := utils.InterfaceString(authData["original_user_id"])
-	isImpersonated, _ := authData["is_impersonated"].(bool)
-	if !isImpersonated || originalUserID == "" {
+	scope := authscope.FromContext(reqCtx)
+	originalUserID := scope.OriginalUserID
+	if !scope.IsImpersonated || originalUserID == "" {
 		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
 		res.Error = "current session is not impersonated"
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
 
-	token, err := h.Service.StopImpersonation(reqCtx, originalUserID, currentUserID, logId.String())
+	token, err := h.Service.StopImpersonation(reqCtx, logId.String())
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogout,
@@ -1119,13 +1105,10 @@ func (h *HandlerUser) GetAllUsers(ctx *gin.Context) {
 	logPrefix := "[UserHandler][GetAllUsers]"
 	reqCtx := ctx.Request.Context()
 
-	authData := utils.GetAuthData(ctx)
-	currentUserRole := utils.InterfaceString(authData["role"])
-
 	params, _ := filter.GetBaseParams(ctx, "updated_at", "desc", 10)
 	params.Filters = filter.WhitelistFilter(params.Filters, []string{"role"})
 
-	users, totalData, err := h.Service.GetAllUsers(reqCtx, params, currentUserRole)
+	users, totalData, err := h.Service.GetAllUsers(reqCtx, params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetAllUsers; ERROR: %+v;", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -1140,12 +1123,16 @@ func (h *HandlerUser) GetAllUsers(ctx *gin.Context) {
 
 func (h *HandlerUser) Update(ctx *gin.Context) {
 	var req dto.UserUpdate
-	authData := utils.GetAuthData(ctx)
-	userId := utils.InterfaceString(authData["user_id"])
-	role := utils.InterfaceString(authData["role"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][Update]"
 	reqCtx := ctx.Request.Context()
+	scope := authscope.FromContext(reqCtx)
+
+	if scope.UserID == "" {
+		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -1156,13 +1143,13 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 		return
 	}
 
-	before, _ := h.Service.GetUserById(reqCtx, userId)
-	data, err := h.Service.Update(reqCtx, userId, userId, role, req)
+	before, _ := h.Service.GetUserById(reqCtx, scope.UserID)
+	data, err := h.Service.Update(reqCtx, scope.UserID, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user",
-			ResourceID:   userId,
+			ResourceID:   scope.UserID,
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to update user profile",
 			ErrorMessage: err.Error(),
@@ -1198,9 +1185,6 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 
 func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	var req dto.UserUpdate
-	authData := utils.GetAuthData(ctx)
-	currentUserID := utils.InterfaceString(authData["user_id"])
-	role := utils.InterfaceString(authData["role"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][UpdateUserById]"
 	reqCtx := ctx.Request.Context()
@@ -1221,7 +1205,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
 	before, _ := h.Service.GetUserById(reqCtx, id)
-	data, err := h.Service.Update(reqCtx, id, currentUserID, role, req)
+	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -1262,11 +1246,16 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 
 func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 	var req dto.ChangePassword
-	authData := utils.GetAuthData(ctx)
-	userId := utils.InterfaceString(authData["user_id"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][ChangePassword]"
 	reqCtx := ctx.Request.Context()
+	scope := authscope.FromContext(reqCtx)
+
+	if scope.UserID == "" {
+		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -1277,13 +1266,13 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		return
 	}
 
-	before, _ := h.Service.GetUserById(reqCtx, userId)
-	data, err := h.Service.ChangePassword(reqCtx, userId, req)
+	before, _ := h.Service.GetUserById(reqCtx, scope.UserID)
+	data, err := h.Service.ChangePassword(reqCtx, scope.UserID, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user_password",
-			ResourceID:   userId,
+			ResourceID:   scope.UserID,
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to change password",
 			ErrorMessage: err.Error(),
@@ -1543,16 +1532,22 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 func (h *HandlerUser) Delete(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][Delete]"
-	authData := utils.GetAuthData(ctx)
-	userId := utils.InterfaceString(authData["user_id"])
 	reqCtx := ctx.Request.Context()
-	before, _ := h.Service.GetUserById(reqCtx, userId)
+	scope := authscope.FromContext(reqCtx)
 
-	if err := h.Service.Delete(reqCtx, userId); err != nil {
+	if scope.UserID == "" {
+		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
+	}
+
+	before, _ := h.Service.GetUserById(reqCtx, scope.UserID)
+
+	if err := h.Service.Delete(reqCtx, scope.UserID); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "user",
-			ResourceID:   userId,
+			ResourceID:   scope.UserID,
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to delete own user",
 			ErrorMessage: err.Error(),
@@ -1573,7 +1568,7 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 	h.writeAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "user",
-		ResourceID: userId,
+		ResourceID: scope.UserID,
 		Status:     domainaudit.StatusSuccess,
 		Message:    "Deleted own user",
 		BeforeData: before,

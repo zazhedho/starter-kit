@@ -3,6 +3,7 @@ package handlersession
 import (
 	"fmt"
 	"net/http"
+	"starter-kit/internal/authscope"
 	domainaudit "starter-kit/internal/domain/audit"
 	handlercommon "starter-kit/internal/handlers/http/common"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
@@ -33,8 +34,8 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 	logPrefix := "[SessionHandler][GetActiveSessions]"
 	reqCtx := ctx.Request.Context()
 
-	userID, ok := ctx.Get("userId")
-	if !ok {
+	scope := authscope.FromContext(reqCtx)
+	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
 		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
 		ctx.JSON(http.StatusUnauthorized, res)
@@ -48,7 +49,7 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 		currentSessionID = currentSession.SessionID
 	}
 
-	sessions, err := h.Service.GetUserSessions(reqCtx, userID.(string), currentSessionID)
+	sessions, err := h.Service.GetUserSessions(reqCtx, scope.UserID, currentSessionID)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserSessions; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -83,8 +84,8 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 		return
 	}
 
-	userID, ok := ctx.Get("userId")
-	if !ok {
+	scope := authscope.FromContext(reqCtx)
+	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
 		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
 		ctx.JSON(http.StatusUnauthorized, res)
@@ -108,7 +109,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 		return
 	}
 
-	if session.UserID != userID.(string) {
+	if session.UserID != scope.UserID {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
@@ -158,8 +159,8 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	logPrefix := "[SessionHandler][RevokeAllOtherSessions]"
 	reqCtx := ctx.Request.Context()
 
-	userID, ok := ctx.Get("userId")
-	if !ok {
+	scope := authscope.FromContext(reqCtx)
+	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
 		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
 		ctx.JSON(http.StatusUnauthorized, res)
@@ -182,7 +183,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.Service.DestroyOtherSessions(reqCtx, userID.(string), currentSession.SessionID); err != nil {
+	if err := h.Service.DestroyOtherSessions(reqCtx, scope.UserID, currentSession.SessionID); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",

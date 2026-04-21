@@ -3,6 +3,7 @@ package servicerole
 import (
 	"context"
 	"errors"
+	"starter-kit/internal/authscope"
 	domainrole "starter-kit/internal/domain/role"
 	"starter-kit/internal/dto"
 	interfacemenu "starter-kit/internal/interfaces/menu"
@@ -92,13 +93,14 @@ func (s *RoleService) GetByIDWithDetails(ctx context.Context, id string) (dto.Ro
 	}, nil
 }
 
-func (s *RoleService) GetAll(ctx context.Context, params filter.BaseParams, currentUserRole string) ([]domainrole.Role, int64, error) {
+func (s *RoleService) GetAll(ctx context.Context, params filter.BaseParams) ([]domainrole.Role, int64, error) {
+	scope := authscope.FromContext(ctx)
 	roles, total, err := s.RoleRepo.GetAll(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	if currentUserRole != utils.RoleSuperAdmin {
+	if scope.Role != utils.RoleSuperAdmin {
 		filteredRoles := make([]domainrole.Role, 0)
 		for _, role := range roles {
 			if role.Name != utils.RoleSuperAdmin {
@@ -148,21 +150,22 @@ func (s *RoleService) Delete(ctx context.Context, id string) error {
 	return s.RoleRepo.Delete(ctx, id)
 }
 
-func (s *RoleService) AssignPermissions(ctx context.Context, roleId string, req dto.AssignPermissions, currentUserId string, currentUserRole string) error {
+func (s *RoleService) AssignPermissions(ctx context.Context, roleId string, req dto.AssignPermissions) error {
+	scope := authscope.FromContext(ctx)
 	role, err := s.RoleRepo.GetByID(ctx, roleId)
 	if err != nil {
 		return err
 	}
 
 	if role.IsSystem {
-		permissions, err := s.PermissionRepo.GetUserPermissions(ctx, currentUserId)
+		canManageSystem, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "roles", "manage_system")
 		if err != nil {
 			return err
 		}
-		if !hasPermission(permissions, "roles", "manage_system") {
+		if !canManageSystem {
 			return errors.New("access denied: missing permission roles:manage_system")
 		}
-		if role.Name == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
+		if role.Name == utils.RoleSuperAdmin && scope.Role != utils.RoleSuperAdmin {
 			return errors.New("access denied: cannot modify superadmin role")
 		}
 	}
@@ -176,7 +179,7 @@ func (s *RoleService) AssignPermissions(ctx context.Context, roleId string, req 
 	return s.RoleRepo.AssignPermissions(ctx, roleId, req.PermissionIds)
 }
 
-func (s *RoleService) AssignMenus(ctx context.Context, roleId string, req dto.AssignMenus, currentUserRole string) error {
+func (s *RoleService) AssignMenus(ctx context.Context, roleId string, req dto.AssignMenus) error {
 	return errors.New("menu access is derived from permissions; assign permissions instead")
 }
 

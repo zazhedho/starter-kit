@@ -1,6 +1,13 @@
 package serviceshared
 
-import domainmenu "starter-kit/internal/domain/menu"
+import (
+	"context"
+	"starter-kit/internal/authscope"
+	domainmenu "starter-kit/internal/domain/menu"
+	domainpermission "starter-kit/internal/domain/permission"
+	interfacepermission "starter-kit/internal/interfaces/permission"
+	"strings"
+)
 
 func ResolveAccessibleMenus(activeMenus []domainmenu.MenuItem, resources []string) []domainmenu.MenuItem {
 	if len(activeMenus) == 0 || len(resources) == 0 {
@@ -52,4 +59,37 @@ func ResolveAccessibleMenuIDs(activeMenus []domainmenu.MenuItem, resources []str
 	}
 
 	return ids
+}
+
+func HasPermission(ctx context.Context, permissionRepo interfacepermission.RepoPermissionInterface, resource, action string) (bool, error) {
+	scope := authscope.FromContext(ctx)
+	if scope.Has(resource, action) {
+		return true, nil
+	}
+
+	if len(scope.Permissions) > 0 || strings.TrimSpace(scope.UserID) == "" {
+		return false, nil
+	}
+
+	permissions, err := permissionRepo.GetUserPermissions(ctx, scope.UserID)
+	if err != nil {
+		return false, err
+	}
+
+	return permissionListHasAccess(permissions, resource, action), nil
+}
+
+func permissionListHasAccess(permissions []domainpermission.Permission, resource, action string) bool {
+	targetKey := authscope.PermissionKey(resource, action)
+	if targetKey == "" {
+		return false
+	}
+
+	for _, permission := range permissions {
+		if authscope.PermissionKey(permission.Resource, permission.Action) == targetKey {
+			return true
+		}
+	}
+
+	return false
 }

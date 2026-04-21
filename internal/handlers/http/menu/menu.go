@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"starter-kit/internal/authscope"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/internal/dto"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
@@ -99,27 +100,15 @@ func (h *MenuHandler) GetUserMenus(ctx *gin.Context) {
 	logPrefix := "[MenuHandler][GetUserMenus]"
 	reqCtx := ctx.Request.Context()
 
-	userId, exists := ctx.Get("userId")
-	if !exists {
+	scope := authscope.FromContext(reqCtx)
+	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; User ID not found in context", logPrefix))
-
-		authData := utils.GetAuthData(ctx)
-		if authData != nil {
-			if userIdFromAuth := utils.InterfaceString(authData["user_id"]); userIdFromAuth != "" {
-				userId = userIdFromAuth
-			} else {
-				res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
-				ctx.JSON(http.StatusUnauthorized, res)
-				return
-			}
-		} else {
-			res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
-			ctx.JSON(http.StatusUnauthorized, res)
-			return
-		}
+		res := response.Response(http.StatusUnauthorized, "Unauthorized", logId, nil)
+		ctx.JSON(http.StatusUnauthorized, res)
+		return
 	}
 
-	data, err := h.Service.GetUserMenus(reqCtx, userId.(string))
+	data, err := h.Service.GetUserMenus(reqCtx, scope.UserID)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserMenus; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)

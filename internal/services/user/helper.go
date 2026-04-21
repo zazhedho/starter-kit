@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/mail"
 	"regexp"
-	domainpermission "starter-kit/internal/domain/permission"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
 	interfacerole "starter-kit/internal/interfaces/role"
@@ -78,16 +77,6 @@ func findRoleIDByName(ctx context.Context, roleRepo interfacerole.RepoRoleInterf
 	}
 
 	return &roleEntity.Id, true
-}
-
-func hasPermission(permissions []domainpermission.Permission, resource, action string) bool {
-	for _, permission := range permissions {
-		if permission.Resource == resource && permission.Action == action {
-			return true
-		}
-	}
-
-	return false
 }
 
 func resolveLoginIdentifier(req dto.Login) (string, error) {

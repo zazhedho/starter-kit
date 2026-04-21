@@ -3,6 +3,7 @@ package serviceuser
 import (
 	"context"
 	"errors"
+	"starter-kit/internal/authscope"
 	domainauth "starter-kit/internal/domain/auth"
 	domainpermission "starter-kit/internal/domain/permission"
 	domainrole "starter-kit/internal/domain/role"
@@ -15,6 +16,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+func authContext(userID, username, role string, permissions ...string) context.Context {
+	return authscope.WithContext(context.Background(), authscope.New(userID, username, role, permissions))
+}
+
+func impersonatedAuthContext(userID, username, role, originalUserID, originalUsername, originalRole string, permissions ...string) context.Context {
+	scope := authscope.New(userID, username, role, permissions)
+	scope.IsImpersonated = true
+	scope.OriginalUserID = originalUserID
+	scope.OriginalUsername = originalUsername
+	scope.OriginalRole = originalRole
+	return authscope.WithContext(context.Background(), scope)
+}
 
 type userRepoMock struct {
 	user      domainuser.Users
@@ -146,13 +160,13 @@ func TestAdminCreateUserRequiresAssignRolePermissionForNonViewer(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.AdminCreateUser(context.Background(), dto.AdminCreateUser{
+	_, err := service.AdminCreateUser(authContext("creator-1", "Admin User", utils.RoleAdmin), dto.AdminCreateUser{
 		Name:     "Jane Doe",
 		Email:    "jane@example.com",
 		Phone:    "08123456789",
 		Password: "Password1!",
 		Role:     utils.RoleStaff,
-	}, "creator-1", utils.RoleAdmin)
+	})
 	if err == nil || err.Error() != "access denied: missing permission users:assign_role" {
 		t.Fatalf("expected assign_role access error, got %v", err)
 	}
@@ -170,7 +184,7 @@ func TestUpdateRequiresAssignRolePermissionWhenChangingRole(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.Update(context.Background(), "user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleStaff})
+	_, err := service.Update(authContext("editor-1", "Editor User", utils.RoleAdmin), "user-1", dto.UserUpdate{Role: utils.RoleStaff})
 	if err == nil || err.Error() != "access denied: missing permission users:assign_role" {
 		t.Fatalf("expected assign_role access error, got %v", err)
 	}
@@ -190,7 +204,7 @@ func TestUpdateRejectsSuperadminAssignmentForNonSuperadmin(t *testing.T) {
 		},
 	}
 
-	_, err := service.Update(context.Background(), "user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleSuperAdmin})
+	_, err := service.Update(authContext("editor-1", "Editor User", utils.RoleAdmin, "users:assign_role"), "user-1", dto.UserUpdate{Role: utils.RoleSuperAdmin})
 	if err == nil || err.Error() != "cannot assign superadmin role" {
 		t.Fatalf("expected superadmin assignment error, got %v", err)
 	}
@@ -233,13 +247,13 @@ func TestAdminCreateUserNormalizesEmailToLowercase(t *testing.T) {
 		},
 	}
 
-	user, err := service.AdminCreateUser(context.Background(), dto.AdminCreateUser{
+	user, err := service.AdminCreateUser(authContext("creator-1", "Admin User", utils.RoleAdmin, "users:assign_role"), dto.AdminCreateUser{
 		Name:     "Jane Doe",
 		Email:    "Jane.Doe@Example.COM",
 		Phone:    "08123456789",
 		Password: "Password1!",
 		Role:     utils.RoleStaff,
-	}, "creator-1", utils.RoleAdmin)
+	})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -259,7 +273,7 @@ func TestUpdateNormalizesEmailToLowercase(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, err := service.Update(context.Background(), "user-1", "user-1", utils.RoleViewer, dto.UserUpdate{
+	user, err := service.Update(authContext("user-1", "Jane Doe", utils.RoleViewer), "user-1", dto.UserUpdate{
 		Email: "Jane.Doe@Example.COM",
 	})
 	if err != nil {
@@ -382,7 +396,7 @@ func TestImpersonateUserGeneratesTokenWithOriginalUserClaims(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	token, err := service.ImpersonateUser(context.Background(), "target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
+	token, err := service.ImpersonateUser(authContext("admin-1", "Admin User", utils.RoleAdmin), "target-1", "log-1")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -419,7 +433,7 @@ func TestImpersonateUserRejectsSuperadminTargetForNonSuperadmin(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.ImpersonateUser(context.Background(), "target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
+	_, err := service.ImpersonateUser(authContext("admin-1", "Admin User", utils.RoleAdmin), "target-1", "log-1")
 	if err == nil || err.Error() != "cannot impersonate superadmin users" {
 		t.Fatalf("expected superadmin impersonation error, got %v", err)
 	}
@@ -443,7 +457,7 @@ func TestStopImpersonationReturnsOriginalUserToken(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	token, err := service.StopImpersonation(context.Background(), "admin-1", "target-1", "log-1")
+	token, err := service.StopImpersonation(impersonatedAuthContext("target-1", "Target User", utils.RoleStaff, "admin-1", "Admin User", utils.RoleAdmin), "log-1")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}

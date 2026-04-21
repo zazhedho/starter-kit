@@ -3,6 +3,7 @@ package servicerole
 import (
 	"context"
 	"errors"
+	"starter-kit/internal/authscope"
 	domainmenu "starter-kit/internal/domain/menu"
 	domainpermission "starter-kit/internal/domain/permission"
 	domainrole "starter-kit/internal/domain/role"
@@ -11,6 +12,10 @@ import (
 	"starter-kit/utils"
 	"testing"
 )
+
+func roleAuthContext(userID, username, role string, permissions ...string) context.Context {
+	return authscope.WithContext(context.Background(), authscope.New(userID, username, role, permissions))
+}
 
 type roleRepoMock struct {
 	role                domainrole.Role
@@ -114,7 +119,7 @@ func TestAssignPermissionsRequiresManageSystemPermissionForSystemRole(t *testing
 		MenuRepo:       &menuRepoMock{},
 	}
 
-	err := service.AssignPermissions(context.Background(), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleStaff)
+	err := service.AssignPermissions(roleAuthContext("user-1", "Staff User", utils.RoleStaff), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}})
 	if err == nil || err.Error() != "access denied: missing permission roles:manage_system" {
 		t.Fatalf("expected manage_system access error, got %v", err)
 	}
@@ -131,7 +136,7 @@ func TestAssignPermissionsRejectsSuperadminRoleForNonSuperadmin(t *testing.T) {
 		MenuRepo: &menuRepoMock{},
 	}
 
-	err := service.AssignPermissions(context.Background(), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleAdmin)
+	err := service.AssignPermissions(roleAuthContext("user-1", "Admin User", utils.RoleAdmin, "roles:manage_system"), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}})
 	if err == nil || err.Error() != "access denied: cannot modify superadmin role" {
 		t.Fatalf("expected superadmin protection error, got %v", err)
 	}
@@ -152,7 +157,7 @@ func TestAssignPermissionsAllowsSystemRoleWhenPermissionPresent(t *testing.T) {
 		MenuRepo: &menuRepoMock{},
 	}
 
-	err := service.AssignPermissions(context.Background(), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleAdmin)
+	err := service.AssignPermissions(roleAuthContext("user-1", "Admin User", utils.RoleAdmin, "roles:manage_system"), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}

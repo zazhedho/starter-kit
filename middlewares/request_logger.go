@@ -3,8 +3,8 @@ package middlewares
 import (
 	"fmt"
 	"net/http"
+	"starter-kit/internal/authscope"
 	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,10 +23,7 @@ func RequestLogger() gin.HandlerFunc {
 			path = ctx.Request.URL.Path
 		}
 
-		userID := ""
-		if val, ok := ctx.Get("userId"); ok {
-			userID = utils.InterfaceString(val)
-		}
+		userID := authscope.FromContext(ctx.Request.Context()).UserID
 
 		msg := fmt.Sprintf(
 			"[Request]; %s %s; status=%d; latency_ms=%d; ip=%s; user_id=%s",

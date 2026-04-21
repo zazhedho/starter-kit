@@ -99,9 +99,6 @@ func (h *RoleHandler) GetAll(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][GetAll]"
 	reqCtx := ctx.Request.Context()
 
-	authData := utils.GetAuthData(ctx)
-	currentUserRole := utils.InterfaceString(authData["role"])
-
 	params, err := filter.GetBaseParams(ctx, "name", "asc", 10)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
@@ -111,7 +108,7 @@ func (h *RoleHandler) GetAll(ctx *gin.Context) {
 		return
 	}
 
-	data, total, err := h.Service.GetAll(reqCtx, params, currentUserRole)
+	data, total, err := h.Service.GetAll(reqCtx, params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -217,10 +214,6 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][AssignPermissions]"
 	reqCtx := ctx.Request.Context()
 
-	authData := utils.GetAuthData(ctx)
-	currentUserID := utils.InterfaceString(authData["user_id"])
-	currentUserRole := utils.InterfaceString(authData["role"])
-
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
@@ -232,7 +225,7 @@ func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
 	beforeIDs, _ := h.Service.GetRolePermissions(reqCtx, id)
-	if err := h.Service.AssignPermissions(reqCtx, id, req, currentUserID, currentUserRole); err != nil {
+	if err := h.Service.AssignPermissions(reqCtx, id, req); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
 			Resource:     "role_permissions",
@@ -274,9 +267,6 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][AssignMenus]"
 	reqCtx := ctx.Request.Context()
 
-	authData := utils.GetAuthData(ctx)
-	currentUserRole := utils.InterfaceString(authData["role"])
-
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
@@ -288,7 +278,7 @@ func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
 	beforeIDs, _ := h.Service.GetRoleMenus(reqCtx, id)
-	if err := h.Service.AssignMenus(reqCtx, id, req, currentUserRole); err != nil {
+	if err := h.Service.AssignMenus(reqCtx, id, req); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
 			Resource:     "role_menus",

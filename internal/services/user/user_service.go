@@ -3,6 +3,7 @@ package serviceuser
 import (
 	"context"
 	"errors"
+	"starter-kit/internal/authscope"
 	domainauth "starter-kit/internal/domain/auth"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
@@ -10,6 +11,7 @@ import (
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	interfacerole "starter-kit/internal/interfaces/role"
 	interfaceuser "starter-kit/internal/interfaces/user"
+	serviceshared "starter-kit/internal/services/shared"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"strings"
@@ -89,7 +91,8 @@ func (s *ServiceUser) RegisterUser(ctx context.Context, req dto.UserRegister) (d
 	return data, nil
 }
 
-func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUser, creatorUserId string, creatorRole string) (domainuser.Users, error) {
+func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUser) (domainuser.Users, error) {
+	scope := authscope.FromContext(ctx)
 	phone := utils.NormalizePhoneTo62(req.Phone)
 	email := utils.SanitizeEmail(req.Email)
 
@@ -115,16 +118,16 @@ func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUs
 	}
 
 	roleName := strings.ToLower(strings.TrimSpace(req.Role))
-	permissions, err := s.PermissionRepo.GetUserPermissions(ctx, creatorUserId)
+	canAssignRole, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "users", "assign_role")
 	if err != nil {
 		return domainuser.Users{}, err
 	}
 
-	if roleName != utils.RoleViewer && !hasPermission(permissions, "users", "assign_role") {
+	if roleName != utils.RoleViewer && !canAssignRole {
 		return domainuser.Users{}, errors.New("access denied: missing permission users:assign_role")
 	}
 
-	if roleName == utils.RoleSuperAdmin && creatorRole != utils.RoleSuperAdmin {
+	if roleName == utils.RoleSuperAdmin && scope.Role != utils.RoleSuperAdmin {
 		return domainuser.Users{}, errors.New("only superadmin can create superadmin users")
 	}
 
@@ -210,14 +213,15 @@ func (s *ServiceUser) LogoutUser(ctx context.Context, token string) error {
 	return nil
 }
 
-func (s *ServiceUser) ImpersonateUser(ctx context.Context, targetUserId, impersonatorUserId, impersonatorName, impersonatorRole string, alreadyImpersonated bool, logId string) (string, error) {
-	if alreadyImpersonated {
+func (s *ServiceUser) ImpersonateUser(ctx context.Context, targetUserId string, logId string) (string, error) {
+	scope := authscope.FromContext(ctx)
+	if scope.IsImpersonated {
 		return "", errors.New("cannot start nested impersonation")
 	}
 	if strings.TrimSpace(targetUserId) == "" {
 		return "", errors.New("target user id is required")
 	}
-	if targetUserId == impersonatorUserId {
+	if targetUserId == scope.UserID {
 		return "", errors.New("cannot impersonate your own account")
 	}
 
@@ -226,19 +230,23 @@ func (s *ServiceUser) ImpersonateUser(ctx context.Context, targetUserId, imperso
 		return "", err
 	}
 
-	if targetUser.Role == utils.RoleSuperAdmin && impersonatorRole != utils.RoleSuperAdmin {
+	if targetUser.Role == utils.RoleSuperAdmin && scope.Role != utils.RoleSuperAdmin {
 		return "", errors.New("cannot impersonate superadmin users")
 	}
 
 	return utils.GenerateJwtWithClaims(&targetUser, logId, &utils.AppClaims{
 		IsImpersonated:   true,
-		OriginalUserId:   impersonatorUserId,
-		OriginalUsername: impersonatorName,
-		OriginalRole:     impersonatorRole,
+		OriginalUserId:   scope.UserID,
+		OriginalUsername: scope.Username,
+		OriginalRole:     scope.Role,
 	})
 }
 
-func (s *ServiceUser) StopImpersonation(ctx context.Context, originalUserId, currentUserId string, logId string) (string, error) {
+func (s *ServiceUser) StopImpersonation(ctx context.Context, logId string) (string, error) {
+	scope := authscope.FromContext(ctx)
+	originalUserId := scope.OriginalUserID
+	currentUserId := scope.UserID
+
 	if strings.TrimSpace(originalUserId) == "" {
 		return "", errors.New("original user id is required")
 	}
@@ -285,13 +293,14 @@ func (s *ServiceUser) GetUserByAuth(ctx context.Context, id string) (map[string]
 	return buildUserAuthResponse(user, permissionNames), nil
 }
 
-func (s *ServiceUser) GetAllUsers(ctx context.Context, params filter.BaseParams, currentUserRole string) ([]domainuser.Users, int64, error) {
+func (s *ServiceUser) GetAllUsers(ctx context.Context, params filter.BaseParams) ([]domainuser.Users, int64, error) {
+	scope := authscope.FromContext(ctx)
 	users, total, err := s.UserRepo.GetAll(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	if currentUserRole != utils.RoleSuperAdmin {
+	if scope.Role != utils.RoleSuperAdmin {
 		filteredUsers := make([]domainuser.Users, 0)
 		for _, user := range users {
 			if user.Role != utils.RoleSuperAdmin {
@@ -305,13 +314,14 @@ func (s *ServiceUser) GetAllUsers(ctx context.Context, params filter.BaseParams,
 	return users, total, nil
 }
 
-func (s *ServiceUser) Update(ctx context.Context, id, currentUserId, currentUserRole string, req dto.UserUpdate) (domainuser.Users, error) {
+func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate) (domainuser.Users, error) {
+	scope := authscope.FromContext(ctx)
 	data, err := s.UserRepo.GetByID(ctx, id)
 	if err != nil {
 		return domainuser.Users{}, err
 	}
 
-	if data.Role == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
+	if data.Role == utils.RoleSuperAdmin && scope.Role != utils.RoleSuperAdmin {
 		return domainuser.Users{}, errors.New("cannot modify superadmin users")
 	}
 
@@ -330,14 +340,14 @@ func (s *ServiceUser) Update(ctx context.Context, id, currentUserId, currentUser
 
 	if reqRole := strings.TrimSpace(req.Role); reqRole != "" {
 		newRoleName := strings.ToLower(reqRole)
-		permissions, err := s.PermissionRepo.GetUserPermissions(ctx, currentUserId)
+		canAssignRole, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "users", "assign_role")
 		if err != nil {
 			return domainuser.Users{}, err
 		}
-		if !hasPermission(permissions, "users", "assign_role") {
+		if !canAssignRole {
 			return domainuser.Users{}, errors.New("access denied: missing permission users:assign_role")
 		}
-		if newRoleName == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
+		if newRoleName == utils.RoleSuperAdmin && scope.Role != utils.RoleSuperAdmin {
 			return domainuser.Users{}, errors.New("cannot assign superadmin role")
 		}
 		roleID, ok := findRoleIDByName(ctx, s.RoleRepo, newRoleName)
