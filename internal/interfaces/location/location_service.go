@@ -1,12 +1,13 @@
 package interfacelocation
 
+import "context"
 import "starter-kit/internal/dto"
 
 type ServiceLocationInterface interface {
-	GetProvince() ([]dto.Location, error)
-	GetCity(provinceCode string) ([]dto.Location, error)
-	GetDistrict(cityCode string) ([]dto.Location, error)
-	GetVillage(districtCode string) ([]dto.Location, error)
-	StartSync(req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error)
-	GetSyncJob(id string) (dto.LocationSyncJob, error)
+	GetProvince(ctx context.Context) ([]dto.Location, error)
+	GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error)
+	GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error)
+	GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error)
+	StartSync(ctx context.Context, req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error)
+	GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error)
 }

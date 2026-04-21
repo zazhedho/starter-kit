@@ -28,8 +28,8 @@ type googleTokenInfo struct {
 
 var googleIDTokenVerifier = verifyGoogleIDToken
 
-func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMetadata, allowRegistration bool) (domainuser.Users, bool, error) {
-	identity, err := googleIDTokenVerifier(context.Background(), req.IDToken)
+func (s *ServiceUser) LoginWithGoogle(ctx context.Context, req dto.GoogleLogin, metadata dto.LoginMetadata, allowRegistration bool) (domainuser.Users, bool, error) {
+	identity, err := googleIDTokenVerifier(ctx, req.IDToken)
 	if err != nil {
 		return domainuser.Users{}, false, err
 	}
@@ -39,7 +39,7 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMet
 		return domainuser.Users{}, false, ErrGoogleEmailMissing
 	}
 
-	existing, err := s.UserRepo.GetByEmail(email)
+	existing, err := s.UserRepo.GetByEmail(ctx, email)
 	if err == nil && existing.Id != "" {
 		existing.EmailVerifiedAt = new(time.Now())
 		existing.LastLoginAt = new(time.Now())
@@ -49,7 +49,7 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMet
 		if strings.TrimSpace(identity.Picture) != "" {
 			existing.AvatarURL = strings.TrimSpace(identity.Picture)
 		}
-		if updateErr := s.UserRepo.Update(existing); updateErr != nil {
+		if updateErr := s.UserRepo.Update(ctx, existing); updateErr != nil {
 			return domainuser.Users{}, false, updateErr
 		}
 		return existing, false, nil
@@ -62,7 +62,7 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMet
 	}
 
 	roleName := utils.RoleViewer
-	roleId, ok := findRoleIDByName(s.RoleRepo, roleName)
+	roleId, ok := findRoleIDByName(ctx, s.RoleRepo, roleName)
 	if !ok {
 		return domainuser.Users{}, false, errors.New("role viewer is not configured")
 	}
@@ -99,7 +99,7 @@ func (s *ServiceUser) LoginWithGoogle(req dto.GoogleLogin, metadata dto.LoginMet
 		CreatedAt: time.Now(),
 	}
 
-	if err := s.UserRepo.Store(user); err != nil {
+	if err := s.UserRepo.Store(ctx, user); err != nil {
 		return domainuser.Users{}, false, err
 	}
 

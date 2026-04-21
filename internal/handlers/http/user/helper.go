@@ -1,6 +1,7 @@
 package handleruser
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -57,11 +58,11 @@ func (h *HandlerUser) writeAudit(ctx *gin.Context, event domainaudit.AuditEvent)
 	handlercommon.WriteAudit(ctx, h.AuditService, event, "UserHandler")
 }
 
-func (h *HandlerUser) isRuntimeConfigEnabled(configKey string, fallback bool) (bool, error) {
+func (h *HandlerUser) isRuntimeConfigEnabled(ctx context.Context, configKey string, fallback bool) (bool, error) {
 	if h.AppConfigService == nil {
 		return fallback, nil
 	}
-	return h.AppConfigService.IsEnabled(configKey, fallback)
+	return h.AppConfigService.IsEnabled(ctx, configKey, fallback)
 }
 
 func publicRegistrationConfigKey() string {

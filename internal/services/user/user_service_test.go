@@ -26,8 +26,11 @@ type userRepoMock struct {
 	phoneErr  error
 }
 
-func (m *userRepoMock) Store(data domainuser.Users) error { m.user = data; return nil }
-func (m *userRepoMock) GetByID(id string) (domainuser.Users, error) {
+func (m *userRepoMock) Store(ctx context.Context, data domainuser.Users) error {
+	m.user = data
+	return nil
+}
+func (m *userRepoMock) GetByID(ctx context.Context, id string) (domainuser.Users, error) {
 	if m.usersByID != nil {
 		user, ok := m.usersByID[id]
 		if !ok {
@@ -37,22 +40,22 @@ func (m *userRepoMock) GetByID(id string) (domainuser.Users, error) {
 	}
 	return m.user, nil
 }
-func (m *userRepoMock) GetAll(params filter.BaseParams) ([]domainuser.Users, int64, error) {
+func (m *userRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainuser.Users, int64, error) {
 	return nil, 0, nil
 }
-func (m *userRepoMock) Update(data domainuser.Users) error {
+func (m *userRepoMock) Update(ctx context.Context, data domainuser.Users) error {
 	m.updated = data
 	m.user = data
 	return nil
 }
-func (m *userRepoMock) Delete(id string) error { return nil }
-func (m *userRepoMock) GetByEmail(email string) (domainuser.Users, error) {
+func (m *userRepoMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *userRepoMock) GetByEmail(ctx context.Context, email string) (domainuser.Users, error) {
 	if m.emailErr != nil {
 		return domainuser.Users{}, m.emailErr
 	}
 	return m.emailUser, nil
 }
-func (m *userRepoMock) GetByPhone(phone string) (domainuser.Users, error) {
+func (m *userRepoMock) GetByPhone(ctx context.Context, phone string) (domainuser.Users, error) {
 	if m.phoneErr != nil {
 		return domainuser.Users{}, m.phoneErr
 	}
@@ -71,49 +74,65 @@ type roleRepoUserMock struct {
 	roles map[string]domainrole.Role
 }
 
-func (m *roleRepoUserMock) Store(data domainrole.Role) error { return nil }
-func (m *roleRepoUserMock) GetByID(id string) (domainrole.Role, error) {
+func (m *roleRepoUserMock) Store(ctx context.Context, data domainrole.Role) error { return nil }
+func (m *roleRepoUserMock) GetByID(ctx context.Context, id string) (domainrole.Role, error) {
 	return domainrole.Role{}, errors.New("not implemented")
 }
-func (m *roleRepoUserMock) GetAll(params filter.BaseParams) ([]domainrole.Role, int64, error) {
+func (m *roleRepoUserMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainrole.Role, int64, error) {
 	return nil, 0, nil
 }
-func (m *roleRepoUserMock) Update(data domainrole.Role) error { return nil }
-func (m *roleRepoUserMock) Delete(id string) error            { return nil }
-func (m *roleRepoUserMock) GetByName(name string) (domainrole.Role, error) {
+func (m *roleRepoUserMock) Update(ctx context.Context, data domainrole.Role) error { return nil }
+func (m *roleRepoUserMock) Delete(ctx context.Context, id string) error            { return nil }
+func (m *roleRepoUserMock) GetByName(ctx context.Context, name string) (domainrole.Role, error) {
 	role, ok := m.roles[name]
 	if !ok {
 		return domainrole.Role{}, errors.New("not found")
 	}
 	return role, nil
 }
-func (m *roleRepoUserMock) AssignPermissions(roleId string, permissionIds []string) error { return nil }
-func (m *roleRepoUserMock) RemovePermissions(roleId string, permissionIds []string) error { return nil }
-func (m *roleRepoUserMock) GetRolePermissions(roleId string) ([]string, error)            { return nil, nil }
-func (m *roleRepoUserMock) AssignMenus(roleId string, menuIds []string) error             { return nil }
-func (m *roleRepoUserMock) RemoveMenus(roleId string, menuIds []string) error             { return nil }
-func (m *roleRepoUserMock) GetRoleMenus(roleId string) ([]string, error)                  { return nil, nil }
+func (m *roleRepoUserMock) AssignPermissions(ctx context.Context, roleId string, permissionIds []string) error {
+	return nil
+}
+func (m *roleRepoUserMock) RemovePermissions(ctx context.Context, roleId string, permissionIds []string) error {
+	return nil
+}
+func (m *roleRepoUserMock) GetRolePermissions(ctx context.Context, roleId string) ([]string, error) {
+	return nil, nil
+}
+func (m *roleRepoUserMock) AssignMenus(ctx context.Context, roleId string, menuIds []string) error {
+	return nil
+}
+func (m *roleRepoUserMock) RemoveMenus(ctx context.Context, roleId string, menuIds []string) error {
+	return nil
+}
+func (m *roleRepoUserMock) GetRoleMenus(ctx context.Context, roleId string) ([]string, error) {
+	return nil, nil
+}
 
 type permissionRepoUserMock struct {
 	userPermissions []domainpermission.Permission
 }
 
-func (m *permissionRepoUserMock) Store(data domainpermission.Permission) error { return nil }
-func (m *permissionRepoUserMock) GetByID(id string) (domainpermission.Permission, error) {
+func (m *permissionRepoUserMock) Store(ctx context.Context, data domainpermission.Permission) error {
+	return nil
+}
+func (m *permissionRepoUserMock) GetByID(ctx context.Context, id string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }
-func (m *permissionRepoUserMock) GetAll(params filter.BaseParams) ([]domainpermission.Permission, int64, error) {
+func (m *permissionRepoUserMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainpermission.Permission, int64, error) {
 	return nil, 0, nil
 }
-func (m *permissionRepoUserMock) Update(data domainpermission.Permission) error { return nil }
-func (m *permissionRepoUserMock) Delete(id string) error                        { return nil }
-func (m *permissionRepoUserMock) GetByName(name string) (domainpermission.Permission, error) {
+func (m *permissionRepoUserMock) Update(ctx context.Context, data domainpermission.Permission) error {
+	return nil
+}
+func (m *permissionRepoUserMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *permissionRepoUserMock) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }
-func (m *permissionRepoUserMock) GetByResource(resource string) ([]domainpermission.Permission, error) {
+func (m *permissionRepoUserMock) GetByResource(ctx context.Context, resource string) ([]domainpermission.Permission, error) {
 	return nil, nil
 }
-func (m *permissionRepoUserMock) GetUserPermissions(userId string) ([]domainpermission.Permission, error) {
+func (m *permissionRepoUserMock) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
 
@@ -127,7 +146,7 @@ func TestAdminCreateUserRequiresAssignRolePermissionForNonViewer(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.AdminCreateUser(dto.AdminCreateUser{
+	_, err := service.AdminCreateUser(context.Background(), dto.AdminCreateUser{
 		Name:     "Jane Doe",
 		Email:    "jane@example.com",
 		Phone:    "08123456789",
@@ -151,7 +170,7 @@ func TestUpdateRequiresAssignRolePermissionWhenChangingRole(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.Update("user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleStaff})
+	_, err := service.Update(context.Background(), "user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleStaff})
 	if err == nil || err.Error() != "access denied: missing permission users:assign_role" {
 		t.Fatalf("expected assign_role access error, got %v", err)
 	}
@@ -171,7 +190,7 @@ func TestUpdateRejectsSuperadminAssignmentForNonSuperadmin(t *testing.T) {
 		},
 	}
 
-	_, err := service.Update("user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleSuperAdmin})
+	_, err := service.Update(context.Background(), "user-1", "editor-1", utils.RoleAdmin, dto.UserUpdate{Role: utils.RoleSuperAdmin})
 	if err == nil || err.Error() != "cannot assign superadmin role" {
 		t.Fatalf("expected superadmin assignment error, got %v", err)
 	}
@@ -187,7 +206,7 @@ func TestRegisterUserNormalizesEmailToLowercase(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, err := service.RegisterUser(dto.UserRegister{
+	user, err := service.RegisterUser(context.Background(), dto.UserRegister{
 		Name:     "Jane Doe",
 		Email:    "Jane.Doe@Example.COM",
 		Phone:    "08123456789",
@@ -214,7 +233,7 @@ func TestAdminCreateUserNormalizesEmailToLowercase(t *testing.T) {
 		},
 	}
 
-	user, err := service.AdminCreateUser(dto.AdminCreateUser{
+	user, err := service.AdminCreateUser(context.Background(), dto.AdminCreateUser{
 		Name:     "Jane Doe",
 		Email:    "Jane.Doe@Example.COM",
 		Phone:    "08123456789",
@@ -240,7 +259,7 @@ func TestUpdateNormalizesEmailToLowercase(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, err := service.Update("user-1", "user-1", utils.RoleViewer, dto.UserUpdate{
+	user, err := service.Update(context.Background(), "user-1", "user-1", utils.RoleViewer, dto.UserUpdate{
 		Email: "Jane.Doe@Example.COM",
 	})
 	if err != nil {
@@ -275,7 +294,7 @@ func TestLoginUserAcceptsEmailIdentifier(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	token, err := service.LoginUser(dto.Login{
+	token, err := service.LoginUser(context.Background(), dto.Login{
 		Identifier: "Jane.Doe@Example.COM",
 		Password:   "Password1!",
 	}, "log-1", dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
@@ -314,7 +333,7 @@ func TestLoginUserAcceptsPhoneIdentifier(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	token, err := service.LoginUser(dto.Login{
+	token, err := service.LoginUser(context.Background(), dto.Login{
 		Identifier: "08123456789",
 		Password:   "Password1!",
 	}, "log-1", dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"})
@@ -335,7 +354,7 @@ func TestLoginUserRejectsInvalidRandomIdentifier(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.LoginUser(dto.Login{
+	_, err := service.LoginUser(context.Background(), dto.Login{
 		Identifier: "randomtext",
 		Password:   "Password1!",
 	}, "log-1", dto.LoginMetadata{})
@@ -363,7 +382,7 @@ func TestImpersonateUserGeneratesTokenWithOriginalUserClaims(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	token, err := service.ImpersonateUser("target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
+	token, err := service.ImpersonateUser(context.Background(), "target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -400,7 +419,7 @@ func TestImpersonateUserRejectsSuperadminTargetForNonSuperadmin(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	_, err := service.ImpersonateUser("target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
+	_, err := service.ImpersonateUser(context.Background(), "target-1", "admin-1", "Admin User", utils.RoleAdmin, false, "log-1")
 	if err == nil || err.Error() != "cannot impersonate superadmin users" {
 		t.Fatalf("expected superadmin impersonation error, got %v", err)
 	}
@@ -424,7 +443,7 @@ func TestStopImpersonationReturnsOriginalUserToken(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	token, err := service.StopImpersonation("admin-1", "target-1", "log-1")
+	token, err := service.StopImpersonation(context.Background(), "admin-1", "target-1", "log-1")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -469,7 +488,7 @@ func TestLoginWithGoogleReturnsExistingUser(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
+	user, isNewUser, err := service.LoginWithGoogle(context.Background(), dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -504,7 +523,7 @@ func TestLoginWithGoogleCreatesNewViewerUser(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	user, isNewUser, err := service.LoginWithGoogle(dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
+	user, isNewUser, err := service.LoginWithGoogle(context.Background(), dto.GoogleLogin{IDToken: "token"}, dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"}, true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -546,6 +565,7 @@ func TestLoginWithGoogleRejectsNewUserWhenPublicRegistrationDisabled(t *testing.
 	}
 
 	_, _, err := service.LoginWithGoogle(
+		context.Background(),
 		dto.GoogleLogin{IDToken: "token"},
 		dto.LoginMetadata{IP: "127.0.0.1", UserAgent: "test-agent"},
 		false,
@@ -579,7 +599,7 @@ func TestResetPasswordByEmailNormalizesEmailAndUpdatesPassword(t *testing.T) {
 		PermissionRepo: &permissionRepoUserMock{},
 	}
 
-	if err := service.ResetPasswordByEmail(" Jane.Doe@Example.COM ", "NewPassword1!"); err != nil {
+	if err := service.ResetPasswordByEmail(context.Background(), " Jane.Doe@Example.COM ", "NewPassword1!"); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 

@@ -1,6 +1,7 @@
 package handlercommon
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -16,16 +17,16 @@ type auditServiceMock struct {
 	stored domainaudit.AuditEvent
 }
 
-func (m *auditServiceMock) Store(req domainaudit.AuditEvent) error {
+func (m *auditServiceMock) Store(ctx context.Context, req domainaudit.AuditEvent) error {
 	m.stored = req
 	return nil
 }
 
-func (m *auditServiceMock) GetAll(params filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {
+func (m *auditServiceMock) GetAll(ctx context.Context, params filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {
 	return nil, 0, errors.New("not implemented")
 }
 
-func (m *auditServiceMock) GetByID(id string) (dto.AuditTrailResponse, error) {
+func (m *auditServiceMock) GetByID(ctx context.Context, id string) (dto.AuditTrailResponse, error) {
 	return dto.AuditTrailResponse{}, errors.New("not implemented")
 }
 

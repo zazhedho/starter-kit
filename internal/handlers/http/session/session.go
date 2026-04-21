@@ -1,7 +1,6 @@
 package handlersession
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	domainaudit "starter-kit/internal/domain/audit"
@@ -32,6 +31,7 @@ func (h *HandlerSession) writeAudit(ctx *gin.Context, event domainaudit.AuditEve
 func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[SessionHandler][GetActiveSessions]"
+	reqCtx := ctx.Request.Context()
 
 	userID, ok := ctx.Get("userId")
 	if !ok {
@@ -42,13 +42,13 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 	}
 
 	token, _ := ctx.Get("token")
-	currentSession, err := h.Service.GetSessionByToken(context.Background(), token.(string))
+	currentSession, err := h.Service.GetSessionByToken(reqCtx, token.(string))
 	currentSessionID := ""
 	if err == nil && currentSession != nil {
 		currentSessionID = currentSession.SessionID
 	}
 
-	sessions, err := h.Service.GetUserSessions(context.Background(), userID.(string), currentSessionID)
+	sessions, err := h.Service.GetUserSessions(reqCtx, userID.(string), currentSessionID)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserSessions; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -66,6 +66,7 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[SessionHandler][RevokeSession]"
+	reqCtx := ctx.Request.Context()
 
 	sessionID := ctx.Param("session_id")
 	if sessionID == "" {
@@ -90,7 +91,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 		return
 	}
 
-	session, err := h.Service.GetSessionBySessionID(context.Background(), sessionID)
+	session, err := h.Service.GetSessionBySessionID(reqCtx, sessionID)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
@@ -125,7 +126,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.Service.DestroySession(context.Background(), sessionID); err != nil {
+	if err := h.Service.DestroySession(reqCtx, sessionID); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
@@ -155,6 +156,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[SessionHandler][RevokeAllOtherSessions]"
+	reqCtx := ctx.Request.Context()
 
 	userID, ok := ctx.Get("userId")
 	if !ok {
@@ -165,7 +167,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	}
 
 	token, _ := ctx.Get("token")
-	currentSession, err := h.Service.GetSessionByToken(context.Background(), token.(string))
+	currentSession, err := h.Service.GetSessionByToken(reqCtx, token.(string))
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
@@ -180,7 +182,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.Service.DestroyOtherSessions(context.Background(), userID.(string), currentSession.SessionID); err != nil {
+	if err := h.Service.DestroyOtherSessions(reqCtx, userID.(string), currentSession.SessionID); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",

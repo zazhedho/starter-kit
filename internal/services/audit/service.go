@@ -1,6 +1,7 @@
 package serviceaudit
 
 import (
+	"context"
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/internal/dto"
@@ -21,7 +22,7 @@ func NewAuditService(auditRepo interfaceaudit.RepoAuditInterface) *AuditService 
 	}
 }
 
-func (s *AuditService) Store(req domainaudit.AuditEvent) error {
+func (s *AuditService) Store(ctx context.Context, req domainaudit.AuditEvent) error {
 	if strings.TrimSpace(req.Action) == "" {
 		return errors.New("action is required")
 	}
@@ -61,11 +62,11 @@ func (s *AuditService) Store(req domainaudit.AuditEvent) error {
 		CreatedAt:    time.Now(),
 	}
 
-	return s.AuditRepo.Store(data)
+	return s.AuditRepo.Store(ctx, data)
 }
 
-func (s *AuditService) GetAll(params filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {
-	items, total, err := s.AuditRepo.GetAll(params)
+func (s *AuditService) GetAll(ctx context.Context, params filter.BaseParams) ([]dto.AuditTrailResponse, int64, error) {
+	items, total, err := s.AuditRepo.GetAll(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -73,8 +74,8 @@ func (s *AuditService) GetAll(params filter.BaseParams) ([]dto.AuditTrailRespons
 	return toAuditResponses(items), total, nil
 }
 
-func (s *AuditService) GetByID(id string) (dto.AuditTrailResponse, error) {
-	item, err := s.AuditRepo.GetByID(id)
+func (s *AuditService) GetByID(ctx context.Context, id string) (dto.AuditTrailResponse, error) {
+	item, err := s.AuditRepo.GetByID(ctx, id)
 	if err != nil {
 		return dto.AuditTrailResponse{}, err
 	}

@@ -1,6 +1,7 @@
 package serviceuser
 
 import (
+	"context"
 	"errors"
 	domainauth "starter-kit/internal/domain/auth"
 	domainuser "starter-kit/internal/domain/user"
@@ -33,16 +34,16 @@ func NewUserService(userRepo interfaceuser.RepoUserInterface, blacklistRepo inte
 	}
 }
 
-func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, error) {
+func (s *ServiceUser) RegisterUser(ctx context.Context, req dto.UserRegister) (domainuser.Users, error) {
 	phone := utils.NormalizePhoneTo62(req.Phone)
 	email := utils.SanitizeEmail(req.Email)
 
-	data, _ := s.UserRepo.GetByEmail(email)
+	data, _ := s.UserRepo.GetByEmail(ctx, email)
 	if data.Id != "" {
 		return domainuser.Users{}, errors.New("email already exists")
 	}
 
-	phoneData, _ := s.UserRepo.GetByPhone(phone)
+	phoneData, _ := s.UserRepo.GetByPhone(ctx, phone)
 	if phoneData.Id != "" {
 		return domainuser.Users{}, errors.New("phone number already exists")
 	}
@@ -60,7 +61,7 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 	// This prevents privilege escalation through request manipulation
 	roleName := utils.RoleViewer
 
-	roleId, _ := findRoleIDByName(s.RoleRepo, roleName)
+	roleId, _ := findRoleIDByName(ctx, s.RoleRepo, roleName)
 	var emailVerifiedAt *time.Time
 	if req.EmailVerified {
 		emailVerifiedAt = new(time.Now())
@@ -81,24 +82,24 @@ func (s *ServiceUser) RegisterUser(req dto.UserRegister) (domainuser.Users, erro
 		CreatedAt:         time.Now(),
 	}
 
-	if err = s.UserRepo.Store(data); err != nil {
+	if err = s.UserRepo.Store(ctx, data); err != nil {
 		return domainuser.Users{}, err
 	}
 
 	return data, nil
 }
 
-func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId string, creatorRole string) (domainuser.Users, error) {
+func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUser, creatorUserId string, creatorRole string) (domainuser.Users, error) {
 	phone := utils.NormalizePhoneTo62(req.Phone)
 	email := utils.SanitizeEmail(req.Email)
 
-	data, _ := s.UserRepo.GetByEmail(email)
+	data, _ := s.UserRepo.GetByEmail(ctx, email)
 	if data.Id != "" {
 		return domainuser.Users{}, errors.New("email already exists")
 	}
 
 	if phone != "" {
-		phoneData, _ := s.UserRepo.GetByPhone(phone)
+		phoneData, _ := s.UserRepo.GetByPhone(ctx, phone)
 		if phoneData.Id != "" {
 			return domainuser.Users{}, errors.New("phone number already exists")
 		}
@@ -114,7 +115,7 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId str
 	}
 
 	roleName := strings.ToLower(strings.TrimSpace(req.Role))
-	permissions, err := s.PermissionRepo.GetUserPermissions(creatorUserId)
+	permissions, err := s.PermissionRepo.GetUserPermissions(ctx, creatorUserId)
 	if err != nil {
 		return domainuser.Users{}, err
 	}
@@ -127,7 +128,7 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId str
 		return domainuser.Users{}, errors.New("only superadmin can create superadmin users")
 	}
 
-	roleId, ok := findRoleIDByName(s.RoleRepo, roleName)
+	roleId, ok := findRoleIDByName(ctx, s.RoleRepo, roleName)
 	if !ok {
 		return domainuser.Users{}, errors.New("invalid role: " + roleName)
 	}
@@ -146,14 +147,14 @@ func (s *ServiceUser) AdminCreateUser(req dto.AdminCreateUser, creatorUserId str
 		CreatedAt:         time.Now(),
 	}
 
-	if err = s.UserRepo.Store(data); err != nil {
+	if err = s.UserRepo.Store(ctx, data); err != nil {
 		return domainuser.Users{}, err
 	}
 
 	return data, nil
 }
 
-func (s *ServiceUser) LoginUser(req dto.Login, logId string, metadata dto.LoginMetadata) (string, error) {
+func (s *ServiceUser) LoginUser(ctx context.Context, req dto.Login, logId string, metadata dto.LoginMetadata) (string, error) {
 	identifier, err := resolveLoginIdentifier(req)
 	if err != nil {
 		return "", err
@@ -164,9 +165,9 @@ func (s *ServiceUser) LoginUser(req dto.Login, logId string, metadata dto.LoginM
 		loginErr error
 	)
 	if strings.Contains(identifier, "@") {
-		data, loginErr = s.UserRepo.GetByEmail(identifier)
+		data, loginErr = s.UserRepo.GetByEmail(ctx, identifier)
 	} else {
-		data, loginErr = s.UserRepo.GetByPhone(identifier)
+		data, loginErr = s.UserRepo.GetByPhone(ctx, identifier)
 	}
 	if loginErr != nil {
 		return "", loginErr
@@ -182,7 +183,7 @@ func (s *ServiceUser) LoginUser(req dto.Login, logId string, metadata dto.LoginM
 	if data.LoginProvider == "" {
 		data.LoginProvider = "local"
 	}
-	if err = s.UserRepo.Update(data); err != nil {
+	if err = s.UserRepo.Update(ctx, data); err != nil {
 		return "", err
 	}
 
@@ -194,7 +195,7 @@ func (s *ServiceUser) LoginUser(req dto.Login, logId string, metadata dto.LoginM
 	return token, nil
 }
 
-func (s *ServiceUser) LogoutUser(token string) error {
+func (s *ServiceUser) LogoutUser(ctx context.Context, token string) error {
 	blacklist := domainauth.Blacklist{
 		ID:        utils.CreateUUID(),
 		Token:     token,
@@ -209,7 +210,7 @@ func (s *ServiceUser) LogoutUser(token string) error {
 	return nil
 }
 
-func (s *ServiceUser) ImpersonateUser(targetUserId, impersonatorUserId, impersonatorName, impersonatorRole string, alreadyImpersonated bool, logId string) (string, error) {
+func (s *ServiceUser) ImpersonateUser(ctx context.Context, targetUserId, impersonatorUserId, impersonatorName, impersonatorRole string, alreadyImpersonated bool, logId string) (string, error) {
 	if alreadyImpersonated {
 		return "", errors.New("cannot start nested impersonation")
 	}
@@ -220,7 +221,7 @@ func (s *ServiceUser) ImpersonateUser(targetUserId, impersonatorUserId, imperson
 		return "", errors.New("cannot impersonate your own account")
 	}
 
-	targetUser, err := s.UserRepo.GetByID(targetUserId)
+	targetUser, err := s.UserRepo.GetByID(ctx, targetUserId)
 	if err != nil {
 		return "", err
 	}
@@ -237,7 +238,7 @@ func (s *ServiceUser) ImpersonateUser(targetUserId, impersonatorUserId, imperson
 	})
 }
 
-func (s *ServiceUser) StopImpersonation(originalUserId, currentUserId string, logId string) (string, error) {
+func (s *ServiceUser) StopImpersonation(ctx context.Context, originalUserId, currentUserId string, logId string) (string, error) {
 	if strings.TrimSpace(originalUserId) == "" {
 		return "", errors.New("original user id is required")
 	}
@@ -245,7 +246,7 @@ func (s *ServiceUser) StopImpersonation(originalUserId, currentUserId string, lo
 		return "", errors.New("current session is not impersonated")
 	}
 
-	originalUser, err := s.UserRepo.GetByID(originalUserId)
+	originalUser, err := s.UserRepo.GetByID(ctx, originalUserId)
 	if err != nil {
 		return "", err
 	}
@@ -253,25 +254,25 @@ func (s *ServiceUser) StopImpersonation(originalUserId, currentUserId string, lo
 	return utils.GenerateJwt(&originalUser, logId)
 }
 
-func (s *ServiceUser) GetUserById(id string) (domainuser.Users, error) {
-	return s.UserRepo.GetByID(id)
+func (s *ServiceUser) GetUserById(ctx context.Context, id string) (domainuser.Users, error) {
+	return s.UserRepo.GetByID(ctx, id)
 }
 
-func (s *ServiceUser) GetUserByEmail(email string) (domainuser.Users, error) {
-	return s.UserRepo.GetByEmail(email)
+func (s *ServiceUser) GetUserByEmail(ctx context.Context, email string) (domainuser.Users, error) {
+	return s.UserRepo.GetByEmail(ctx, email)
 }
 
-func (s *ServiceUser) GetUserByPhone(phone string) (domainuser.Users, error) {
-	return s.UserRepo.GetByPhone(phone)
+func (s *ServiceUser) GetUserByPhone(ctx context.Context, phone string) (domainuser.Users, error) {
+	return s.UserRepo.GetByPhone(ctx, phone)
 }
 
-func (s *ServiceUser) GetUserByAuth(id string) (map[string]interface{}, error) {
-	user, err := s.UserRepo.GetByID(id)
+func (s *ServiceUser) GetUserByAuth(ctx context.Context, id string) (map[string]interface{}, error) {
+	user, err := s.UserRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	permissions, err := s.PermissionRepo.GetUserPermissions(user.Id)
+	permissions, err := s.PermissionRepo.GetUserPermissions(ctx, user.Id)
 	if err != nil {
 		return buildUserAuthResponse(user, nil), nil
 	}
@@ -284,8 +285,8 @@ func (s *ServiceUser) GetUserByAuth(id string) (map[string]interface{}, error) {
 	return buildUserAuthResponse(user, permissionNames), nil
 }
 
-func (s *ServiceUser) GetAllUsers(params filter.BaseParams, currentUserRole string) ([]domainuser.Users, int64, error) {
-	users, total, err := s.UserRepo.GetAll(params)
+func (s *ServiceUser) GetAllUsers(ctx context.Context, params filter.BaseParams, currentUserRole string) ([]domainuser.Users, int64, error) {
+	users, total, err := s.UserRepo.GetAll(ctx, params)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -304,8 +305,8 @@ func (s *ServiceUser) GetAllUsers(params filter.BaseParams, currentUserRole stri
 	return users, total, nil
 }
 
-func (s *ServiceUser) Update(id, currentUserId, currentUserRole string, req dto.UserUpdate) (domainuser.Users, error) {
-	data, err := s.UserRepo.GetByID(id)
+func (s *ServiceUser) Update(ctx context.Context, id, currentUserId, currentUserRole string, req dto.UserUpdate) (domainuser.Users, error) {
+	data, err := s.UserRepo.GetByID(ctx, id)
 	if err != nil {
 		return domainuser.Users{}, err
 	}
@@ -329,7 +330,7 @@ func (s *ServiceUser) Update(id, currentUserId, currentUserRole string, req dto.
 
 	if reqRole := strings.TrimSpace(req.Role); reqRole != "" {
 		newRoleName := strings.ToLower(reqRole)
-		permissions, err := s.PermissionRepo.GetUserPermissions(currentUserId)
+		permissions, err := s.PermissionRepo.GetUserPermissions(ctx, currentUserId)
 		if err != nil {
 			return domainuser.Users{}, err
 		}
@@ -339,7 +340,7 @@ func (s *ServiceUser) Update(id, currentUserId, currentUserRole string, req dto.
 		if newRoleName == utils.RoleSuperAdmin && currentUserRole != utils.RoleSuperAdmin {
 			return domainuser.Users{}, errors.New("cannot assign superadmin role")
 		}
-		roleID, ok := findRoleIDByName(s.RoleRepo, newRoleName)
+		roleID, ok := findRoleIDByName(ctx, s.RoleRepo, newRoleName)
 		if !ok {
 			return domainuser.Users{}, errors.New("invalid role: " + newRoleName)
 		}
@@ -347,14 +348,14 @@ func (s *ServiceUser) Update(id, currentUserId, currentUserRole string, req dto.
 		data.RoleId = roleID
 	}
 
-	if err = s.UserRepo.Update(data); err != nil {
+	if err = s.UserRepo.Update(ctx, data); err != nil {
 		return domainuser.Users{}, err
 	}
 
 	return data, nil
 }
 
-func (s *ServiceUser) ChangePassword(id string, req dto.ChangePassword) (domainuser.Users, error) {
+func (s *ServiceUser) ChangePassword(ctx context.Context, id string, req dto.ChangePassword) (domainuser.Users, error) {
 	if req.CurrentPassword == req.NewPassword {
 		return domainuser.Users{}, errors.New("new password must be different from current password")
 	}
@@ -363,7 +364,7 @@ func (s *ServiceUser) ChangePassword(id string, req dto.ChangePassword) (domainu
 		return domainuser.Users{}, err
 	}
 
-	data, err := s.UserRepo.GetByID(id)
+	data, err := s.UserRepo.GetByID(ctx, id)
 	if err != nil {
 		return domainuser.Users{}, err
 	}
@@ -380,15 +381,15 @@ func (s *ServiceUser) ChangePassword(id string, req dto.ChangePassword) (domainu
 	data.Password = string(hashedPwd)
 	data.PasswordChangedAt = new(time.Now())
 
-	if err = s.UserRepo.Update(data); err != nil {
+	if err = s.UserRepo.Update(ctx, data); err != nil {
 		return domainuser.Users{}, err
 	}
 
 	return data, nil
 }
 
-func (s *ServiceUser) ForgotPassword(req dto.ForgotPasswordRequest) (string, error) {
-	data, err := s.UserRepo.GetByEmail(utils.SanitizeEmail(req.Email))
+func (s *ServiceUser) ForgotPassword(ctx context.Context, req dto.ForgotPasswordRequest) (string, error) {
+	data, err := s.UserRepo.GetByEmail(ctx, utils.SanitizeEmail(req.Email))
 	if err != nil {
 		return "", nil
 	}
@@ -401,7 +402,7 @@ func (s *ServiceUser) ForgotPassword(req dto.ForgotPasswordRequest) (string, err
 	return token, nil
 }
 
-func (s *ServiceUser) ResetPassword(req dto.ResetPasswordRequest) error {
+func (s *ServiceUser) ResetPassword(ctx context.Context, req dto.ResetPasswordRequest) error {
 	if err := ValidatePasswordStrength(req.NewPassword); err != nil {
 		return err
 	}
@@ -413,7 +414,7 @@ func (s *ServiceUser) ResetPassword(req dto.ResetPasswordRequest) error {
 
 	userId := claims["user_id"].(string)
 
-	data, err := s.UserRepo.GetByID(userId)
+	data, err := s.UserRepo.GetByID(ctx, userId)
 	if err != nil {
 		return errors.New("user not found")
 	}
@@ -426,21 +427,21 @@ func (s *ServiceUser) ResetPassword(req dto.ResetPasswordRequest) error {
 	data.Password = string(hashedPwd)
 	data.PasswordChangedAt = new(time.Now())
 
-	if err = s.UserRepo.Update(data); err != nil {
+	if err = s.UserRepo.Update(ctx, data); err != nil {
 		return err
 	}
 
-	_ = s.LogoutUser(req.Token)
+	_ = s.LogoutUser(ctx, req.Token)
 
 	return nil
 }
 
-func (s *ServiceUser) ResetPasswordByEmail(email, newPassword string) error {
+func (s *ServiceUser) ResetPasswordByEmail(ctx context.Context, email, newPassword string) error {
 	if err := ValidatePasswordStrength(newPassword); err != nil {
 		return err
 	}
 
-	data, err := s.UserRepo.GetByEmail(utils.SanitizeEmail(email))
+	data, err := s.UserRepo.GetByEmail(ctx, utils.SanitizeEmail(email))
 	if err != nil {
 		return errors.New("user not found")
 	}
@@ -453,15 +454,15 @@ func (s *ServiceUser) ResetPasswordByEmail(email, newPassword string) error {
 	data.Password = string(hashedPwd)
 	data.PasswordChangedAt = new(time.Now())
 
-	if err = s.UserRepo.Update(data); err != nil {
+	if err = s.UserRepo.Update(ctx, data); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *ServiceUser) Delete(id string) error {
-	return s.UserRepo.Delete(id)
+func (s *ServiceUser) Delete(ctx context.Context, id string) error {
+	return s.UserRepo.Delete(ctx, id)
 }
 
 var _ interfaceuser.ServiceUserInterface = (*ServiceUser)(nil)

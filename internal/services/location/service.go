@@ -46,84 +46,84 @@ func NewLocationService(repo interfacelocation.RepoLocationInterface, redisClien
 		HTTPClient: &http.Client{Timeout: 20 * time.Second},
 	}
 
-	if err := service.Repo.FailActiveSyncJobs("Service restarted before the previous location sync completed."); err != nil {
+	if err := service.Repo.FailActiveSyncJobs(context.Background(), "Service restarted before the previous location sync completed."); err != nil {
 		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("failed to mark interrupted location sync jobs: %v", err))
 	}
 
 	return service
 }
 
-func (s *LocationService) GetProvince() ([]dto.Location, error) {
+func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, error) {
 	cacheKey := provinceCacheKey()
-	if data, ok := s.getCachedLocations(cacheKey); ok {
+	if data, ok := s.getCachedLocations(ctx, cacheKey); ok {
 		return data, nil
 	}
 
-	rows, err := s.Repo.ListProvinces()
+	rows, err := s.Repo.ListProvinces(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	locations := mapProvinces(rows)
-	s.setCachedLocations(cacheKey, locations)
+	s.setCachedLocations(ctx, cacheKey, locations)
 	return locations, nil
 }
 
-func (s *LocationService) GetCity(provinceCode string) ([]dto.Location, error) {
+func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error) {
 	cacheKey := cityCacheKey(provinceCode)
-	if data, ok := s.getCachedLocations(cacheKey); ok {
+	if data, ok := s.getCachedLocations(ctx, cacheKey); ok {
 		return data, nil
 	}
 
-	rows, err := s.Repo.ListCitiesByProvince(provinceCode)
+	rows, err := s.Repo.ListCitiesByProvince(ctx, provinceCode)
 	if err != nil {
 		return nil, err
 	}
 
 	locations := mapCities(rows)
-	s.setCachedLocations(cacheKey, locations)
+	s.setCachedLocations(ctx, cacheKey, locations)
 	return locations, nil
 }
 
-func (s *LocationService) GetDistrict(cityCode string) ([]dto.Location, error) {
+func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error) {
 	cacheKey := districtCacheKey(cityCode)
-	if data, ok := s.getCachedLocations(cacheKey); ok {
+	if data, ok := s.getCachedLocations(ctx, cacheKey); ok {
 		return data, nil
 	}
 
-	rows, err := s.Repo.ListDistrictsByCity(cityCode)
+	rows, err := s.Repo.ListDistrictsByCity(ctx, cityCode)
 	if err != nil {
 		return nil, err
 	}
 
 	locations := mapDistricts(rows)
-	s.setCachedLocations(cacheKey, locations)
+	s.setCachedLocations(ctx, cacheKey, locations)
 	return locations, nil
 }
 
-func (s *LocationService) GetVillage(districtCode string) ([]dto.Location, error) {
+func (s *LocationService) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
 	cacheKey := villageCacheKey(districtCode)
-	if data, ok := s.getCachedLocations(cacheKey); ok {
+	if data, ok := s.getCachedLocations(ctx, cacheKey); ok {
 		return data, nil
 	}
 
-	rows, err := s.Repo.ListVillagesByDistrict(districtCode)
+	rows, err := s.Repo.ListVillagesByDistrict(ctx, districtCode)
 	if err != nil {
 		return nil, err
 	}
 
 	locations := mapVillages(rows)
-	s.setCachedLocations(cacheKey, locations)
+	s.setCachedLocations(ctx, cacheKey, locations)
 	return locations, nil
 }
 
-func (s *LocationService) StartSync(req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error) {
+func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error) {
 	normalizedReq, err := s.normalizeAndValidateRequest(req)
 	if err != nil {
 		return dto.LocationSyncJob{}, err
 	}
 
-	activeJob, err := s.Repo.GetActiveSyncJob()
+	activeJob, err := s.Repo.GetActiveSyncJob(ctx)
 	switch {
 	case err == nil:
 		return mapSyncJob(activeJob), ErrLocationSyncRunning
@@ -146,7 +146,7 @@ func (s *LocationService) StartSync(req dto.SyncLocationRequest, requestedByUser
 		UpdatedAt:    &now,
 	}
 
-	if err := s.Repo.CreateSyncJob(&job); err != nil {
+	if err := s.Repo.CreateSyncJob(ctx, &job); err != nil {
 		return dto.LocationSyncJob{}, err
 	}
 
@@ -155,8 +155,8 @@ func (s *LocationService) StartSync(req dto.SyncLocationRequest, requestedByUser
 	return mapSyncJob(job), nil
 }
 
-func (s *LocationService) GetSyncJob(id string) (dto.LocationSyncJob, error) {
-	job, err := s.Repo.GetSyncJobByID(id)
+func (s *LocationService) GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error) {
+	job, err := s.Repo.GetSyncJobByID(ctx, id)
 	if err != nil {
 		return dto.LocationSyncJob{}, err
 	}
@@ -194,13 +194,14 @@ func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationReques
 }
 
 func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) {
+	jobCtx := context.Background()
 	if !s.syncing.CompareAndSwap(false, true) {
-		s.markSyncJobFailed(jobID, "Another location sync is already running in this service instance.")
+		s.markSyncJobFailed(jobCtx, jobID, "Another location sync is already running in this service instance.")
 		return
 	}
 	defer s.syncing.Store(false)
 
-	job, err := s.Repo.GetSyncJobByID(jobID)
+	job, err := s.Repo.GetSyncJobByID(jobCtx, jobID)
 	if err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to load location sync job %s: %v", jobID, err))
 		return
@@ -211,19 +212,19 @@ func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) 
 	job.Message = "Location sync is running"
 	job.StartedAt = &startedAt
 	job.UpdatedAt = &startedAt
-	if err := s.Repo.UpdateSyncJob(&job); err != nil {
+	if err := s.Repo.UpdateSyncJob(jobCtx, &job); err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as running: %v", jobID, err))
 		return
 	}
 
-	result, err := s.sync(req, func(progress syncProgress) {
+	result, err := s.sync(jobCtx, req, func(progress syncProgress) {
 		s.applySyncProgress(&job, progress)
-		if updateErr := s.Repo.UpdateSyncJob(&job); updateErr != nil {
+		if updateErr := s.Repo.UpdateSyncJob(jobCtx, &job); updateErr != nil {
 			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("failed to update location sync job progress %s: %v", job.ID, updateErr))
 		}
 	})
 	if err != nil {
-		s.markSyncJobFailed(job.ID, err.Error())
+		s.markSyncJobFailed(jobCtx, job.ID, err.Error())
 		return
 	}
 
@@ -234,13 +235,13 @@ func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) 
 	job.ErrorMessage = ""
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
-	if err := s.Repo.UpdateSyncJob(&job); err != nil {
+	if err := s.Repo.UpdateSyncJob(jobCtx, &job); err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as completed: %v", job.ID, err))
 	}
 }
 
-func (s *LocationService) markSyncJobFailed(jobID, errorMessage string) {
-	job, err := s.Repo.GetSyncJobByID(jobID)
+func (s *LocationService) markSyncJobFailed(ctx context.Context, jobID, errorMessage string) {
+	job, err := s.Repo.GetSyncJobByID(ctx, jobID)
 	if err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
 		return
@@ -252,7 +253,7 @@ func (s *LocationService) markSyncJobFailed(jobID, errorMessage string) {
 	job.ErrorMessage = errorMessage
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
-	if err := s.Repo.UpdateSyncJob(&job); err != nil {
+	if err := s.Repo.UpdateSyncJob(ctx, &job); err != nil {
 		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as failed: %v", job.ID, err))
 	}
 }
@@ -266,15 +267,15 @@ func (s *LocationService) applySyncProgress(job *domainlocation.SyncJob, progres
 	job.UpdatedAt = new(time.Now())
 }
 
-func (s *LocationService) sync(req dto.SyncLocationRequest, progress func(syncProgress)) (syncProgress, error) {
+func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest, progress func(syncProgress)) (syncProgress, error) {
 	switch req.Level {
 	case "province":
 		progress(syncProgress{Message: "Fetching provinces"})
-		provinces, err := s.fetchProvinces(req.Year)
+		provinces, err := s.fetchProvinces(ctx, req.Year)
 		if err != nil {
 			return syncProgress{}, err
 		}
-		if err := s.Repo.UpsertProvinces(provinces); err != nil {
+		if err := s.Repo.UpsertProvinces(ctx, provinces); err != nil {
 			return syncProgress{}, err
 		}
 		s.deleteCacheKeys(provinceCacheKey())
@@ -284,11 +285,11 @@ func (s *LocationService) sync(req dto.SyncLocationRequest, progress func(syncPr
 		}, nil
 	case "city":
 		progress(syncProgress{Message: fmt.Sprintf("Fetching cities for province %s", req.ProvinceCode)})
-		cities, err := s.fetchCities(req.Year, req.ProvinceCode)
+		cities, err := s.fetchCities(ctx, req.Year, req.ProvinceCode)
 		if err != nil {
 			return syncProgress{}, err
 		}
-		if err := s.Repo.UpsertCities(cities); err != nil {
+		if err := s.Repo.UpsertCities(ctx, cities); err != nil {
 			return syncProgress{}, err
 		}
 		s.deleteCacheKeys(cityCacheKey(req.ProvinceCode))
@@ -298,11 +299,11 @@ func (s *LocationService) sync(req dto.SyncLocationRequest, progress func(syncPr
 		}, nil
 	case "district":
 		progress(syncProgress{Message: fmt.Sprintf("Fetching districts for city %s", req.CityCode)})
-		districts, err := s.fetchDistricts(req.Year, req.ProvinceCode, req.CityCode)
+		districts, err := s.fetchDistricts(ctx, req.Year, req.ProvinceCode, req.CityCode)
 		if err != nil {
 			return syncProgress{}, err
 		}
-		if err := s.Repo.UpsertDistricts(districts); err != nil {
+		if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
 			return syncProgress{}, err
 		}
 		s.deleteCacheKeys(districtCacheKey(req.CityCode))
@@ -312,11 +313,11 @@ func (s *LocationService) sync(req dto.SyncLocationRequest, progress func(syncPr
 		}, nil
 	case "village":
 		progress(syncProgress{Message: fmt.Sprintf("Fetching villages for district %s", req.DistrictCode)})
-		villages, err := s.fetchVillages(req.Year, req.ProvinceCode, req.CityCode, req.DistrictCode)
+		villages, err := s.fetchVillages(ctx, req.Year, req.ProvinceCode, req.CityCode, req.DistrictCode)
 		if err != nil {
 			return syncProgress{}, err
 		}
-		if err := s.Repo.UpsertVillages(villages); err != nil {
+		if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
 			return syncProgress{}, err
 		}
 		s.deleteCacheKeys(villageCacheKey(req.DistrictCode))
@@ -325,19 +326,19 @@ func (s *LocationService) sync(req dto.SyncLocationRequest, progress func(syncPr
 			VillageCount: len(villages),
 		}, nil
 	case "all":
-		return s.syncAll(req.Year, progress)
+		return s.syncAll(ctx, req.Year, progress)
 	default:
 		return syncProgress{}, errors.New("invalid sync level")
 	}
 }
 
-func (s *LocationService) syncAll(year string, progress func(syncProgress)) (syncProgress, error) {
+func (s *LocationService) syncAll(ctx context.Context, year string, progress func(syncProgress)) (syncProgress, error) {
 	progress(syncProgress{Message: "Fetching provinces"})
-	provinces, err := s.fetchProvinces(year)
+	provinces, err := s.fetchProvinces(ctx, year)
 	if err != nil {
 		return syncProgress{}, err
 	}
-	if err := s.Repo.UpsertProvinces(provinces); err != nil {
+	if err := s.Repo.UpsertProvinces(ctx, provinces); err != nil {
 		return syncProgress{}, err
 	}
 	s.deleteCacheKeys(provinceCacheKey())
@@ -353,12 +354,12 @@ func (s *LocationService) syncAll(year string, progress func(syncProgress)) (syn
 	})
 
 	for provinceIndex, province := range provinces {
-		cities, err := s.fetchCities(year, province.Code)
+		cities, err := s.fetchCities(ctx, year, province.Code)
 		if err != nil {
 			return syncProgress{}, err
 		}
 		if len(cities) > 0 {
-			if err := s.Repo.UpsertCities(cities); err != nil {
+			if err := s.Repo.UpsertCities(ctx, cities); err != nil {
 				return syncProgress{}, err
 			}
 			cityCount += len(cities)
@@ -374,12 +375,12 @@ func (s *LocationService) syncAll(year string, progress func(syncProgress)) (syn
 		})
 
 		for cityIndex, city := range cities {
-			districts, err := s.fetchDistricts(year, province.Code, city.Code)
+			districts, err := s.fetchDistricts(ctx, year, province.Code, city.Code)
 			if err != nil {
 				return syncProgress{}, err
 			}
 			if len(districts) > 0 {
-				if err := s.Repo.UpsertDistricts(districts); err != nil {
+				if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
 					return syncProgress{}, err
 				}
 				districtCount += len(districts)
@@ -387,12 +388,12 @@ func (s *LocationService) syncAll(year string, progress func(syncProgress)) (syn
 			}
 
 			for _, district := range districts {
-				villages, err := s.fetchVillages(year, province.Code, city.Code, district.Code)
+				villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
 				if err != nil {
 					return syncProgress{}, err
 				}
 				if len(villages) > 0 {
-					if err := s.Repo.UpsertVillages(villages); err != nil {
+					if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
 						return syncProgress{}, err
 					}
 					villageCount += len(villages)
@@ -420,8 +421,8 @@ func (s *LocationService) syncAll(year string, progress func(syncProgress)) (syn
 	}, nil
 }
 
-func (s *LocationService) fetchProvinces(year string) ([]domainlocation.Province, error) {
-	dataMap, err := s.fetchLocationMap(context.Background(), fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_pro?thn=%s", year), "province")
+func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
+	dataMap, err := s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_pro?thn=%s", year), "province")
 	if err != nil {
 		return nil, err
 	}
@@ -439,8 +440,8 @@ func (s *LocationService) fetchProvinces(year string) ([]domainlocation.Province
 	return sortProvinces(items), nil
 }
 
-func (s *LocationService) fetchCities(year, provinceCode string) ([]domainlocation.City, error) {
-	dataMap, err := s.fetchLocationMap(context.Background(), fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_kab?thn=%s&lvl=11&pro=%s", year, provinceCode), "city")
+func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
+	dataMap, err := s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_kab?thn=%s&lvl=11&pro=%s", year, provinceCode), "city")
 	if err != nil {
 		return nil, err
 	}
@@ -459,14 +460,14 @@ func (s *LocationService) fetchCities(year, provinceCode string) ([]domainlocati
 	return sortCities(items), nil
 }
 
-func (s *LocationService) fetchDistricts(year, provinceCode, cityCode string) ([]domainlocation.District, error) {
+func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
 	var (
 		dataMap map[string]string
 		err     error
 	)
 
 	for _, cityParam := range childCodeCandidates(provinceCode, cityCode) {
-		dataMap, err = s.fetchLocationMap(context.Background(), fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_kec?thn=%s&lvl=12&pro=%s&kab=%s", year, provinceCode, cityParam), "district")
+		dataMap, err = s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_kec?thn=%s&lvl=12&pro=%s&kab=%s", year, provinceCode, cityParam), "district")
 		if err == nil {
 			break
 		}
@@ -489,7 +490,7 @@ func (s *LocationService) fetchDistricts(year, provinceCode, cityCode string) ([
 	return sortDistricts(items), nil
 }
 
-func (s *LocationService) fetchVillages(year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
+func (s *LocationService) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
 	var (
 		dataMap map[string]string
 		err     error
@@ -500,7 +501,7 @@ func (s *LocationService) fetchVillages(year, provinceCode, cityCode, districtCo
 
 	for _, cityParam := range cityCandidates {
 		for _, districtParam := range districtCandidates {
-			dataMap, err = s.fetchLocationMap(context.Background(), fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_des?thn=%s&lvl=13&pro=%s&kab=%s&kec=%s", year, provinceCode, cityParam, districtParam), "village")
+			dataMap, err = s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_des?thn=%s&lvl=13&pro=%s&kab=%s&kec=%s", year, provinceCode, cityParam, districtParam), "village")
 			if err == nil {
 				break
 			}

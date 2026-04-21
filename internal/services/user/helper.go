@@ -1,6 +1,7 @@
 package serviceuser
 
 import (
+	"context"
 	"errors"
 	"net/mail"
 	"regexp"
@@ -70,8 +71,8 @@ func buildUserAuthResponse(user domainuser.Users, permissions []string) map[stri
 	}
 }
 
-func findRoleIDByName(roleRepo interfacerole.RepoRoleInterface, roleName string) (*string, bool) {
-	roleEntity, err := roleRepo.GetByName(roleName)
+func findRoleIDByName(ctx context.Context, roleRepo interfacerole.RepoRoleInterface, roleName string) (*string, bool) {
+	roleEntity, err := roleRepo.GetByName(ctx, roleName)
 	if err != nil || roleEntity.Id == "" {
 		return nil, false
 	}

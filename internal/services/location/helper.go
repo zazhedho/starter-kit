@@ -83,12 +83,12 @@ func locationCachePrefix() string {
 	return "location:"
 }
 
-func (s *LocationService) getCachedLocations(cacheKey string) ([]dto.Location, bool) {
+func (s *LocationService) getCachedLocations(ctx context.Context, cacheKey string) ([]dto.Location, bool) {
 	if s.Redis == nil {
 		return nil, false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	cached, err := s.Redis.Get(ctx, cacheKey).Result()
@@ -108,7 +108,7 @@ func (s *LocationService) getCachedLocations(cacheKey string) ([]dto.Location, b
 	return locations, true
 }
 
-func (s *LocationService) setCachedLocations(cacheKey string, locations []dto.Location) {
+func (s *LocationService) setCachedLocations(ctx context.Context, cacheKey string, locations []dto.Location) {
 	if s.Redis == nil {
 		return
 	}
@@ -119,7 +119,7 @@ func (s *LocationService) setCachedLocations(cacheKey string, locations []dto.Lo
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	if err := s.Redis.Set(ctx, cacheKey, payload, locationCacheTTL()).Err(); err != nil {

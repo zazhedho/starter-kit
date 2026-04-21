@@ -1,6 +1,7 @@
 package interfaceuser
 
 import (
+	"context"
 	domainuser "starter-kit/internal/domain/user"
 	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
@@ -8,6 +9,6 @@ import (
 type RepoUserInterface interface {
 	interfacegeneric.GenericRepository[domainuser.Users]
 
-	GetByEmail(email string) (domainuser.Users, error)
-	GetByPhone(phone string) (domainuser.Users, error)
+	GetByEmail(ctx context.Context, email string) (domainuser.Users, error)
+	GetByPhone(ctx context.Context, phone string) (domainuser.Users, error)
 }

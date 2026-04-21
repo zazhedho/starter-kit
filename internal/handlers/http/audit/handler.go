@@ -24,6 +24,7 @@ func NewAuditHandler(s interfaceaudit.ServiceAuditInterface) *AuditHandler {
 func (h *AuditHandler) GetAll(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[AuditHandler][GetAll]"
+	reqCtx := ctx.Request.Context()
 
 	params, err := filter.GetBaseParams(ctx, "occurred_at", "desc", 20)
 	if err != nil {
@@ -35,7 +36,7 @@ func (h *AuditHandler) GetAll(ctx *gin.Context) {
 	}
 	params.Filters = filter.WhitelistStringFilter(params.Filters, []string{"actor_user_id", "actor_role", "action", "resource", "status", "request_id"})
 
-	data, total, err := h.Service.GetAll(params)
+	data, total, err := h.Service.GetAll(reqCtx, params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -50,13 +51,14 @@ func (h *AuditHandler) GetAll(ctx *gin.Context) {
 func (h *AuditHandler) GetByID(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[AuditHandler][GetByID]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}
 
-	data, err := h.Service.GetByID(id)
+	data, err := h.Service.GetByID(reqCtx, id)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByID; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Audit trail not found", logId, nil)

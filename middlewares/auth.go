@@ -178,7 +178,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			return
 		}
 
-		permissions, err := m.PermissionRepo.GetUserPermissions(userId)
+		permissions, err := m.PermissionRepo.GetUserPermissions(ctx.Request.Context(), userId)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))

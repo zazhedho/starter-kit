@@ -1,6 +1,7 @@
 package serviceaudit
 
 import (
+	"context"
 	"errors"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/pkg/filter"
@@ -16,27 +17,27 @@ type auditRepoMock struct {
 	err    error
 }
 
-func (m *auditRepoMock) Store(data domainaudit.AuditTrail) error {
+func (m *auditRepoMock) Store(ctx context.Context, data domainaudit.AuditTrail) error {
 	m.stored = data
 	return m.err
 }
 
-func (m *auditRepoMock) GetByID(id string) (domainaudit.AuditTrail, error) {
+func (m *auditRepoMock) GetByID(ctx context.Context, id string) (domainaudit.AuditTrail, error) {
 	if m.err != nil {
 		return domainaudit.AuditTrail{}, m.err
 	}
 	return m.item, nil
 }
 
-func (m *auditRepoMock) GetAll(params filter.BaseParams) ([]domainaudit.AuditTrail, int64, error) {
+func (m *auditRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainaudit.AuditTrail, int64, error) {
 	if m.err != nil {
 		return nil, 0, m.err
 	}
 	return append([]domainaudit.AuditTrail{}, m.items...), m.total, nil
 }
 
-func (m *auditRepoMock) Update(data domainaudit.AuditTrail) error { return nil }
-func (m *auditRepoMock) Delete(id string) error                   { return nil }
+func (m *auditRepoMock) Update(ctx context.Context, data domainaudit.AuditTrail) error { return nil }
+func (m *auditRepoMock) Delete(ctx context.Context, id string) error                   { return nil }
 
 func TestGetAllDelegatesToRepository(t *testing.T) {
 	repo := &auditRepoMock{
@@ -54,7 +55,7 @@ func TestGetAllDelegatesToRepository(t *testing.T) {
 	}
 	service := NewAuditService(repo)
 
-	items, total, err := service.GetAll(filter.BaseParams{Page: 1, Limit: 10})
+	items, total, err := service.GetAll(context.Background(), filter.BaseParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -82,7 +83,7 @@ func TestGetByIDDelegatesToRepository(t *testing.T) {
 	}
 	service := NewAuditService(repo)
 
-	item, err := service.GetByID("audit-1")
+	item, err := service.GetByID(context.Background(), "audit-1")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -97,7 +98,7 @@ func TestGetByIDDelegatesToRepository(t *testing.T) {
 func TestGetByIDReturnsRepositoryError(t *testing.T) {
 	service := NewAuditService(&auditRepoMock{err: errors.New("not found")})
 
-	_, err := service.GetByID("missing")
+	_, err := service.GetByID(context.Background(), "missing")
 	if err == nil || err.Error() != "not found" {
 		t.Fatalf("expected not found error, got %v", err)
 	}
@@ -107,7 +108,7 @@ func TestStoreSanitizesSensitivePayloadAndHumanizesValues(t *testing.T) {
 	repo := &auditRepoMock{}
 	service := NewAuditService(repo)
 
-	err := service.Store(domainaudit.AuditEvent{
+	err := service.Store(context.Background(), domainaudit.AuditEvent{
 		Action:   "refresh_token",
 		Resource: "auth_token",
 		Status:   "failed",

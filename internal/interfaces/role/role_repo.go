@@ -1,6 +1,7 @@
 package interfacerole
 
 import (
+	"context"
 	domainrole "starter-kit/internal/domain/role"
 	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
@@ -8,13 +9,13 @@ import (
 type RepoRoleInterface interface {
 	interfacegeneric.GenericRepository[domainrole.Role]
 
-	GetByName(name string) (domainrole.Role, error)
+	GetByName(ctx context.Context, name string) (domainrole.Role, error)
 
-	AssignPermissions(roleId string, permissionIds []string) error
-	RemovePermissions(roleId string, permissionIds []string) error
-	GetRolePermissions(roleId string) ([]string, error)
+	AssignPermissions(ctx context.Context, roleId string, permissionIds []string) error
+	RemovePermissions(ctx context.Context, roleId string, permissionIds []string) error
+	GetRolePermissions(ctx context.Context, roleId string) ([]string, error)
 
-	AssignMenus(roleId string, menuIds []string) error
-	RemoveMenus(roleId string, menuIds []string) error
-	GetRoleMenus(roleId string) ([]string, error)
+	AssignMenus(ctx context.Context, roleId string, menuIds []string) error
+	RemoveMenus(ctx context.Context, roleId string, menuIds []string) error
+	GetRoleMenus(ctx context.Context, roleId string) ([]string, error)
 }

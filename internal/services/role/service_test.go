@@ -1,6 +1,7 @@
 package servicerole
 
 import (
+	"context"
 	"errors"
 	domainmenu "starter-kit/internal/domain/menu"
 	domainpermission "starter-kit/internal/domain/permission"
@@ -17,53 +18,67 @@ type roleRepoMock struct {
 	assignedPermissions []string
 }
 
-func (m *roleRepoMock) Store(data domainrole.Role) error           { return nil }
-func (m *roleRepoMock) GetByID(id string) (domainrole.Role, error) { return m.role, nil }
-func (m *roleRepoMock) GetAll(params filter.BaseParams) ([]domainrole.Role, int64, error) {
+func (m *roleRepoMock) Store(ctx context.Context, data domainrole.Role) error { return nil }
+func (m *roleRepoMock) GetByID(ctx context.Context, id string) (domainrole.Role, error) {
+	return m.role, nil
+}
+func (m *roleRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainrole.Role, int64, error) {
 	return nil, 0, nil
 }
-func (m *roleRepoMock) Update(data domainrole.Role) error { return nil }
-func (m *roleRepoMock) Delete(id string) error            { return nil }
-func (m *roleRepoMock) GetByName(name string) (domainrole.Role, error) {
+func (m *roleRepoMock) Update(ctx context.Context, data domainrole.Role) error { return nil }
+func (m *roleRepoMock) Delete(ctx context.Context, id string) error            { return nil }
+func (m *roleRepoMock) GetByName(ctx context.Context, name string) (domainrole.Role, error) {
 	return domainrole.Role{}, errors.New("not implemented")
 }
-func (m *roleRepoMock) AssignPermissions(roleId string, permissionIds []string) error {
+func (m *roleRepoMock) AssignPermissions(ctx context.Context, roleId string, permissionIds []string) error {
 	m.assignedPermissions = append([]string{}, permissionIds...)
 	return nil
 }
-func (m *roleRepoMock) RemovePermissions(roleId string, permissionIds []string) error { return nil }
-func (m *roleRepoMock) GetRolePermissions(roleId string) ([]string, error) {
+func (m *roleRepoMock) RemovePermissions(ctx context.Context, roleId string, permissionIds []string) error {
+	return nil
+}
+func (m *roleRepoMock) GetRolePermissions(ctx context.Context, roleId string) ([]string, error) {
 	return m.rolePermissions, nil
 }
-func (m *roleRepoMock) AssignMenus(roleId string, menuIds []string) error { return nil }
-func (m *roleRepoMock) RemoveMenus(roleId string, menuIds []string) error { return nil }
-func (m *roleRepoMock) GetRoleMenus(roleId string) ([]string, error)      { return nil, nil }
+func (m *roleRepoMock) AssignMenus(ctx context.Context, roleId string, menuIds []string) error {
+	return nil
+}
+func (m *roleRepoMock) RemoveMenus(ctx context.Context, roleId string, menuIds []string) error {
+	return nil
+}
+func (m *roleRepoMock) GetRoleMenus(ctx context.Context, roleId string) ([]string, error) {
+	return nil, nil
+}
 
 type permissionRepoMock struct {
 	permissionsByID map[string]domainpermission.Permission
 	userPermissions []domainpermission.Permission
 }
 
-func (m *permissionRepoMock) Store(data domainpermission.Permission) error { return nil }
-func (m *permissionRepoMock) GetByID(id string) (domainpermission.Permission, error) {
+func (m *permissionRepoMock) Store(ctx context.Context, data domainpermission.Permission) error {
+	return nil
+}
+func (m *permissionRepoMock) GetByID(ctx context.Context, id string) (domainpermission.Permission, error) {
 	permission, ok := m.permissionsByID[id]
 	if !ok {
 		return domainpermission.Permission{}, errors.New("not found")
 	}
 	return permission, nil
 }
-func (m *permissionRepoMock) GetAll(params filter.BaseParams) ([]domainpermission.Permission, int64, error) {
+func (m *permissionRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainpermission.Permission, int64, error) {
 	return nil, 0, nil
 }
-func (m *permissionRepoMock) Update(data domainpermission.Permission) error { return nil }
-func (m *permissionRepoMock) Delete(id string) error                        { return nil }
-func (m *permissionRepoMock) GetByName(name string) (domainpermission.Permission, error) {
+func (m *permissionRepoMock) Update(ctx context.Context, data domainpermission.Permission) error {
+	return nil
+}
+func (m *permissionRepoMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *permissionRepoMock) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }
-func (m *permissionRepoMock) GetByResource(resource string) ([]domainpermission.Permission, error) {
+func (m *permissionRepoMock) GetByResource(ctx context.Context, resource string) ([]domainpermission.Permission, error) {
 	return nil, nil
 }
-func (m *permissionRepoMock) GetUserPermissions(userId string) ([]domainpermission.Permission, error) {
+func (m *permissionRepoMock) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
 
@@ -71,22 +86,24 @@ type menuRepoMock struct {
 	activeMenus []domainmenu.MenuItem
 }
 
-func (m *menuRepoMock) Store(data domainmenu.MenuItem) error { return nil }
-func (m *menuRepoMock) GetByID(id string) (domainmenu.MenuItem, error) {
+func (m *menuRepoMock) Store(ctx context.Context, data domainmenu.MenuItem) error { return nil }
+func (m *menuRepoMock) GetByID(ctx context.Context, id string) (domainmenu.MenuItem, error) {
 	return domainmenu.MenuItem{}, errors.New("not implemented")
 }
-func (m *menuRepoMock) GetAll(params filter.BaseParams) ([]domainmenu.MenuItem, int64, error) {
+func (m *menuRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainmenu.MenuItem, int64, error) {
 	return nil, 0, nil
 }
-func (m *menuRepoMock) Update(data domainmenu.MenuItem) error { return nil }
-func (m *menuRepoMock) Delete(id string) error                { return nil }
-func (m *menuRepoMock) GetByName(name string) (domainmenu.MenuItem, error) {
+func (m *menuRepoMock) Update(ctx context.Context, data domainmenu.MenuItem) error { return nil }
+func (m *menuRepoMock) Delete(ctx context.Context, id string) error                { return nil }
+func (m *menuRepoMock) GetByName(ctx context.Context, name string) (domainmenu.MenuItem, error) {
 	return domainmenu.MenuItem{}, errors.New("not implemented")
 }
-func (m *menuRepoMock) GetActiveMenus() ([]domainmenu.MenuItem, error) {
+func (m *menuRepoMock) GetActiveMenus(ctx context.Context) ([]domainmenu.MenuItem, error) {
 	return append([]domainmenu.MenuItem{}, m.activeMenus...), nil
 }
-func (m *menuRepoMock) GetUserMenus(userId string) ([]domainmenu.MenuItem, error) { return nil, nil }
+func (m *menuRepoMock) GetUserMenus(ctx context.Context, userId string) ([]domainmenu.MenuItem, error) {
+	return nil, nil
+}
 
 func TestAssignPermissionsRequiresManageSystemPermissionForSystemRole(t *testing.T) {
 	service := &RoleService{
@@ -97,7 +114,7 @@ func TestAssignPermissionsRequiresManageSystemPermissionForSystemRole(t *testing
 		MenuRepo:       &menuRepoMock{},
 	}
 
-	err := service.AssignPermissions("role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleStaff)
+	err := service.AssignPermissions(context.Background(), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleStaff)
 	if err == nil || err.Error() != "access denied: missing permission roles:manage_system" {
 		t.Fatalf("expected manage_system access error, got %v", err)
 	}
@@ -114,7 +131,7 @@ func TestAssignPermissionsRejectsSuperadminRoleForNonSuperadmin(t *testing.T) {
 		MenuRepo: &menuRepoMock{},
 	}
 
-	err := service.AssignPermissions("role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleAdmin)
+	err := service.AssignPermissions(context.Background(), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleAdmin)
 	if err == nil || err.Error() != "access denied: cannot modify superadmin role" {
 		t.Fatalf("expected superadmin protection error, got %v", err)
 	}
@@ -135,7 +152,7 @@ func TestAssignPermissionsAllowsSystemRoleWhenPermissionPresent(t *testing.T) {
 		MenuRepo: &menuRepoMock{},
 	}
 
-	err := service.AssignPermissions("role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleAdmin)
+	err := service.AssignPermissions(context.Background(), "role-1", dto.AssignPermissions{PermissionIds: []string{"perm-1"}}, "user-1", utils.RoleAdmin)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}

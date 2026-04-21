@@ -1,6 +1,7 @@
 package repositorygeneric
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"starter-kit/pkg/filter"
@@ -30,12 +31,12 @@ func New[T any](db *gorm.DB) *GenericRepository[T] {
 	return &GenericRepository[T]{DB: db}
 }
 
-func (r *GenericRepository[T]) Store(m T) error {
-	return r.DB.Create(&m).Error
+func (r *GenericRepository[T]) Store(ctx context.Context, m T) error {
+	return r.DB.WithContext(ctx).Create(&m).Error
 }
 
-func (r *GenericRepository[T]) GetByID(id string) (ret T, err error) {
-	err = r.DB.Where("id = ?", id).First(&ret).Error
+func (r *GenericRepository[T]) GetByID(ctx context.Context, id string) (ret T, err error) {
+	err = r.DB.WithContext(ctx).Where("id = ?", id).First(&ret).Error
 	if err != nil {
 		return zeroValue[T](), err
 	}
@@ -43,8 +44,8 @@ func (r *GenericRepository[T]) GetByID(id string) (ret T, err error) {
 	return ret, nil
 }
 
-func (r *GenericRepository[T]) GetOneByField(field string, value interface{}) (ret T, err error) {
-	err = r.DB.Where(fmt.Sprintf("%s = ?", field), value).First(&ret).Error
+func (r *GenericRepository[T]) GetOneByField(ctx context.Context, field string, value interface{}) (ret T, err error) {
+	err = r.DB.WithContext(ctx).Where(fmt.Sprintf("%s = ?", field), value).First(&ret).Error
 	if err != nil {
 		return zeroValue[T](), err
 	}
@@ -52,8 +53,8 @@ func (r *GenericRepository[T]) GetOneByField(field string, value interface{}) (r
 	return ret, nil
 }
 
-func (r *GenericRepository[T]) GetManyByField(field string, value interface{}) (ret []T, err error) {
-	err = r.DB.Where(fmt.Sprintf("%s = ?", field), value).Find(&ret).Error
+func (r *GenericRepository[T]) GetManyByField(ctx context.Context, field string, value interface{}) (ret []T, err error) {
+	err = r.DB.WithContext(ctx).Where(fmt.Sprintf("%s = ?", field), value).Find(&ret).Error
 	if err != nil {
 		return nil, err
 	}
@@ -61,9 +62,9 @@ func (r *GenericRepository[T]) GetManyByField(field string, value interface{}) (
 	return ret, nil
 }
 
-func (r *GenericRepository[T]) ExistsByField(field string, value interface{}) (exists bool, err error) {
+func (r *GenericRepository[T]) ExistsByField(ctx context.Context, field string, value interface{}) (exists bool, err error) {
 	var count int64
-	err = r.DB.Model(new(T)).Where(fmt.Sprintf("%s = ?", field), value).Count(&count).Error
+	err = r.DB.WithContext(ctx).Model(new(T)).Where(fmt.Sprintf("%s = ?", field), value).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
@@ -71,8 +72,8 @@ func (r *GenericRepository[T]) ExistsByField(field string, value interface{}) (e
 	return count > 0, nil
 }
 
-func (r *GenericRepository[T]) ExistsByFields(filters map[string]interface{}) (exists bool, err error) {
-	query := r.DB.Model(new(T))
+func (r *GenericRepository[T]) ExistsByFields(ctx context.Context, filters map[string]interface{}) (exists bool, err error) {
+	query := r.DB.WithContext(ctx).Model(new(T))
 	for key, value := range filters {
 		query = query.Where(fmt.Sprintf("%s = ?", key), value)
 	}
@@ -86,8 +87,8 @@ func (r *GenericRepository[T]) ExistsByFields(filters map[string]interface{}) (e
 	return count > 0, nil
 }
 
-func (r *GenericRepository[T]) GetAll(params filter.BaseParams, opts QueryOptions) (ret []T, totalData int64, err error) {
-	query := r.DB.Model(new(T))
+func (r *GenericRepository[T]) GetAll(ctx context.Context, params filter.BaseParams, opts QueryOptions) (ret []T, totalData int64, err error) {
+	query := r.DB.WithContext(ctx).Model(new(T))
 	if opts.BaseQuery != nil {
 		query = opts.BaseQuery(query)
 	}
@@ -114,12 +115,12 @@ func (r *GenericRepository[T]) GetAll(params filter.BaseParams, opts QueryOption
 	return ret, totalData, nil
 }
 
-func (r *GenericRepository[T]) Update(m T) error {
-	return r.DB.Save(&m).Error
+func (r *GenericRepository[T]) Update(ctx context.Context, m T) error {
+	return r.DB.WithContext(ctx).Save(&m).Error
 }
 
-func (r *GenericRepository[T]) Delete(id string) error {
-	return r.DB.Where("id = ?", id).Delete(new(T)).Error
+func (r *GenericRepository[T]) Delete(ctx context.Context, id string) error {
+	return r.DB.WithContext(ctx).Where("id = ?", id).Delete(new(T)).Error
 }
 
 func BuildSearchFunc(columns ...string) SearchFunc {

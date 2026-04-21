@@ -1,7 +1,6 @@
 package handleruser
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -71,8 +70,9 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	var req dto.UserRegister
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][Register]"
+	reqCtx := ctx.Request.Context()
 
-	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	registerEnabled, err := h.isRuntimeConfigEnabled(reqCtx, publicRegistrationConfigKey(), true)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -95,7 +95,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	otpEnabled, err := h.isRuntimeConfigEnabled(registerOTPConfigKey(), false)
+	otpEnabled, err := h.isRuntimeConfigEnabled(reqCtx, registerOTPConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -143,7 +143,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		req.EmailVerified = true
 	}
 
-	data, err := h.Service.RegisterUser(req)
+	data, err := h.Service.RegisterUser(reqCtx, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
@@ -187,8 +187,9 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 func (h *HandlerUser) GetRegisterStatus(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][GetRegisterStatus]"
+	reqCtx := ctx.Request.Context()
 
-	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	registerEnabled, err := h.isRuntimeConfigEnabled(reqCtx, publicRegistrationConfigKey(), true)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -206,8 +207,9 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	var req dto.SendRegisterOTPRequest
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][SendRegisterOTP]"
+	reqCtx := ctx.Request.Context()
 
-	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	registerEnabled, err := h.isRuntimeConfigEnabled(reqCtx, publicRegistrationConfigKey(), true)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -228,7 +230,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		return
 	}
 
-	otpEnabled, err := h.isRuntimeConfigEnabled(registerOTPConfigKey(), false)
+	otpEnabled, err := h.isRuntimeConfigEnabled(reqCtx, registerOTPConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -249,7 +251,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	}
 
 	normalizedEmail := utils.SanitizeEmail(req.Email)
-	if data, err := h.Service.GetUserByEmail(normalizedEmail); err == nil && data.Id != "" {
+	if data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail); err == nil && data.Id != "" {
 		res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
 		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "email already exists"}
 		ctx.JSON(http.StatusBadRequest, res)
@@ -301,6 +303,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 	var req dto.AdminCreateUser
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][AdminCreateUser]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -321,7 +324,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 	creatorRole := authData["role"].(string)
 	creatorUserID := utils.InterfaceString(authData["user_id"])
 
-	data, err := h.Service.AdminCreateUser(req, creatorUserID, creatorRole)
+	data, err := h.Service.AdminCreateUser(reqCtx, req, creatorUserID, creatorRole)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
@@ -365,6 +368,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	var req dto.Login
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserController][Login]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -427,7 +431,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		}
 	}
 
-	token, err := h.Service.LoginUser(req, logId.String(), dto.LoginMetadata{
+	token, err := h.Service.LoginUser(reqCtx, req, logId.String(), dto.LoginMetadata{
 		IP:        ctx.ClientIP(),
 		UserAgent: ctx.Request.UserAgent(),
 	})
@@ -490,9 +494,9 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		userErr      error
 	)
 	if strings.Contains(normalizedIdentifier, "@") {
-		loggedInUser, userErr = h.Service.GetUserByEmail(normalizedIdentifier)
+		loggedInUser, userErr = h.Service.GetUserByEmail(reqCtx, normalizedIdentifier)
 	} else {
-		loggedInUser, userErr = h.Service.GetUserByPhone(normalizedIdentifier)
+		loggedInUser, userErr = h.Service.GetUserByPhone(reqCtx, normalizedIdentifier)
 	}
 	loginUserID := ""
 	if userErr == nil {
@@ -518,7 +522,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 
 	// Create session if Redis is available
 	if h.SessionSvc != nil && userErr == nil && refreshToken != "" {
-		session, errSession := h.SessionSvc.CreateSession(context.Background(), &loggedInUser, token, refreshToken, domainsession.RequestMeta{
+		session, errSession := h.SessionSvc.CreateSession(reqCtx, &loggedInUser, token, refreshToken, domainsession.RequestMeta{
 			IP:        ctx.ClientIP(),
 			UserAgent: ctx.GetHeader("User-Agent"),
 		})
@@ -551,6 +555,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	var req dto.GoogleLogin
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][GoogleLogin]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -560,7 +565,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		return
 	}
 
-	registerEnabled, err := h.isRuntimeConfigEnabled(publicRegistrationConfigKey(), true)
+	registerEnabled, err := h.isRuntimeConfigEnabled(reqCtx, publicRegistrationConfigKey(), true)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -568,7 +573,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		return
 	}
 
-	user, isNewUser, err := h.Service.LoginWithGoogle(req, dto.LoginMetadata{
+	user, isNewUser, err := h.Service.LoginWithGoogle(reqCtx, req, dto.LoginMetadata{
 		IP:        ctx.ClientIP(),
 		UserAgent: ctx.Request.UserAgent(),
 	}, registerEnabled)
@@ -626,7 +631,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	}
 
 	if h.SessionSvc != nil {
-		session, errSession := h.SessionSvc.CreateSession(context.Background(), &user, accessToken, refreshToken, domainsession.RequestMeta{
+		session, errSession := h.SessionSvc.CreateSession(reqCtx, &user, accessToken, refreshToken, domainsession.RequestMeta{
 			IP:        ctx.ClientIP(),
 			UserAgent: ctx.GetHeader("User-Agent"),
 		})
@@ -670,6 +675,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	var req dto.RefreshTokenRequest
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][RefreshToken]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -744,7 +750,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 	userID := utils.InterfaceString(tokenClaims["user_id"])
 	userRole := utils.InterfaceString(tokenClaims["role"])
-	user, err := h.Service.GetUserById(userID)
+	user, err := h.Service.GetUserById(reqCtx, userID)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  userID,
@@ -804,7 +810,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	}
 
 	if h.SessionSvc != nil {
-		session, sessionErr := h.SessionSvc.GetSessionByRefreshToken(context.Background(), req.RefreshToken)
+		session, sessionErr := h.SessionSvc.GetSessionByRefreshToken(reqCtx, req.RefreshToken)
 		if sessionErr != nil {
 			h.writeAudit(ctx, domainaudit.AuditEvent{
 				ActorUserID:  userID,
@@ -824,7 +830,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		}
 
 		refreshExpAt := time.Now().Add(time.Hour * time.Duration(utils.GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)))
-		if sessionErr = h.SessionSvc.RotateSessionTokens(context.Background(), session.SessionID, accessToken, refreshToken, refreshExpAt); sessionErr != nil {
+		if sessionErr = h.SessionSvc.RotateSessionTokens(reqCtx, session.SessionID, accessToken, refreshToken, refreshExpAt); sessionErr != nil {
 			h.writeAudit(ctx, domainaudit.AuditEvent{
 				ActorUserID:  userID,
 				ActorRole:    user.Role,
@@ -845,7 +851,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		}
 	}
 
-	if err = h.Service.LogoutUser(req.RefreshToken); err != nil {
+	if err = h.Service.LogoutUser(reqCtx, req.RefreshToken); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  userID,
 			ActorRole:    user.Role,
@@ -879,6 +885,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 func (h *HandlerUser) Logout(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserController][Logout]"
+	reqCtx := ctx.Request.Context()
 
 	token, ok := ctx.Get("token")
 	if !ok {
@@ -896,7 +903,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 	}
 
 	if h.SessionSvc != nil {
-		errSession := h.SessionSvc.DestroySessionByToken(context.Background(), token.(string))
+		errSession := h.SessionSvc.DestroySessionByToken(reqCtx, token.(string))
 		if errSession != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to destroy session: %v", logPrefix, errSession))
 		} else {
@@ -904,7 +911,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 		}
 	}
 
-	if err := h.Service.LogoutUser(token.(string)); err != nil {
+	if err := h.Service.LogoutUser(reqCtx, token.(string)); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogout,
 			Resource:     "auth",
@@ -932,13 +939,14 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 func (h *HandlerUser) GetUserById(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][GetUserByID]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}
 
-	data, err := h.Service.GetUserById(id)
+	data, err := h.Service.GetUserById(reqCtx, id)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByID; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -963,8 +971,9 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 	userId := utils.InterfaceString(authData["user_id"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][GetUserByAuth]"
+	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetUserByAuth(userId)
+	data, err := h.Service.GetUserByAuth(reqCtx, userId)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByAuth; ERROR: %s;", logPrefix, err))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1000,6 +1009,7 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][ImpersonateUser]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
@@ -1012,7 +1022,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 	currentUserRole := utils.InterfaceString(authData["role"])
 	alreadyImpersonated, _ := authData["is_impersonated"].(bool)
 
-	token, err := h.Service.ImpersonateUser(id, currentUserID, currentUserName, currentUserRole, alreadyImpersonated, logId.String())
+	token, err := h.Service.ImpersonateUser(reqCtx, id, currentUserID, currentUserName, currentUserRole, alreadyImpersonated, logId.String())
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,
@@ -1054,6 +1064,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][StopImpersonation]"
+	reqCtx := ctx.Request.Context()
 
 	authData := utils.GetAuthData(ctx)
 	currentUserID := utils.InterfaceString(authData["user_id"])
@@ -1066,7 +1077,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 		return
 	}
 
-	token, err := h.Service.StopImpersonation(originalUserID, currentUserID, logId.String())
+	token, err := h.Service.StopImpersonation(reqCtx, originalUserID, currentUserID, logId.String())
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogout,
@@ -1084,7 +1095,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 	}
 
 	if tokenString, ok := ctx.Get("token"); ok {
-		_ = h.Service.LogoutUser(tokenString.(string))
+		_ = h.Service.LogoutUser(reqCtx, tokenString.(string))
 	}
 
 	h.writeAudit(ctx, domainaudit.AuditEvent{
@@ -1106,6 +1117,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 func (h *HandlerUser) GetAllUsers(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][GetAllUsers]"
+	reqCtx := ctx.Request.Context()
 
 	authData := utils.GetAuthData(ctx)
 	currentUserRole := utils.InterfaceString(authData["role"])
@@ -1113,7 +1125,7 @@ func (h *HandlerUser) GetAllUsers(ctx *gin.Context) {
 	params, _ := filter.GetBaseParams(ctx, "updated_at", "desc", 10)
 	params.Filters = filter.WhitelistFilter(params.Filters, []string{"role"})
 
-	users, totalData, err := h.Service.GetAllUsers(params, currentUserRole)
+	users, totalData, err := h.Service.GetAllUsers(reqCtx, params, currentUserRole)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetAllUsers; ERROR: %+v;", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -1133,6 +1145,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 	role := utils.InterfaceString(authData["role"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][Update]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -1143,8 +1156,8 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 		return
 	}
 
-	before, _ := h.Service.GetUserById(userId)
-	data, err := h.Service.Update(userId, userId, role, req)
+	before, _ := h.Service.GetUserById(reqCtx, userId)
+	data, err := h.Service.Update(reqCtx, userId, userId, role, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -1190,6 +1203,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	role := utils.InterfaceString(authData["role"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][UpdateUserById]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
@@ -1206,8 +1220,8 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	before, _ := h.Service.GetUserById(id)
-	data, err := h.Service.Update(id, currentUserID, role, req)
+	before, _ := h.Service.GetUserById(reqCtx, id)
+	data, err := h.Service.Update(reqCtx, id, currentUserID, role, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -1252,6 +1266,7 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 	userId := utils.InterfaceString(authData["user_id"])
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][ChangePassword]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -1262,8 +1277,8 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		return
 	}
 
-	before, _ := h.Service.GetUserById(userId)
-	data, err := h.Service.ChangePassword(userId, req)
+	before, _ := h.Service.GetUserById(reqCtx, userId)
+	data, err := h.Service.ChangePassword(reqCtx, userId, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -1315,6 +1330,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 	var req dto.ForgotPasswordRequest
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][ForgotPassword]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -1324,7 +1340,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		return
 	}
 
-	emailResetEnabled, err := h.isRuntimeConfigEnabled(passwordResetEmailConfigKey(), false)
+	emailResetEnabled, err := h.isRuntimeConfigEnabled(reqCtx, passwordResetEmailConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -1340,7 +1356,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		}
 
 		normalizedEmail := utils.SanitizeEmail(req.Email)
-		if data, err := h.Service.GetUserByEmail(normalizedEmail); err == nil && data.Id != "" {
+		if data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail); err == nil && data.Id != "" {
 			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, authEmailAppName()); err != nil {
 				h.writeAudit(ctx, domainaudit.AuditEvent{
 					Action:       domainaudit.ActionUpdate,
@@ -1384,7 +1400,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		return
 	}
 
-	token, err := h.Service.ForgotPassword(req)
+	token, err := h.Service.ForgotPassword(reqCtx, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
@@ -1421,6 +1437,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 	var req dto.ResetPasswordRequest
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][ResetPassword]"
+	reqCtx := ctx.Request.Context()
 
 	if err := ctx.BindJSON(&req); err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
@@ -1430,7 +1447,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 		return
 	}
 
-	emailResetEnabled, err := h.isRuntimeConfigEnabled(passwordResetEmailConfigKey(), false)
+	emailResetEnabled, err := h.isRuntimeConfigEnabled(reqCtx, passwordResetEmailConfigKey(), false)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Config check ERROR: %s;", logPrefix, err.Error()))
 		res := response.InternalServerError(logId)
@@ -1465,7 +1482,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			ctx.JSON(statusCode, res)
 			return
 		}
-		if err := h.Service.ResetPasswordByEmail(email, req.NewPassword); err != nil {
+		if err := h.Service.ResetPasswordByEmail(reqCtx, email, req.NewPassword); err != nil {
 			h.writeAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionUpdate,
 				Resource:     "user_password_reset",
@@ -1495,7 +1512,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.Service.ResetPassword(req); err != nil {
+	if err := h.Service.ResetPassword(reqCtx, req); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user_password_reset",
@@ -1528,9 +1545,10 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 	logPrefix := "[UserHandler][Delete]"
 	authData := utils.GetAuthData(ctx)
 	userId := utils.InterfaceString(authData["user_id"])
-	before, _ := h.Service.GetUserById(userId)
+	reqCtx := ctx.Request.Context()
+	before, _ := h.Service.GetUserById(reqCtx, userId)
 
-	if err := h.Service.Delete(userId); err != nil {
+	if err := h.Service.Delete(reqCtx, userId); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "user",
@@ -1569,14 +1587,15 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[UserHandler][DeleteUserById]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}
-	before, _ := h.Service.GetUserById(id)
+	before, _ := h.Service.GetUserById(reqCtx, id)
 
-	if err := h.Service.Delete(id); err != nil {
+	if err := h.Service.Delete(reqCtx, id); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "user",

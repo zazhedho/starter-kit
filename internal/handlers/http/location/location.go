@@ -28,8 +28,9 @@ func NewLocationHandler(s interfacelocation.ServiceLocationInterface) *LocationH
 func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetProvince]"
+	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetProvince()
+	data, err := h.Service.GetProvince(reqCtx)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetProvince; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -44,6 +45,7 @@ func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 func (h *LocationHandler) GetCity(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetCity]"
+	reqCtx := ctx.Request.Context()
 
 	provinceCode := ctx.Query("province_code")
 	if provinceCode == "" {
@@ -53,7 +55,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetCity(provinceCode)
+	data, err := h.Service.GetCity(reqCtx, provinceCode)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetCity; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -68,6 +70,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetDistrict]"
+	reqCtx := ctx.Request.Context()
 
 	cityCode := ctx.Query("city_code")
 	if cityCode == "" {
@@ -77,7 +80,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetDistrict(cityCode)
+	data, err := h.Service.GetDistrict(reqCtx, cityCode)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetDistrict; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -92,6 +95,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetVillage]"
+	reqCtx := ctx.Request.Context()
 
 	districtCode := ctx.Query("district_code")
 	if districtCode == "" {
@@ -101,7 +105,7 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetVillage(districtCode)
+	data, err := h.Service.GetVillage(reqCtx, districtCode)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetVillage; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -116,6 +120,7 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 func (h *LocationHandler) Sync(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][Sync]"
+	reqCtx := ctx.Request.Context()
 
 	var req dto.SyncLocationRequest
 	if err := ctx.BindJSON(&req); err != nil {
@@ -127,7 +132,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 	}
 
 	requestedByUserID, _ := utils.GetActorContext(ctx)
-	data, err := h.Service.StartSync(req, requestedByUserID)
+	data, err := h.Service.StartSync(reqCtx, req, requestedByUserID)
 	if err != nil {
 		if errors.Is(err, servicelocation.ErrLocationSyncRunning) {
 			res := response.Response(http.StatusConflict, messages.MsgFail, logId, data)
@@ -150,6 +155,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 func (h *LocationHandler) GetSyncJob(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetSyncJob]"
+	reqCtx := ctx.Request.Context()
 
 	jobID := ctx.Param("id")
 	if jobID == "" {
@@ -159,7 +165,7 @@ func (h *LocationHandler) GetSyncJob(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetSyncJob(jobID)
+	data, err := h.Service.GetSyncJob(reqCtx, jobID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			res := response.Response(http.StatusNotFound, messages.MsgNotFound, logId, nil)

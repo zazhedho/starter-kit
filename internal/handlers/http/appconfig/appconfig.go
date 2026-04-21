@@ -34,6 +34,7 @@ func NewAppConfigHandler(s interfaceappconfig.ServiceAppConfigInterface, auditSe
 func (h *AppConfigHandler) GetAll(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[AppConfigHandler][GetAll]"
+	reqCtx := ctx.Request.Context()
 
 	params, err := filter.GetBaseParams(ctx, "category", "asc", 50)
 	if err != nil {
@@ -45,7 +46,7 @@ func (h *AppConfigHandler) GetAll(ctx *gin.Context) {
 	}
 	params.Filters = filter.WhitelistStringFilter(params.Filters, []string{"category"})
 
-	data, total, err := h.Service.GetAll(params)
+	data, total, err := h.Service.GetAll(reqCtx, params)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetAll; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
@@ -60,13 +61,14 @@ func (h *AppConfigHandler) GetAll(ctx *gin.Context) {
 func (h *AppConfigHandler) GetByID(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[AppConfigHandler][GetByID]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}
 
-	data, err := h.Service.GetByID(id)
+	data, err := h.Service.GetByID(reqCtx, id)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetByID; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusNotFound, "Configuration not found", logId, nil)
@@ -82,6 +84,7 @@ func (h *AppConfigHandler) GetByID(ctx *gin.Context) {
 func (h *AppConfigHandler) Update(ctx *gin.Context) {
 	logId := utils.GenerateLogId(ctx)
 	logPrefix := "[AppConfigHandler][Update]"
+	reqCtx := ctx.Request.Context()
 
 	id, err := utils.ValidateUUID(ctx, logId)
 	if err != nil {
@@ -97,8 +100,8 @@ func (h *AppConfigHandler) Update(ctx *gin.Context) {
 		return
 	}
 
-	before, _ := h.Service.GetByID(id)
-	data, err := h.Service.Update(id, req)
+	before, _ := h.Service.GetByID(reqCtx, id)
+	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,

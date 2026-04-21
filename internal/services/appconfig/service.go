@@ -1,6 +1,7 @@
 package serviceappconfig
 
 import (
+	"context"
 	"errors"
 	domainappconfig "starter-kit/internal/domain/appconfig"
 	"starter-kit/internal/dto"
@@ -20,20 +21,20 @@ func NewAppConfigService(repo interfaceappconfig.RepoAppConfigInterface) *AppCon
 	return &AppConfigService{Repo: repo}
 }
 
-func (s *AppConfigService) GetAll(params filter.BaseParams) ([]domainappconfig.AppConfig, int64, error) {
-	return s.Repo.GetAll(params)
+func (s *AppConfigService) GetAll(ctx context.Context, params filter.BaseParams) ([]domainappconfig.AppConfig, int64, error) {
+	return s.Repo.GetAll(ctx, params)
 }
 
-func (s *AppConfigService) GetByID(id string) (domainappconfig.AppConfig, error) {
-	return s.Repo.GetByID(id)
+func (s *AppConfigService) GetByID(ctx context.Context, id string) (domainappconfig.AppConfig, error) {
+	return s.Repo.GetByID(ctx, id)
 }
 
-func (s *AppConfigService) GetByKey(configKey string) (domainappconfig.AppConfig, error) {
-	return s.Repo.GetByKey(configKey)
+func (s *AppConfigService) GetByKey(ctx context.Context, configKey string) (domainappconfig.AppConfig, error) {
+	return s.Repo.GetByKey(ctx, configKey)
 }
 
-func (s *AppConfigService) Update(id string, req dto.UpdateAppConfig) (domainappconfig.AppConfig, error) {
-	config, err := s.Repo.GetByID(id)
+func (s *AppConfigService) Update(ctx context.Context, id string, req dto.UpdateAppConfig) (domainappconfig.AppConfig, error) {
+	config, err := s.Repo.GetByID(ctx, id)
 	if err != nil {
 		return domainappconfig.AppConfig{}, err
 	}
@@ -44,15 +45,15 @@ func (s *AppConfigService) Update(id string, req dto.UpdateAppConfig) (domainapp
 	}
 	config.UpdatedAt = new(time.Now())
 
-	if err := s.Repo.Update(config); err != nil {
+	if err := s.Repo.Update(ctx, config); err != nil {
 		return domainappconfig.AppConfig{}, err
 	}
 
 	return config, nil
 }
 
-func (s *AppConfigService) GetString(configKey string, fallback string) (string, error) {
-	config, found, err := s.getActiveConfigByKey(configKey)
+func (s *AppConfigService) GetString(ctx context.Context, configKey string, fallback string) (string, error) {
+	config, found, err := s.getActiveConfigByKey(ctx, configKey)
 	if err != nil {
 		return fallback, err
 	}
@@ -62,8 +63,8 @@ func (s *AppConfigService) GetString(configKey string, fallback string) (string,
 	return configvalue.String(config.Value, fallback), nil
 }
 
-func (s *AppConfigService) GetBool(configKey string, fallback bool) (bool, error) {
-	config, found, err := s.getActiveConfigByKey(configKey)
+func (s *AppConfigService) GetBool(ctx context.Context, configKey string, fallback bool) (bool, error) {
+	config, found, err := s.getActiveConfigByKey(ctx, configKey)
 	if err != nil {
 		return fallback, err
 	}
@@ -73,8 +74,8 @@ func (s *AppConfigService) GetBool(configKey string, fallback bool) (bool, error
 	return configvalue.Bool(config.Value, fallback)
 }
 
-func (s *AppConfigService) GetInt(configKey string, fallback int) (int, error) {
-	config, found, err := s.getActiveConfigByKey(configKey)
+func (s *AppConfigService) GetInt(ctx context.Context, configKey string, fallback int) (int, error) {
+	config, found, err := s.getActiveConfigByKey(ctx, configKey)
 	if err != nil {
 		return fallback, err
 	}
@@ -84,8 +85,8 @@ func (s *AppConfigService) GetInt(configKey string, fallback int) (int, error) {
 	return configvalue.Int(config.Value, fallback)
 }
 
-func (s *AppConfigService) GetDuration(configKey string, fallback time.Duration) (time.Duration, error) {
-	config, found, err := s.getActiveConfigByKey(configKey)
+func (s *AppConfigService) GetDuration(ctx context.Context, configKey string, fallback time.Duration) (time.Duration, error) {
+	config, found, err := s.getActiveConfigByKey(ctx, configKey)
 	if err != nil {
 		return fallback, err
 	}
@@ -95,8 +96,8 @@ func (s *AppConfigService) GetDuration(configKey string, fallback time.Duration)
 	return configvalue.Duration(config.Value, fallback)
 }
 
-func (s *AppConfigService) DecodeJSON(configKey string, target interface{}) error {
-	config, found, err := s.getActiveConfigByKey(configKey)
+func (s *AppConfigService) DecodeJSON(ctx context.Context, configKey string, target interface{}) error {
+	config, found, err := s.getActiveConfigByKey(ctx, configKey)
 	if err != nil {
 		return err
 	}
@@ -106,12 +107,12 @@ func (s *AppConfigService) DecodeJSON(configKey string, target interface{}) erro
 	return configvalue.JSON(config.Value, target)
 }
 
-func (s *AppConfigService) IsEnabled(configKey string, fallback bool) (bool, error) {
-	return s.GetBool(configKey, fallback)
+func (s *AppConfigService) IsEnabled(ctx context.Context, configKey string, fallback bool) (bool, error) {
+	return s.GetBool(ctx, configKey, fallback)
 }
 
-func (s *AppConfigService) getActiveConfigByKey(configKey string) (domainappconfig.AppConfig, bool, error) {
-	config, err := s.Repo.GetByKey(configKey)
+func (s *AppConfigService) getActiveConfigByKey(ctx context.Context, configKey string) (domainappconfig.AppConfig, bool, error) {
+	config, err := s.Repo.GetByKey(ctx, configKey)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domainappconfig.AppConfig{}, false, nil

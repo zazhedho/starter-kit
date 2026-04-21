@@ -1,6 +1,7 @@
 package repositorymenu
 
 import (
+	"context"
 	"sort"
 	domainmenu "starter-kit/internal/domain/menu"
 	interfacemenu "starter-kit/internal/interfaces/menu"
@@ -19,12 +20,12 @@ func NewMenuRepo(db *gorm.DB) interfacemenu.RepoMenuInterface {
 	return &repo{GenericRepository: repositorygeneric.New[domainmenu.MenuItem](db)}
 }
 
-func (r *repo) GetByName(name string) (ret domainmenu.MenuItem, err error) {
-	return r.GetOneByField("name", name)
+func (r *repo) GetByName(ctx context.Context, name string) (ret domainmenu.MenuItem, err error) {
+	return r.GetOneByField(ctx, "name", name)
 }
 
-func (r *repo) GetAll(params filter.BaseParams) (ret []domainmenu.MenuItem, totalData int64, err error) {
-	return r.GenericRepository.GetAll(params, repositorygeneric.QueryOptions{
+func (r *repo) GetAll(ctx context.Context, params filter.BaseParams) (ret []domainmenu.MenuItem, totalData int64, err error) {
+	return r.GenericRepository.GetAll(ctx, params, repositorygeneric.QueryOptions{
 		Search:         repositorygeneric.BuildSearchFunc("name", "display_name", "path"),
 		AllowedFilters: []string{"id", "name", "display_name", "path", "parent_id", "order_index", "is_active", "created_at", "updated_at"},
 		AllowedOrderColumns: []string{
@@ -38,24 +39,24 @@ func (r *repo) GetAll(params filter.BaseParams) (ret []domainmenu.MenuItem, tota
 	})
 }
 
-func (r *repo) GetActiveMenus() (ret []domainmenu.MenuItem, err error) {
-	if err = r.DB.Where("is_active = ?", true).Order("order_index ASC").Find(&ret).Error; err != nil {
+func (r *repo) GetActiveMenus(ctx context.Context) (ret []domainmenu.MenuItem, err error) {
+	if err = r.DB.WithContext(ctx).Where("is_active = ?", true).Order("order_index ASC").Find(&ret).Error; err != nil {
 		return nil, err
 	}
 	return ret, nil
 }
 
-func (r *repo) GetUserMenus(userId string) (ret []domainmenu.MenuItem, err error) {
+func (r *repo) GetUserMenus(ctx context.Context, userId string) (ret []domainmenu.MenuItem, err error) {
 	var user struct {
 		RoleId *string
 		Role   string
 	}
-	if err = r.DB.Table("users").Select("role_id, role").Where("id = ?", userId).First(&user).Error; err != nil {
+	if err = r.DB.WithContext(ctx).Table("users").Select("role_id, role").Where("id = ?", userId).First(&user).Error; err != nil {
 		return nil, err
 	}
 
 	if user.Role == utils.RoleSuperAdmin {
-		return r.GetActiveMenus()
+		return r.GetActiveMenus(ctx)
 	}
 
 	if user.RoleId == nil || *user.RoleId == "" {
@@ -73,7 +74,7 @@ func (r *repo) GetUserMenus(userId string) (ret []domainmenu.MenuItem, err error
 		  AND p.deleted_at IS NULL
 		ORDER BY m.order_index ASC
 	`
-	if err = r.DB.Raw(query, *user.RoleId).Scan(&ret).Error; err != nil {
+	if err = r.DB.WithContext(ctx).Raw(query, *user.RoleId).Scan(&ret).Error; err != nil {
 		return nil, err
 	}
 
@@ -90,7 +91,7 @@ func (r *repo) GetUserMenus(userId string) (ret []domainmenu.MenuItem, err error
 
 	for len(pendingParentIDs) > 0 {
 		var parentMenus []domainmenu.MenuItem
-		if err = r.DB.
+		if err = r.DB.WithContext(ctx).
 			Where("id IN ? AND is_active = ? AND deleted_at IS NULL", pendingParentIDs, true).
 			Find(&parentMenus).Error; err != nil {
 			return nil, err

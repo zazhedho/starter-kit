@@ -1,6 +1,7 @@
 package interfaceappconfig
 
 import (
+	"context"
 	domainappconfig "starter-kit/internal/domain/appconfig"
 	interfacegeneric "starter-kit/internal/interfaces/generic"
 )
@@ -8,5 +9,5 @@ import (
 type RepoAppConfigInterface interface {
 	interfacegeneric.GenericRepository[domainappconfig.AppConfig]
 
-	GetByKey(configKey string) (domainappconfig.AppConfig, error)
+	GetByKey(ctx context.Context, configKey string) (domainappconfig.AppConfig, error)
 }

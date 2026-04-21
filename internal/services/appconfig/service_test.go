@@ -1,6 +1,7 @@
 package serviceappconfig
 
 import (
+	"context"
 	"errors"
 	domainappconfig "starter-kit/internal/domain/appconfig"
 	"starter-kit/internal/dto"
@@ -21,23 +22,25 @@ type appConfigRepoMock struct {
 	total  int64
 }
 
-func (m *appConfigRepoMock) Store(data domainappconfig.AppConfig) error { return nil }
-func (m *appConfigRepoMock) GetByID(id string) (domainappconfig.AppConfig, error) {
+func (m *appConfigRepoMock) Store(ctx context.Context, data domainappconfig.AppConfig) error {
+	return nil
+}
+func (m *appConfigRepoMock) GetByID(ctx context.Context, id string) (domainappconfig.AppConfig, error) {
 	if m.getErr != nil {
 		return domainappconfig.AppConfig{}, m.getErr
 	}
 	return m.byID, nil
 }
-func (m *appConfigRepoMock) GetAll(params filter.BaseParams) ([]domainappconfig.AppConfig, int64, error) {
+func (m *appConfigRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainappconfig.AppConfig, int64, error) {
 	return append([]domainappconfig.AppConfig{}, m.list...), m.total, nil
 }
-func (m *appConfigRepoMock) Update(data domainappconfig.AppConfig) error {
+func (m *appConfigRepoMock) Update(ctx context.Context, data domainappconfig.AppConfig) error {
 	m.update = data
 	m.byID = data
 	return nil
 }
-func (m *appConfigRepoMock) Delete(id string) error { return nil }
-func (m *appConfigRepoMock) GetByKey(configKey string) (domainappconfig.AppConfig, error) {
+func (m *appConfigRepoMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *appConfigRepoMock) GetByKey(ctx context.Context, configKey string) (domainappconfig.AppConfig, error) {
 	if m.keyErr != nil {
 		return domainappconfig.AppConfig{}, m.keyErr
 	}
@@ -51,7 +54,7 @@ func (m *appConfigRepoMock) GetByKey(configKey string) (domainappconfig.AppConfi
 func TestGetBoolReturnsDefaultWhenConfigMissing(t *testing.T) {
 	service := NewAppConfigService(&appConfigRepoMock{byKey: map[string]domainappconfig.AppConfig{}})
 
-	value, err := service.GetBool("feature.example", true)
+	value, err := service.GetBool(context.Background(), "feature.example", true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -67,7 +70,7 @@ func TestGetBoolReturnsDefaultWhenConfigInactive(t *testing.T) {
 		},
 	})
 
-	value, err := service.GetBool("feature.example", true)
+	value, err := service.GetBool(context.Background(), "feature.example", true)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -83,7 +86,7 @@ func TestGetBoolParsesFeatureFlagValue(t *testing.T) {
 		},
 	})
 
-	value, err := service.GetBool("feature.example", false)
+	value, err := service.GetBool(context.Background(), "feature.example", false)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -99,7 +102,7 @@ func TestGetIntReturnsParseErrorForInvalidValue(t *testing.T) {
 		},
 	})
 
-	_, err := service.GetInt("jobs.batch_size", 10)
+	_, err := service.GetInt(context.Background(), "jobs.batch_size", 10)
 	if err == nil {
 		t.Fatalf("expected parse error, got nil")
 	}
@@ -112,7 +115,7 @@ func TestGetDurationParsesValue(t *testing.T) {
 		},
 	})
 
-	value, err := service.GetDuration("jobs.interval", time.Minute)
+	value, err := service.GetDuration(context.Background(), "jobs.interval", time.Minute)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -128,7 +131,7 @@ func TestDecodeJSONLeavesTargetWhenConfigMissing(t *testing.T) {
 		Limit int `json:"limit"`
 	}{Limit: 7}
 
-	if err := service.DecodeJSON("jobs.rules", &target); err != nil {
+	if err := service.DecodeJSON(context.Background(), "jobs.rules", &target); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 	if target.Limit != 7 {
@@ -147,7 +150,7 @@ func TestDecodeJSONDecodesActiveConfig(t *testing.T) {
 		Limit int `json:"limit"`
 	}{}
 
-	if err := service.DecodeJSON("jobs.rules", &target); err != nil {
+	if err := service.DecodeJSON(context.Background(), "jobs.rules", &target); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 	if target.Limit != 5 {
@@ -158,7 +161,7 @@ func TestDecodeJSONDecodesActiveConfig(t *testing.T) {
 func TestGetStringReturnsRepositoryError(t *testing.T) {
 	service := NewAppConfigService(&appConfigRepoMock{keyErr: errors.New("db error")})
 
-	_, err := service.GetString("app.name", "Starter")
+	_, err := service.GetString(context.Background(), "app.name", "Starter")
 	if err == nil || err.Error() != "db error" {
 		t.Fatalf("expected db error, got %v", err)
 	}
@@ -169,7 +172,7 @@ func TestUpdateStillWorks(t *testing.T) {
 	repo := &appConfigRepoMock{byID: nowConfig}
 	service := NewAppConfigService(repo)
 
-	updated, err := service.Update("cfg-1", dto.UpdateAppConfig{Value: "new"})
+	updated, err := service.Update(context.Background(), "cfg-1", dto.UpdateAppConfig{Value: "new"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
