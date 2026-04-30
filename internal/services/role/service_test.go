@@ -19,21 +19,35 @@ func roleAuthContext(userID, username, role string, permissions ...string) conte
 
 type roleRepoMock struct {
 	role                domainrole.Role
+	roles               []domainrole.Role
+	existingByName      domainrole.Role
 	rolePermissions     []string
 	assignedPermissions []string
+	stored              domainrole.Role
+	updated             domainrole.Role
+	deletedID           string
 }
 
-func (m *roleRepoMock) Store(ctx context.Context, data domainrole.Role) error { return nil }
+func (m *roleRepoMock) Store(ctx context.Context, data domainrole.Role) error {
+	m.stored = data
+	return nil
+}
 func (m *roleRepoMock) GetByID(ctx context.Context, id string) (domainrole.Role, error) {
 	return m.role, nil
 }
 func (m *roleRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainrole.Role, int64, error) {
-	return nil, 0, nil
+	return append([]domainrole.Role{}, m.roles...), int64(len(m.roles)), nil
 }
-func (m *roleRepoMock) Update(ctx context.Context, data domainrole.Role) error { return nil }
-func (m *roleRepoMock) Delete(ctx context.Context, id string) error            { return nil }
+func (m *roleRepoMock) Update(ctx context.Context, data domainrole.Role) error {
+	m.updated = data
+	return nil
+}
+func (m *roleRepoMock) Delete(ctx context.Context, id string) error {
+	m.deletedID = id
+	return nil
+}
 func (m *roleRepoMock) GetByName(ctx context.Context, name string) (domainrole.Role, error) {
-	return domainrole.Role{}, errors.New("not implemented")
+	return m.existingByName, nil
 }
 func (m *roleRepoMock) AssignPermissions(ctx context.Context, roleId string, permissionIds []string) error {
 	m.assignedPermissions = append([]string{}, permissionIds...)
@@ -164,5 +178,97 @@ func TestAssignPermissionsAllowsSystemRoleWhenPermissionPresent(t *testing.T) {
 
 	if len(roleRepo.assignedPermissions) != 1 || roleRepo.assignedPermissions[0] != "perm-1" {
 		t.Fatalf("expected assigned permission to be stored, got %v", roleRepo.assignedPermissions)
+	}
+}
+
+func TestRoleServiceCRUDAndDetails(t *testing.T) {
+	roleRepo := &roleRepoMock{
+		role: domainrole.Role{Id: "role-1", Name: "manager", DisplayName: "Manager"},
+		roles: []domainrole.Role{
+			{Id: "role-1", Name: "manager"},
+			{Id: "role-2", Name: utils.RoleSuperAdmin},
+		},
+		rolePermissions: []string{"perm-1"},
+	}
+	parentID := "menu-root"
+	service := NewRoleService(roleRepo, &permissionRepoMock{
+		permissionsByID: map[string]domainpermission.Permission{
+			"perm-1": {Id: "perm-1", Resource: "users", Action: "view"},
+		},
+	}, &menuRepoMock{activeMenus: []domainmenu.MenuItem{
+		{Id: parentID, Name: "root", DisplayName: "Root", IsActive: true},
+		{Id: "menu-users", Name: "users", DisplayName: "Users", ParentId: &parentID, IsActive: true},
+	}})
+
+	created, err := service.Create(context.Background(), dto.RoleCreate{Name: "manager", DisplayName: "Manager", Description: "Can manage users"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Id == "" || roleRepo.stored.Name != "manager" {
+		t.Fatalf("expected created role to be stored, role=%+v stored=%+v", created, roleRepo.stored)
+	}
+
+	got, err := service.GetByID(context.Background(), "role-1")
+	if err != nil || got.Id != "role-1" {
+		t.Fatalf("get by id: role=%+v err=%v", got, err)
+	}
+
+	details, err := service.GetByIDWithDetails(context.Background(), "role-1")
+	if err != nil {
+		t.Fatalf("get details: %v", err)
+	}
+	if len(details.PermissionIds) != 1 || len(details.MenuIds) != 2 {
+		t.Fatalf("unexpected details: %+v", details)
+	}
+
+	roles, total, err := service.GetAll(roleAuthContext("user-1", "Staff", utils.RoleStaff), filter.BaseParams{})
+	if err != nil {
+		t.Fatalf("get all: %v", err)
+	}
+	if total != 1 || len(roles) != 1 || roles[0].Name == utils.RoleSuperAdmin {
+		t.Fatalf("expected superadmin filtered for non-superadmin, roles=%+v total=%d", roles, total)
+	}
+
+	updated, err := service.Update(context.Background(), "role-1", dto.RoleUpdate{DisplayName: "Updated", Description: "Updated desc"})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.DisplayName != "Updated" || roleRepo.updated.DisplayName != "Updated" {
+		t.Fatalf("expected updated role, got %+v stored %+v", updated, roleRepo.updated)
+	}
+
+	if err := service.Delete(context.Background(), "role-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if roleRepo.deletedID != "role-1" {
+		t.Fatalf("expected role deletion, got %q", roleRepo.deletedID)
+	}
+}
+
+func TestRoleServiceSystemRoleProtectionsAndMenus(t *testing.T) {
+	systemRepo := &roleRepoMock{role: domainrole.Role{Id: "role-1", Name: utils.RoleAdmin, IsSystem: true}}
+	service := NewRoleService(systemRepo, &permissionRepoMock{}, &menuRepoMock{})
+
+	if _, err := service.Update(context.Background(), "role-1", dto.RoleUpdate{DisplayName: "Updated"}); err == nil {
+		t.Fatal("expected system role update to be rejected")
+	}
+	if err := service.Delete(context.Background(), "role-1"); err == nil {
+		t.Fatal("expected system role delete to be rejected")
+	}
+	if err := service.AssignMenus(context.Background(), "role-1", dto.AssignMenus{MenuIds: []string{"menu-1"}}); err == nil {
+		t.Fatal("expected direct menu assignment to be rejected")
+	}
+}
+
+func TestRoleServiceCreateRejectsDuplicateAndInvalidPermission(t *testing.T) {
+	duplicateService := NewRoleService(&roleRepoMock{existingByName: domainrole.Role{Id: "role-1", Name: "manager"}}, &permissionRepoMock{}, &menuRepoMock{})
+	if _, err := duplicateService.Create(context.Background(), dto.RoleCreate{Name: "manager"}); err == nil {
+		t.Fatal("expected duplicate role error")
+	}
+
+	service := NewRoleService(&roleRepoMock{role: domainrole.Role{Id: "role-1", Name: "manager"}}, &permissionRepoMock{}, &menuRepoMock{})
+	err := service.AssignPermissions(roleAuthContext("user-1", "Admin User", utils.RoleAdmin), "role-1", dto.AssignPermissions{PermissionIds: []string{"missing"}})
+	if err == nil || err.Error() != "invalid permission ID: missing" {
+		t.Fatalf("expected invalid permission error, got %v", err)
 	}
 }

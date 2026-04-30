@@ -33,7 +33,9 @@ func impersonatedAuthContext(userID, username, role, originalUserID, originalUse
 type userRepoMock struct {
 	user      domainuser.Users
 	usersByID map[string]domainuser.Users
+	users     []domainuser.Users
 	updated   domainuser.Users
+	deletedID string
 	emailUser domainuser.Users
 	emailErr  error
 	phoneUser domainuser.Users
@@ -55,14 +57,17 @@ func (m *userRepoMock) GetByID(ctx context.Context, id string) (domainuser.Users
 	return m.user, nil
 }
 func (m *userRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainuser.Users, int64, error) {
-	return nil, 0, nil
+	return append([]domainuser.Users{}, m.users...), int64(len(m.users)), nil
 }
 func (m *userRepoMock) Update(ctx context.Context, data domainuser.Users) error {
 	m.updated = data
 	m.user = data
 	return nil
 }
-func (m *userRepoMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *userRepoMock) Delete(ctx context.Context, id string) error {
+	m.deletedID = id
+	return nil
+}
 func (m *userRepoMock) GetByEmail(ctx context.Context, email string) (domainuser.Users, error) {
 	if m.emailErr != nil {
 		return domainuser.Users{}, m.emailErr
@@ -622,5 +627,78 @@ func TestResetPasswordByEmailNormalizesEmailAndUpdatesPassword(t *testing.T) {
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(userRepo.updated.Password), []byte("NewPassword1!")); err != nil {
 		t.Fatalf("expected password to be updated, got %v", err)
+	}
+}
+
+func TestUserServicePassThroughAndFilteringMethods(t *testing.T) {
+	userRepo := &userRepoMock{
+		user:      domainuser.Users{Id: "user-1", Name: "Jane", Email: "jane@example.com", Phone: "628123456789", Role: utils.RoleViewer},
+		emailUser: domainuser.Users{Id: "user-1", Email: "jane@example.com"},
+		phoneUser: domainuser.Users{Id: "user-1", Phone: "628123456789"},
+		users: []domainuser.Users{
+			{Id: "user-1", Role: utils.RoleViewer},
+			{Id: "user-2", Role: utils.RoleSuperAdmin},
+		},
+	}
+	service := NewUserService(userRepo, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{
+		userPermissions: []domainpermission.Permission{{Name: "users.list", Resource: "users", Action: "list"}},
+	})
+
+	if got, err := service.GetUserById(context.Background(), "user-1"); err != nil || got.Id != "user-1" {
+		t.Fatalf("get by id: user=%+v err=%v", got, err)
+	}
+	if got, err := service.GetUserByEmail(context.Background(), "jane@example.com"); err != nil || got.Id != "user-1" {
+		t.Fatalf("get by email: user=%+v err=%v", got, err)
+	}
+	if got, err := service.GetUserByPhone(context.Background(), "628123456789"); err != nil || got.Id != "user-1" {
+		t.Fatalf("get by phone: user=%+v err=%v", got, err)
+	}
+	if got, err := service.GetUserByAuth(context.Background(), "user-1"); err != nil || got["id"] != "user-1" {
+		t.Fatalf("get by auth: user=%+v err=%v", got, err)
+	}
+
+	users, total, err := service.GetAllUsers(authContext("viewer-1", "Viewer", utils.RoleViewer), filter.BaseParams{})
+	if err != nil || total != 1 || len(users) != 1 || users[0].Role == utils.RoleSuperAdmin {
+		t.Fatalf("expected superadmin filtered for non-superadmin, users=%+v total=%d err=%v", users, total, err)
+	}
+	users, total, err = service.GetAllUsers(authContext("root", "Root", utils.RoleSuperAdmin), filter.BaseParams{})
+	if err != nil || total != 2 || len(users) != 2 {
+		t.Fatalf("expected superadmin to see all users, users=%+v total=%d err=%v", users, total, err)
+	}
+
+	if err := service.LogoutUser(context.Background(), "token"); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if err := service.Delete(context.Background(), "user-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if userRepo.deletedID != "user-1" {
+		t.Fatalf("expected delete delegation, got %q", userRepo.deletedID)
+	}
+}
+
+func TestChangePasswordAndForgotResetPasswordFlows(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret")
+	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	userRepo := &userRepoMock{
+		user:      domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer},
+		emailUser: domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer},
+	}
+	service := NewUserService(userRepo, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+
+	changed, err := service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "OldPassword1!", NewPassword: "NewPassword1!"})
+	if err != nil || changed.PasswordChangedAt == nil {
+		t.Fatalf("change password: user=%+v err=%v", changed, err)
+	}
+
+	token, err := service.ForgotPassword(context.Background(), dto.ForgotPasswordRequest{Email: "jane@example.com"})
+	if err != nil || token == "" {
+		t.Fatalf("forgot password: token=%q err=%v", token, err)
+	}
+	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: token, NewPassword: "AnotherPassword1!"}); err != nil {
+		t.Fatalf("reset password: %v", err)
 	}
 }

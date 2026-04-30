@@ -180,3 +180,36 @@ func TestUpdateStillWorks(t *testing.T) {
 		t.Fatalf("expected updated value new, got %+v", updated)
 	}
 }
+
+func TestAppConfigServicePassThroughMethodsAndIsEnabled(t *testing.T) {
+	repo := &appConfigRepoMock{
+		byID:  domainappconfig.AppConfig{Id: "cfg-1", ConfigKey: "feature.example", Value: "old", IsActive: true},
+		byKey: map[string]domainappconfig.AppConfig{"feature.example": {ConfigKey: "feature.example", Value: "true", IsActive: true}},
+		list:  []domainappconfig.AppConfig{{Id: "cfg-1"}},
+		total: 1,
+	}
+	service := NewAppConfigService(repo)
+
+	configs, total, err := service.GetAll(context.Background(), filter.BaseParams{})
+	if err != nil || total != 1 || len(configs) != 1 {
+		t.Fatalf("get all: configs=%+v total=%d err=%v", configs, total, err)
+	}
+	if cfg, err := service.GetByID(context.Background(), "cfg-1"); err != nil || cfg.Id != "cfg-1" {
+		t.Fatalf("get by id: cfg=%+v err=%v", cfg, err)
+	}
+	if cfg, err := service.GetByKey(context.Background(), "feature.example"); err != nil || cfg.ConfigKey != "feature.example" {
+		t.Fatalf("get by key: cfg=%+v err=%v", cfg, err)
+	}
+	if enabled, err := service.IsEnabled(context.Background(), "feature.example", false); err != nil || !enabled {
+		t.Fatalf("is enabled: enabled=%v err=%v", enabled, err)
+	}
+
+	inactive := false
+	updated, err := service.Update(context.Background(), "cfg-1", dto.UpdateAppConfig{Value: "false", IsActive: &inactive})
+	if err != nil {
+		t.Fatalf("update inactive: %v", err)
+	}
+	if updated.IsActive {
+		t.Fatalf("expected config to be inactive, got %+v", updated)
+	}
+}
