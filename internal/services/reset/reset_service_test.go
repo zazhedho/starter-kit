@@ -178,3 +178,15 @@ func TestResetServiceNotConfigured(t *testing.T) {
 		t.Fatalf("expected not configured error, got %v", err)
 	}
 }
+
+func TestThrottleErrorString(t *testing.T) {
+	var nilErr *ThrottleError
+	if got := nilErr.Error(); got != "reset throttled" {
+		t.Fatalf("expected nil throttle message, got %q", got)
+	}
+
+	err := &ThrottleError{Reason: "rate_limit"}
+	if got := err.Error(); got != "reset throttled: rate_limit" {
+		t.Fatalf("expected rate limit throttle message, got %q", got)
+	}
+}

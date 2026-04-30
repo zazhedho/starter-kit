@@ -28,6 +28,27 @@ func TestBoolSupportsCommonFeatureFlagValues(t *testing.T) {
 	}
 }
 
+func TestStringAndInvalidValues(t *testing.T) {
+	if got := String(" value ", "fallback"); got != "value" {
+		t.Fatalf("expected trimmed string, got %q", got)
+	}
+	if got := String("   ", "fallback"); got != "fallback" {
+		t.Fatalf("expected fallback string, got %q", got)
+	}
+	if got, err := Bool("maybe", true); err == nil || !got {
+		t.Fatalf("expected bool fallback with error, got %v err=%v", got, err)
+	}
+	if got, err := Int("abc", 7); err == nil || got != 7 {
+		t.Fatalf("expected int fallback with error, got %v err=%v", got, err)
+	}
+	if got, err := Duration("abc", time.Second); err == nil || got != time.Second {
+		t.Fatalf("expected duration fallback with error, got %v err=%v", got, err)
+	}
+	if err := JSON("", nil); err != nil {
+		t.Fatalf("expected empty JSON to be ignored, got %v", err)
+	}
+}
+
 func TestIntReturnsFallbackWhenEmpty(t *testing.T) {
 	actual, err := Int("", 42)
 	if err != nil {

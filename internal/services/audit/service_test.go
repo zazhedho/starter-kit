@@ -119,6 +119,9 @@ func TestStoreSanitizesSensitivePayloadAndHumanizesValues(t *testing.T) {
 			"nested": map[string]interface{}{
 				"otp_code": "123456",
 			},
+			"events": []interface{}{
+				map[string]interface{}{"access_token": "sensitive-access-token"},
+			},
 		},
 	})
 	if err != nil {
@@ -136,6 +139,7 @@ func TestStoreSanitizesSensitivePayloadAndHumanizesValues(t *testing.T) {
 	}
 	if strings.Contains(repo.stored.AfterData, "SecretPassword1!") ||
 		strings.Contains(repo.stored.AfterData, "sensitive-refresh-token") ||
+		strings.Contains(repo.stored.AfterData, "sensitive-access-token") ||
 		strings.Contains(repo.stored.AfterData, "123456") {
 		t.Fatalf("expected sensitive values to be redacted, got %s", repo.stored.AfterData)
 	}

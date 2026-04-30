@@ -43,6 +43,19 @@ func TestFromContextReturnsEmptyScopeWhenMissing(t *testing.T) {
 	}
 }
 
+func TestWithContextStoresScope(t *testing.T) {
+	want := New(" user-1 ", " Jane ", "admin", []string{"users:read"})
+	ctx := WithContext(context.Background(), want)
+
+	got := FromContext(ctx)
+	if got.UserID != "user-1" || got.Username != "Jane" || got.Role != "admin" {
+		t.Fatalf("unexpected scope from context: %+v", got)
+	}
+	if !got.Has("users", "read") {
+		t.Fatalf("expected permission from context, got %+v", got.Permissions)
+	}
+}
+
 func TestSuperadminHasEveryPermission(t *testing.T) {
 	scope := New("user-1", "Root", "superadmin", nil)
 	if !scope.Has("anything", "delete") {

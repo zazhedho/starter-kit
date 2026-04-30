@@ -243,6 +243,15 @@ func TestRoleServiceCRUDAndDetails(t *testing.T) {
 	if roleRepo.deletedID != "role-1" {
 		t.Fatalf("expected role deletion, got %q", roleRepo.deletedID)
 	}
+
+	permissionIDs, err := service.GetRolePermissions(context.Background(), "role-1")
+	if err != nil || len(permissionIDs) != 1 || permissionIDs[0] != "perm-1" {
+		t.Fatalf("get role permissions: ids=%+v err=%v", permissionIDs, err)
+	}
+	menuIDs, err := service.GetRoleMenus(context.Background(), "role-1")
+	if err != nil || len(menuIDs) != 2 {
+		t.Fatalf("get role menus: ids=%+v err=%v", menuIDs, err)
+	}
 }
 
 func TestRoleServiceSystemRoleProtectionsAndMenus(t *testing.T) {

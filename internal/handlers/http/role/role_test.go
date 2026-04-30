@@ -92,6 +92,17 @@ func performRoleRequest(method, routePath, requestPath string, body interface{},
 	return rec
 }
 
+func performRoleRawRequest(method, routePath, requestPath, body string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Handle(method, routePath, handler)
+	req := httptest.NewRequest(method, requestPath, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestRoleCRUDHandlers(t *testing.T) {
 	handler := NewRoleHandler(&roleServiceHandlerTestDouble{
 		role:    domainrole.Role{Id: "role-1", Name: "staff"},
@@ -134,5 +145,31 @@ func TestRoleMutationErrorsAndAssignments(t *testing.T) {
 	rec = performRoleRequest(http.MethodPost, "/roles/:id/menus", "/roles/role-1/menus", dto.AssignMenus{MenuIds: []string{"menu-1"}}, handler.AssignMenus)
 	if rec.Code != http.StatusOK || len(service.assigned) != 1 || service.assigned[0] != "menu-1" {
 		t.Fatalf("expected menu assignment, code=%d assigned=%v", rec.Code, service.assigned)
+	}
+}
+
+func TestRoleHandlersRejectInvalidJSON(t *testing.T) {
+	handler := NewRoleHandler(&roleServiceHandlerTestDouble{}, &auditServiceRoleTestDouble{})
+
+	tests := []struct {
+		name      string
+		method    string
+		routePath string
+		path      string
+		call      gin.HandlerFunc
+	}{
+		{name: "create", method: http.MethodPost, routePath: "/roles", path: "/roles", call: handler.Create},
+		{name: "update", method: http.MethodPut, routePath: "/roles/:id", path: "/roles/role-1", call: handler.Update},
+		{name: "assign permissions", method: http.MethodPost, routePath: "/roles/:id/permissions", path: "/roles/role-1/permissions", call: handler.AssignPermissions},
+		{name: "assign menus", method: http.MethodPost, routePath: "/roles/:id/menus", path: "/roles/role-1/menus", call: handler.AssignMenus},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := performRoleRawRequest(tt.method, tt.routePath, tt.path, `{`, tt.call)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

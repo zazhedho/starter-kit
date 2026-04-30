@@ -4,9 +4,15 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"starter-kit/utils"
 )
 
 func TestMapLevelToSlog(t *testing.T) {
@@ -54,5 +60,30 @@ func TestStringHandlerWithGroupAndAttrs(t *testing.T) {
 	record := slog.NewRecord(time.Time{}, slog.LevelInfo, "hello", 0)
 	if err := handler.Handle(context.Background(), record); err != nil {
 		t.Fatalf("expected success, got %v", err)
+	}
+}
+
+func TestLoggerPublicWritePaths(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "6")
+	t.Setenv("LOG_FORMAT", "string")
+
+	WriteLog(999, "ignored")
+	WriteLog(LogLevelDebug, "debug message")
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("GET", "/", nil)
+	ctx.Set(utils.CtxKeyId, uuid.New())
+	ctx.Set("userId", "user-1")
+	WriteLogWithContext(ctx, LogLevelInfo, "context message")
+
+	if attrs := callerAttrs(0); len(attrs) == 0 {
+		t.Fatal("expected caller attrs")
+	}
+	if got := normalizeSourceFile("pkg/logger/logger.go"); got == "" {
+		t.Fatal("expected normalized source file")
+	}
+	if logger := getLogger(); logger == nil {
+		t.Fatal("expected logger singleton")
 	}
 }

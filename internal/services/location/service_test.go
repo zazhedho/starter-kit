@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	redismock "github.com/go-redis/redismock/v9"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +28,11 @@ type locationRepoTestDouble struct {
 	syncJobErr   error
 	createdJob   *domainlocation.SyncJob
 	failMessage  string
+
+	upsertProvinceCount int
+	upsertCityCount     int
+	upsertDistrictCount int
+	upsertVillageCount  int
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -57,15 +63,19 @@ func (m *locationRepoTestDouble) GetDistrictByCode(ctx context.Context, code str
 	return domainlocation.District{}, errors.New("not implemented")
 }
 func (m *locationRepoTestDouble) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
+	m.upsertProvinceCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) UpsertCities(ctx context.Context, items []domainlocation.City) error {
+	m.upsertCityCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) UpsertDistricts(ctx context.Context, items []domainlocation.District) error {
+	m.upsertDistrictCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) UpsertVillages(ctx context.Context, items []domainlocation.Village) error {
+	m.upsertVillageCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
@@ -226,6 +236,29 @@ func TestLocationHelperCacheKeysAndCodeNormalization(t *testing.T) {
 	}
 }
 
+func TestLocationCacheHelpersUseRedis(t *testing.T) {
+	client, mock := redismock.NewClientMock()
+	svc := &LocationService{Redis: client}
+	ctx := context.Background()
+
+	mock.ExpectGet("location:province").SetVal(`[{"code":"11","name":"Aceh"}]`)
+	got, ok := svc.getCachedLocations(ctx, "location:province")
+	if !ok || len(got) != 1 || got[0].Code != "11" {
+		t.Fatalf("expected cached locations, ok=%v got=%+v", ok, got)
+	}
+
+	mock.Regexp().ExpectSet("location:province", `.+`, defaultLocationCacheTTL).SetVal("OK")
+	svc.setCachedLocations(ctx, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}})
+
+	mock.ExpectScan(0, "location:*", 100).SetVal([]string{"location:province", "location:city:11"}, 0)
+	mock.ExpectDel("location:province", "location:city:11").SetVal(2)
+	svc.deleteCacheKeys("location:")
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redis expectations: %v", err)
+	}
+}
+
 func TestLocationMapAndSortHelpers(t *testing.T) {
 	provinces := sortProvinces([]domainlocation.Province{{Code: "12", Name: "Zulu"}, {Code: "11", Name: "Aceh"}})
 	if provinces[0].Name != "Aceh" {
@@ -279,5 +312,78 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 	})}
 	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
 		t.Fatal("expected status error")
+	}
+}
+
+func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	svc := &LocationService{
+		Repo: repo,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body := `{}`
+			switch {
+			case strings.Contains(req.URL.Path, "list_pro"):
+				body = `{"31":"DKI Jakarta"}`
+			case strings.Contains(req.URL.Path, "list_kab"):
+				body = `{"71":"Jakarta Selatan"}`
+			case strings.Contains(req.URL.Path, "list_kec"):
+				body = `{"01":"Tebet"}`
+			case strings.Contains(req.URL.Path, "list_des"):
+				body = `{"01":"Tebet Barat"}`
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	ctx := context.Background()
+
+	cities, err := svc.fetchCities(ctx, "2026", "31")
+	if err != nil || len(cities) != 1 || cities[0].Code != "3171" {
+		t.Fatalf("fetch cities: cities=%+v err=%v", cities, err)
+	}
+	districts, err := svc.fetchDistricts(ctx, "2026", "31", "3171")
+	if err != nil || len(districts) != 1 || districts[0].Code != "317101" {
+		t.Fatalf("fetch districts: districts=%+v err=%v", districts, err)
+	}
+	villages, err := svc.fetchVillages(ctx, "2026", "31", "3171", "317101")
+	if err != nil || len(villages) != 1 || villages[0].Code != "31710101" {
+		t.Fatalf("fetch villages: villages=%+v err=%v", villages, err)
+	}
+
+	var progressCalls int
+	result, err := svc.sync(ctx, dto.SyncLocationRequest{Level: "all", Year: "2026"}, func(progress syncProgress) {
+		progressCalls++
+	})
+	if err != nil {
+		t.Fatalf("sync all: %v", err)
+	}
+	if result.ProvinceCount != 1 || result.CityCount != 1 || result.DistrictCount != 1 || result.VillageCount != 1 {
+		t.Fatalf("unexpected sync result: %+v", result)
+	}
+	if progressCalls == 0 {
+		t.Fatal("expected progress callbacks")
+	}
+	if repo.upsertProvinceCount != 1 || repo.upsertCityCount != 1 || repo.upsertDistrictCount != 1 || repo.upsertVillageCount != 1 {
+		t.Fatalf("expected all upserts, repo=%+v", repo)
+	}
+}
+
+func TestLocationSyncProgressAndFailureHelpers(t *testing.T) {
+	now := time.Now()
+	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "running", CreatedAt: now}}
+	svc := &LocationService{Repo: repo}
+
+	job := domainlocation.SyncJob{ID: "job-1"}
+	svc.applySyncProgress(&job, syncProgress{Message: "halfway", ProvinceCount: 1})
+	if job.Message != "halfway" || job.ProvinceCount != 1 || job.UpdatedAt == nil {
+		t.Fatalf("unexpected progress application: %+v", job)
+	}
+
+	svc.markSyncJobFailed(context.Background(), "job-1", "failed")
+	if repo.syncJob.Status != "running" {
+		t.Fatalf("test double should keep original sync job copy, got %+v", repo.syncJob)
 	}
 }

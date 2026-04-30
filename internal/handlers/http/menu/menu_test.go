@@ -106,6 +106,34 @@ func TestMenuReadHandlers(t *testing.T) {
 	}
 }
 
+func TestMenuReadHandlersMapServiceErrors(t *testing.T) {
+	handler := NewMenuHandler(&menuServiceHandlerTestDouble{err: errors.New("database down")}, &auditServiceMenuTestDouble{})
+
+	tests := []struct {
+		name      string
+		method    string
+		routePath string
+		path      string
+		call      gin.HandlerFunc
+		scope     authscope.Scope
+		want      int
+	}{
+		{name: "get by id", method: http.MethodGet, routePath: "/menus/:id", path: "/menus/menu-1", call: handler.GetByID, want: http.StatusNotFound},
+		{name: "get all", method: http.MethodGet, routePath: "/menus", path: "/menus", call: handler.GetAll, want: http.StatusInternalServerError},
+		{name: "get active", method: http.MethodGet, routePath: "/menus/active", path: "/menus/active", call: handler.GetActiveMenus, want: http.StatusInternalServerError},
+		{name: "get user menus", method: http.MethodGet, routePath: "/menus/me", path: "/menus/me", call: handler.GetUserMenus, scope: authscope.New("user-1", "Jane", "viewer", nil), want: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := performMenuRequest(tt.method, tt.routePath, tt.path, nil, tt.call, tt.scope)
+			if rec.Code != tt.want {
+				t.Fatalf("expected %d, got %d: %s", tt.want, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestGetUserMenusRequiresScope(t *testing.T) {
 	handler := NewMenuHandler(&menuServiceHandlerTestDouble{}, &auditServiceMenuTestDouble{})
 	rec := performMenuRequest(http.MethodGet, "/menus/me", "/menus/me", nil, handler.GetUserMenus, authscope.Scope{})
@@ -135,5 +163,10 @@ func TestUpdateMenuMapsSuccessAndError(t *testing.T) {
 	rec = performMenuRequest(http.MethodPut, "/menus/:id", "/menus/menu-1", dto.MenuUpdate{DisplayName: "Users"}, handler.Update, authscope.Scope{})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+
+	rec = performMenuRequest(http.MethodPut, "/menus/:id", "/menus/menu-1", map[string]interface{}{"is_active": "bad"}, handler.Update, authscope.Scope{})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid update 400, got %d", rec.Code)
 	}
 }

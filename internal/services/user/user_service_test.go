@@ -597,6 +597,27 @@ func TestLoginWithGoogleRejectsNewUserWhenPublicRegistrationDisabled(t *testing.
 	}
 }
 
+func TestGoogleTokenVerifierLocalValidationBranches(t *testing.T) {
+	t.Setenv("GOOGLE_CLIENT_IDS", "")
+	t.Setenv("GOOGLE_CLIENT_ID", "")
+
+	if _, err := verifyGoogleIDToken(context.Background(), " "); !errors.Is(err, ErrGoogleTokenInvalid) {
+		t.Fatalf("expected invalid token for empty input, got %v", err)
+	}
+	if _, err := verifyGoogleIDToken(context.Background(), "token"); !errors.Is(err, ErrGoogleNotConfigured) {
+		t.Fatalf("expected not configured without audiences, got %v", err)
+	}
+
+	t.Setenv("GOOGLE_CLIENT_IDS", "client-a, client-b,,")
+	t.Setenv("GOOGLE_CLIENT_ID", "client-c")
+	audiences := googleAllowedAudiences()
+	for _, audience := range []string{"client-a", "client-b", "client-c"} {
+		if _, ok := audiences[audience]; !ok {
+			t.Fatalf("expected audience %q in %#v", audience, audiences)
+		}
+	}
+}
+
 func TestResetPasswordByEmailNormalizesEmailAndUpdatesPassword(t *testing.T) {
 	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
 	if err != nil {

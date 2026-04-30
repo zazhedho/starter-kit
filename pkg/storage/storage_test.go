@@ -31,6 +31,18 @@ func TestNewStorageProviderCreatesR2AdapterAliases(t *testing.T) {
 	}
 }
 
+func TestNewMinIOAdapterRejectsInvalidEndpoint(t *testing.T) {
+	_, err := NewMinIOAdapter(Config{
+		Endpoint:        "://bad-endpoint",
+		AccessKeyID:     "access",
+		SecretAccessKey: "secret",
+		BucketName:      "bucket",
+	})
+	if err == nil || !strings.Contains(err.Error(), "failed to create MinIO client") {
+		t.Fatalf("expected invalid endpoint error, got %v", err)
+	}
+}
+
 func TestNewStorageProviderCreatesR2AdapterWithDefaults(t *testing.T) {
 	provider, err := NewStorageProvider(Config{
 		Provider:        "r2",
@@ -71,6 +83,12 @@ func TestExtractObjectNameFromProviderURLs(t *testing.T) {
 	if got := minio.GetFileURL("users/avatar.png"); got != "http://localhost:9000/uploads/users/avatar.png" {
 		t.Fatalf("unexpected minio file url: %q", got)
 	}
+	if got := minio.extractObjectName("avatar.png"); got != "" {
+		t.Fatalf("expected empty object name for short url, got %q", got)
+	}
+	if got := minio.extractObjectName("http://localhost:9000/uploads"); got != "" {
+		t.Fatalf("expected empty object name for bucket-only url, got %q", got)
+	}
 	if err := minio.DeleteFile(context.Background(), "http://localhost:9000/no-bucket/avatar.png"); err == nil {
 		t.Fatal("expected invalid minio url error")
 	}
@@ -81,6 +99,9 @@ func TestExtractObjectNameFromProviderURLs(t *testing.T) {
 	}
 	if got := r2.extractObjectName("https://pub.example.com/users/avatar.png"); got != "users/avatar.png" {
 		t.Fatalf("unexpected r2 fallback object name: %q", got)
+	}
+	if got := r2.extractObjectName("avatar.png"); got != "avatar.png" {
+		t.Fatalf("expected bare r2 object name, got %q", got)
 	}
 	if got := r2.GetFileURL("users/avatar.png"); got != "https://cdn.example.com/users/avatar.png" {
 		t.Fatalf("unexpected r2 file url: %q", got)

@@ -1,17 +1,42 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 func TestGetAppConfReturnsDefaultWhenConfigMissing(t *testing.T) {
+	viper.Reset()
 	t.Setenv("CONSUL", "")
 	t.Setenv("APP_CONFIG", t.TempDir())
 	t.Setenv("APP_ENV", "test")
 
 	if got := GetAppConf("MISSING_VALUE", "fallback", nil); got != "fallback" {
 		t.Fatalf("expected fallback value, got %v", got)
+	}
+}
+
+func TestGetAppConfLoadsLocalEnvFileAndExportsValues(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "app.env")
+	if err := os.WriteFile(configPath, []byte("CONFIG_ID=file-config\nFEATURE_FLAG=enabled\nFEATURE_INT=42\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("CONSUL", "")
+	t.Setenv("APP_CONFIG", dir)
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("CONFIG_ID", "old-config")
+
+	if got := GetAppConf("FEATURE_FLAG", "fallback", nil); got != "enabled" {
+		t.Fatalf("expected value from config file, got %v", got)
+	}
+	if got := os.Getenv("FEATURE_INT"); got != "42" {
+		t.Fatalf("expected config value exported to env, got %q", got)
 	}
 }
 

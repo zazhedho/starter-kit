@@ -94,6 +94,24 @@ func TestCreateSessionStoresSessionWithDerivedDeviceInfo(t *testing.T) {
 	}
 }
 
+func TestExtractDeviceInfoVariants(t *testing.T) {
+	tests := map[string]string{
+		"Mozilla/5.0 (Linux; Android 13; Pixel)":       "Android Mobile",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)":     "iOS Mobile",
+		"Mozilla/5.0 (Mobile; rv:109.0)":               "Mobile Device",
+		"Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS)":  "Tablet",
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)": "Mac",
+		"Mozilla/5.0 (X11; Linux x86_64)":              "Linux",
+		"unknown":                                      "Unknown Device",
+	}
+
+	for userAgent, want := range tests {
+		if got := extractDeviceInfo(userAgent); got != want {
+			t.Fatalf("user agent %q: expected %q, got %q", userAgent, want, got)
+		}
+	}
+}
+
 func TestValidateSessionDeletesExpiredSession(t *testing.T) {
 	repo := &sessionRepoTestDouble{session: &domainsession.Session{
 		SessionID: "session-1",

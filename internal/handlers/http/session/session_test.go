@@ -23,6 +23,8 @@ type sessionServiceHandlerTestDouble struct {
 	destroyedID  string
 	destroyOther string
 	err          error
+	destroyErr   error
+	otherErr     error
 }
 
 func (m *sessionServiceHandlerTestDouble) CreateSession(ctx context.Context, user *domainuser.Users, accessToken string, refreshToken string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
@@ -36,6 +38,9 @@ func (m *sessionServiceHandlerTestDouble) GetUserSessions(ctx context.Context, u
 }
 func (m *sessionServiceHandlerTestDouble) DestroySession(ctx context.Context, sessionID string) error {
 	m.destroyedID = sessionID
+	if m.destroyErr != nil {
+		return m.destroyErr
+	}
 	return m.err
 }
 func (m *sessionServiceHandlerTestDouble) DestroySessionByToken(ctx context.Context, token string) error {
@@ -46,6 +51,9 @@ func (m *sessionServiceHandlerTestDouble) DestroyAllUserSessions(ctx context.Con
 }
 func (m *sessionServiceHandlerTestDouble) DestroyOtherSessions(ctx context.Context, userID string, currentSessionID string) error {
 	m.destroyOther = currentSessionID
+	if m.otherErr != nil {
+		return m.otherErr
+	}
 	return m.err
 }
 func (m *sessionServiceHandlerTestDouble) GetSessionByToken(ctx context.Context, token string) (*domainsession.Session, error) {
@@ -110,15 +118,36 @@ func TestGetActiveSessionsRequiresAuthAndReturnsSessions(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+
+	handler = NewSessionHandler(&sessionServiceHandlerTestDouble{
+		session: &domainsession.Session{SessionID: "current"},
+		err:     errors.New("database down"),
+	}, &auditServiceSessionTestDouble{})
+	rec = performSessionRequest(http.MethodGet, "/sessions", "/sessions", handler.GetActiveSessions, authscope.New("user-1", "Jane", "viewer", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestRevokeSessionValidatesOwnership(t *testing.T) {
-	handler := NewSessionHandler(&sessionServiceHandlerTestDouble{
+	handler := NewSessionHandler(&sessionServiceHandlerTestDouble{}, &auditServiceSessionTestDouble{})
+	rec := performSessionRequest(http.MethodDelete, "/session/:session_id", "/session/session-1", handler.RevokeSession, authscope.Scope{})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewSessionHandler(&sessionServiceHandlerTestDouble{
 		session: &domainsession.Session{SessionID: "session-1", UserID: "other-user"},
 	}, &auditServiceSessionTestDouble{})
-	rec := performSessionRequest(http.MethodDelete, "/session/:session_id", "/session/session-1", handler.RevokeSession, authscope.New("user-1", "Jane", "viewer", nil))
+	rec = performSessionRequest(http.MethodDelete, "/session/:session_id", "/session/session-1", handler.RevokeSession, authscope.New("user-1", "Jane", "viewer", nil))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewSessionHandler(&sessionServiceHandlerTestDouble{err: errors.New("not found")}, &auditServiceSessionTestDouble{})
+	rec = performSessionRequest(http.MethodDelete, "/session/:session_id", "/session/session-1", handler.RevokeSession, authscope.New("user-1", "Jane", "viewer", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -132,11 +161,27 @@ func TestRevokeSessionDeletesOwnedSession(t *testing.T) {
 	if service.destroyedID != "session-1" {
 		t.Fatalf("expected session delete, got %q", service.destroyedID)
 	}
+
+	service = &sessionServiceHandlerTestDouble{
+		session:    &domainsession.Session{SessionID: "session-1", UserID: "user-1"},
+		destroyErr: errors.New("redis down"),
+	}
+	handler = NewSessionHandler(service, &auditServiceSessionTestDouble{})
+	rec = performSessionRequest(http.MethodDelete, "/session/:session_id", "/session/session-1", handler.RevokeSession, authscope.New("user-1", "Jane", "viewer", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestRevokeAllOtherSessionsHandlesCurrentSessionLookup(t *testing.T) {
-	handler := NewSessionHandler(&sessionServiceHandlerTestDouble{err: errors.New("not found")}, &auditServiceSessionTestDouble{})
-	rec := performSessionRequest(http.MethodPost, "/sessions/revoke-others", "/sessions/revoke-others", handler.RevokeAllOtherSessions, authscope.New("user-1", "Jane", "viewer", nil))
+	handler := NewSessionHandler(&sessionServiceHandlerTestDouble{}, &auditServiceSessionTestDouble{})
+	rec := performSessionRequest(http.MethodPost, "/sessions/revoke-others", "/sessions/revoke-others", handler.RevokeAllOtherSessions, authscope.Scope{})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+
+	handler = NewSessionHandler(&sessionServiceHandlerTestDouble{err: errors.New("not found")}, &auditServiceSessionTestDouble{})
+	rec = performSessionRequest(http.MethodPost, "/sessions/revoke-others", "/sessions/revoke-others", handler.RevokeAllOtherSessions, authscope.New("user-1", "Jane", "viewer", nil))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
 	}
@@ -149,5 +194,15 @@ func TestRevokeAllOtherSessionsHandlesCurrentSessionLookup(t *testing.T) {
 	}
 	if service.destroyOther != "current" {
 		t.Fatalf("expected current session id, got %q", service.destroyOther)
+	}
+
+	service = &sessionServiceHandlerTestDouble{
+		session:  &domainsession.Session{SessionID: "current", UserID: "user-1"},
+		otherErr: errors.New("redis down"),
+	}
+	handler = NewSessionHandler(service, &auditServiceSessionTestDouble{})
+	rec = performSessionRequest(http.MethodPost, "/sessions/revoke-others", "/sessions/revoke-others", handler.RevokeAllOtherSessions, authscope.New("user-1", "Jane", "viewer", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected destroy others 500, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

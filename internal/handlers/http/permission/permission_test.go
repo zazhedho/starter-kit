@@ -119,6 +119,18 @@ func performPermissionRequest(
 	return rec
 }
 
+func performPermissionRawRequest(method, path, body string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	routePath := strings.SplitN(path, "?", 2)[0]
+	router.Handle(method, routePath, handler)
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestCreatePermissionReturnsCreatedAndWritesAudit(t *testing.T) {
 	auditSvc := &auditServicePermissionTestDouble{}
 	service := &permissionServiceTestDouble{permission: domainpermission.Permission{
@@ -189,6 +201,15 @@ func TestGetAllPermissionsReturnsPagination(t *testing.T) {
 	}
 }
 
+func TestGetAllPermissionsReturnsServiceError(t *testing.T) {
+	handler := NewPermissionHandler(&permissionServiceTestDouble{err: errors.New("database down")}, &auditServicePermissionTestDouble{})
+
+	rec := performPermissionRequest(http.MethodGet, "/permissions", nil, handler.GetAll, authscope.Scope{})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUpdatePermissionMapsDuplicateError(t *testing.T) {
 	handler := NewPermissionHandler(
 		&permissionServiceTestDouble{err: errors.New("permission with this name already exists")},
@@ -200,6 +221,11 @@ func TestUpdatePermissionMapsDuplicateError(t *testing.T) {
 	}, handler.Update, authscope.Scope{})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = performPermissionRawRequest(http.MethodPut, "/permissions/:id", `{`, handler.Update)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid json 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -213,6 +239,12 @@ func TestDeletePermissionDelegatesToService(t *testing.T) {
 	}
 	if service.deleteID != ":id" {
 		t.Fatalf("expected delete id from route param placeholder, got %q", service.deleteID)
+	}
+
+	handler = NewPermissionHandler(&permissionServiceTestDouble{err: errors.New("database down")}, &auditServicePermissionTestDouble{})
+	rec = performPermissionRequest(http.MethodDelete, "/permissions/:id", nil, handler.Delete, authscope.Scope{})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected delete 500, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

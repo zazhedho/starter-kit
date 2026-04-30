@@ -181,3 +181,15 @@ func TestOTPServiceNotConfigured(t *testing.T) {
 		t.Fatalf("expected not configured error, got %v", err)
 	}
 }
+
+func TestThrottleErrorString(t *testing.T) {
+	var nilErr *ThrottleError
+	if got := nilErr.Error(); got != "otp throttled" {
+		t.Fatalf("expected nil throttle message, got %q", got)
+	}
+
+	err := &ThrottleError{Reason: "cooldown"}
+	if got := err.Error(); got != "otp throttled: cooldown" {
+		t.Fatalf("expected cooldown throttle message, got %q", got)
+	}
+}
