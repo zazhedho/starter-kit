@@ -105,7 +105,7 @@ func performMiddlewareRequestWithSetup(handlers []gin.HandlerFunc, setup func(*g
 
 func testToken(t *testing.T, tokenType string, role string) string {
 	t.Helper()
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	claims := &utils.AppClaims{TokenType: tokenType}
 	token, err := utils.GenerateJwtWithClaims(&domainuser.Users{

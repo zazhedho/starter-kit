@@ -364,7 +364,7 @@ func TestUserHandlerPublicAndAdminFlows(t *testing.T) {
 }
 
 func TestUserHandlerAuthTokenFlows(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	t.Setenv("JWT_EXP", "1")
 	t.Setenv("REFRESH_TOKEN_EXP_HOURS", "1")
 	handler := newUserHandlerForTest()
@@ -390,7 +390,7 @@ func TestUserHandlerAuthTokenFlows(t *testing.T) {
 }
 
 func TestUserHandlerRegisterOTPAndStopImpersonationFlows(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	otpService := &otpServiceUserHandlerTestDouble{}
 	handler := newUserHandlerForTest()
 	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: true}
@@ -638,7 +638,7 @@ func TestUserHandlerServiceErrorBranches(t *testing.T) {
 }
 
 func TestUserHandlerAuthErrorBranches(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	t.Setenv("JWT_EXP", "1")
 	t.Setenv("REFRESH_TOKEN_EXP_HOURS", "1")
 

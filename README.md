@@ -112,7 +112,7 @@ Minimum required variables:
 - `DB_PASS`
 - `DB_NAME`
 - `DB_SSLMODE`
-- `JWT_KEY`
+- `JWT_KEY` (minimum 32 characters; use a random secret for production)
 - `JWT_EXP`
 - `PATH_MIGRATE`
 

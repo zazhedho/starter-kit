@@ -12,6 +12,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const minJWTKeyLength = 32
+
+var (
+	ErrJWTKeyNotConfigured = errors.New("jwt key is not configured")
+	ErrJWTKeyTooShort      = fmt.Errorf("jwt key must be at least %d characters", minJWTKeyLength)
+)
+
 type AppClaims struct {
 	UserId           string `json:"user_id"`
 	Username         string `json:"username"`
@@ -29,6 +36,11 @@ func GenerateJwt(user *domainuser.Users, logId string) (string, error) {
 }
 
 func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride *AppClaims) (string, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return "", err
+	}
+
 	accessExp := time.Now().Add(time.Hour * time.Duration(GetEnv("JWT_EXP", 24)))
 	claims := AppClaims{
 		UserId:    user.Id,
@@ -53,7 +65,7 @@ func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride 
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
 
-	signedToken, err := token.SignedString([]byte(os.Getenv("JWT_KEY")))
+	signedToken, err := token.SignedString(secret)
 	if err != nil {
 		return "", err
 	}
@@ -62,6 +74,11 @@ func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride 
 }
 
 func GenerateRefreshJwt(user *domainuser.Users, logId string, claimsOverride *AppClaims) (string, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return "", err
+	}
+
 	refreshExp := time.Now().Add(time.Hour * time.Duration(GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)))
 	claims := &AppClaims{
 		UserId:    user.Id,
@@ -82,7 +99,7 @@ func GenerateRefreshJwt(user *domainuser.Users, logId string, claimsOverride *Ap
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(os.Getenv("JWT_KEY")))
+	return token.SignedString(secret)
 }
 
 func GetAuthToken(ctx *gin.Context) string {
@@ -102,8 +119,10 @@ func JwtClaim(tokenString string) (map[string]interface{}, error) {
 	}
 
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		hmacSecretString := GetEnv("JWT_KEY", "")
-		hmacSecret := []byte(hmacSecretString)
+		hmacSecret, err := jwtSecret()
+		if err != nil {
+			return nil, err
+		}
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return "", fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -119,4 +138,20 @@ func JwtClaim(tokenString string) (map[string]interface{}, error) {
 		return claims, nil
 	}
 	return nil, err
+}
+
+func jwtSecret() ([]byte, error) {
+	secret := strings.TrimSpace(os.Getenv("JWT_KEY"))
+	if secret == "" {
+		return nil, ErrJWTKeyNotConfigured
+	}
+	if len(secret) < minJWTKeyLength {
+		return nil, ErrJWTKeyTooShort
+	}
+	return []byte(secret), nil
+}
+
+func ValidateJWTKeyConfigured() error {
+	_, err := jwtSecret()
+	return err
 }

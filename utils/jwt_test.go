@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"net/http/httptest"
 	domainuser "starter-kit/internal/domain/user"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestGenerateJwtIncludesAccessClaims(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	token, err := GenerateJwt(&domainuser.Users{
 		Id:   "user-1",
@@ -32,7 +33,7 @@ func TestGenerateJwtIncludesAccessClaims(t *testing.T) {
 }
 
 func TestGenerateRefreshJwtIncludesRefreshTokenType(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	token, err := GenerateRefreshJwt(&domainuser.Users{
 		Id:   "user-1",
@@ -53,7 +54,7 @@ func TestGenerateRefreshJwtIncludesRefreshTokenType(t *testing.T) {
 }
 
 func TestJwtClaimRejectsUnexpectedSigningMethod(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	token := jwt.NewWithClaims(jwt.SigningMethodNone, jwt.MapClaims{"user_id": "user-1"})
 	tokenString, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
@@ -63,6 +64,63 @@ func TestJwtClaimRejectsUnexpectedSigningMethod(t *testing.T) {
 
 	if _, err := JwtClaim(tokenString); err == nil {
 		t.Fatal("expected signing method error")
+	}
+}
+
+func TestJWTRequiresConfiguredSecret(t *testing.T) {
+	t.Setenv("JWT_KEY", "")
+	user := &domainuser.Users{
+		Id:   "user-1",
+		Name: "Jane",
+		Role: RoleViewer,
+	}
+
+	if _, err := GenerateJwt(user, "log-1"); !errors.Is(err, ErrJWTKeyNotConfigured) {
+		t.Fatalf("expected jwt key error for access token, got %v", err)
+	}
+	if _, err := GenerateRefreshJwt(user, "log-1", nil); !errors.Is(err, ErrJWTKeyNotConfigured) {
+		t.Fatalf("expected jwt key error for refresh token, got %v", err)
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"user_id": "user-1"})
+	tokenString, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("failed to sign test token: %v", err)
+	}
+	if _, err := JwtClaim(tokenString); !errors.Is(err, ErrJWTKeyNotConfigured) {
+		t.Fatalf("expected jwt key error for token parsing, got %v", err)
+	}
+}
+
+func TestJWTRejectsWhitespaceOnlySecret(t *testing.T) {
+	t.Setenv("JWT_KEY", "   ")
+
+	_, err := GenerateJwt(&domainuser.Users{Id: "user-1"}, "log-1")
+	if !errors.Is(err, ErrJWTKeyNotConfigured) {
+		t.Fatalf("expected jwt key error, got %v", err)
+	}
+	if err := ValidateJWTKeyConfigured(); !errors.Is(err, ErrJWTKeyNotConfigured) {
+		t.Fatalf("expected startup validation error, got %v", err)
+	}
+}
+
+func TestJWTRejectsShortSecret(t *testing.T) {
+	t.Setenv("JWT_KEY", "a")
+
+	_, err := GenerateJwt(&domainuser.Users{Id: "user-1"}, "log-1")
+	if !errors.Is(err, ErrJWTKeyTooShort) {
+		t.Fatalf("expected short jwt key error, got %v", err)
+	}
+	if err := ValidateJWTKeyConfigured(); !errors.Is(err, ErrJWTKeyTooShort) {
+		t.Fatalf("expected startup validation short key error, got %v", err)
+	}
+}
+
+func TestValidateJWTKeyConfiguredAcceptsNonEmptySecret(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+
+	if err := ValidateJWTKeyConfigured(); err != nil {
+		t.Fatalf("expected valid jwt key, got %v", err)
 	}
 }
 

@@ -304,7 +304,7 @@ func TestUpdateNormalizesEmailToLowercase(t *testing.T) {
 }
 
 func TestLoginUserAcceptsEmailIdentifier(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("Password1!"), bcrypt.DefaultCost)
 	if err != nil {
@@ -343,7 +343,7 @@ func TestLoginUserAcceptsEmailIdentifier(t *testing.T) {
 }
 
 func TestLoginUserAcceptsPhoneIdentifier(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("Password1!"), bcrypt.DefaultCost)
 	if err != nil {
@@ -396,7 +396,7 @@ func TestLoginUserRejectsInvalidRandomIdentifier(t *testing.T) {
 }
 
 func TestImpersonateUserGeneratesTokenWithOriginalUserClaims(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	service := &ServiceUser{
 		UserRepo: &userRepoMock{
@@ -458,7 +458,7 @@ func TestImpersonateUserRejectsSuperadminTargetForNonSuperadmin(t *testing.T) {
 }
 
 func TestStopImpersonationReturnsOriginalUserToken(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
 	service := &ServiceUser{
 		UserRepo: &userRepoMock{
@@ -712,7 +712,7 @@ func TestUserServicePassThroughAndFilteringMethods(t *testing.T) {
 }
 
 func TestChangePasswordAndForgotResetPasswordFlows(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
@@ -853,7 +853,7 @@ func TestAdminCreateUserValidationBranches(t *testing.T) {
 }
 
 func TestUserServiceErrorBranches(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)

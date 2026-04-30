@@ -154,7 +154,7 @@ func TestValidateErrorMapsKnownTags(t *testing.T) {
 }
 
 func TestJwtClaimsReadsAuthorizationHeader(t *testing.T) {
-	t.Setenv("JWT_KEY", "test-secret")
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	token, err := GenerateJwt(&domainuser.Users{
 		Id:   "user-1",
 		Name: "Jane",
