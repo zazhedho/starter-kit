@@ -13,13 +13,14 @@ import (
 )
 
 type appConfigRepoMock struct {
-	byID   domainappconfig.AppConfig
-	byKey  map[string]domainappconfig.AppConfig
-	update domainappconfig.AppConfig
-	getErr error
-	keyErr error
-	list   []domainappconfig.AppConfig
-	total  int64
+	byID      domainappconfig.AppConfig
+	byKey     map[string]domainappconfig.AppConfig
+	update    domainappconfig.AppConfig
+	getErr    error
+	keyErr    error
+	updateErr error
+	list      []domainappconfig.AppConfig
+	total     int64
 }
 
 func (m *appConfigRepoMock) Store(ctx context.Context, data domainappconfig.AppConfig) error {
@@ -35,6 +36,9 @@ func (m *appConfigRepoMock) GetAll(ctx context.Context, params filter.BaseParams
 	return append([]domainappconfig.AppConfig{}, m.list...), m.total, nil
 }
 func (m *appConfigRepoMock) Update(ctx context.Context, data domainappconfig.AppConfig) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
 	m.update = data
 	m.byID = data
 	return nil
@@ -211,5 +215,42 @@ func TestAppConfigServicePassThroughMethodsAndIsEnabled(t *testing.T) {
 	}
 	if updated.IsActive {
 		t.Fatalf("expected config to be inactive, got %+v", updated)
+	}
+}
+
+func TestAppConfigServiceUpdateErrorsAndFallbacks(t *testing.T) {
+	service := NewAppConfigService(&appConfigRepoMock{getErr: gorm.ErrRecordNotFound})
+	if _, err := service.Update(context.Background(), "cfg-1", dto.UpdateAppConfig{Value: "new"}); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected get by id error, got %v", err)
+	}
+
+	service = NewAppConfigService(&appConfigRepoMock{
+		byID:      domainappconfig.AppConfig{Id: "cfg-1", Value: "old", IsActive: true},
+		updateErr: errors.New("database down"),
+	})
+	if _, err := service.Update(context.Background(), "cfg-1", dto.UpdateAppConfig{Value: "new"}); err == nil {
+		t.Fatal("expected update error")
+	}
+
+	service = NewAppConfigService(&appConfigRepoMock{
+		byKey: map[string]domainappconfig.AppConfig{
+			"app.name":      {ConfigKey: "app.name", Value: "Starter", IsActive: true},
+			"jobs.size":     {ConfigKey: "jobs.size", Value: "25", IsActive: true},
+			"jobs.interval": {ConfigKey: "jobs.interval", Value: "bad", IsActive: true},
+			"jobs.rules":    {ConfigKey: "jobs.rules", Value: `{`, IsActive: true},
+		},
+	})
+	if got, err := service.GetString(context.Background(), "app.name", "fallback"); err != nil || got != "Starter" {
+		t.Fatalf("get string: got=%q err=%v", got, err)
+	}
+	if got, err := service.GetInt(context.Background(), "jobs.size", 10); err != nil || got != 25 {
+		t.Fatalf("get int: got=%d err=%v", got, err)
+	}
+	if _, err := service.GetDuration(context.Background(), "jobs.interval", time.Minute); err == nil {
+		t.Fatal("expected duration parse error")
+	}
+	var target map[string]interface{}
+	if err := service.DecodeJSON(context.Background(), "jobs.rules", &target); err == nil {
+		t.Fatal("expected json decode error")
 	}
 }

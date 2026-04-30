@@ -11,16 +11,21 @@ import (
 )
 
 type otpRepoTestDouble struct {
-	otp             map[string]string
-	attempts        map[string]int
-	cooldownTTL     time.Duration
-	sendCount       int
-	sendRetryAfter  time.Duration
-	deletedEmail    string
-	resetEmail      string
-	clearedCooldown string
-	clearedSend     string
-	setCooldownErr  error
+	otp                 map[string]string
+	attempts            map[string]int
+	cooldownTTL         time.Duration
+	sendCount           int
+	sendRetryAfter      time.Duration
+	deletedEmail        string
+	resetEmail          string
+	clearedCooldown     string
+	clearedSend         string
+	getCooldownErr      error
+	incrementSendErr    error
+	setOTPErr           error
+	getOTPErr           error
+	incrementAttemptErr error
+	setCooldownErr      error
 }
 
 func newOTPRepoTestDouble() *otpRepoTestDouble {
@@ -31,10 +36,16 @@ func newOTPRepoTestDouble() *otpRepoTestDouble {
 }
 
 func (m *otpRepoTestDouble) SetOTP(ctx context.Context, email, hashed string, ttl time.Duration) error {
+	if m.setOTPErr != nil {
+		return m.setOTPErr
+	}
 	m.otp[email] = hashed
 	return nil
 }
 func (m *otpRepoTestDouble) GetOTP(ctx context.Context, email string) (string, error) {
+	if m.getOTPErr != nil {
+		return "", m.getOTPErr
+	}
 	hashed, ok := m.otp[email]
 	if !ok {
 		return "", redis.Nil
@@ -47,6 +58,9 @@ func (m *otpRepoTestDouble) DeleteOTP(ctx context.Context, email string) error {
 	return nil
 }
 func (m *otpRepoTestDouble) IncrementAttempts(ctx context.Context, email string, ttl time.Duration) (int, error) {
+	if m.incrementAttemptErr != nil {
+		return 0, m.incrementAttemptErr
+	}
 	m.attempts[email]++
 	return m.attempts[email], nil
 }
@@ -59,6 +73,9 @@ func (m *otpRepoTestDouble) SetCooldown(ctx context.Context, email string, ttl t
 	return m.setCooldownErr
 }
 func (m *otpRepoTestDouble) GetCooldownTTL(ctx context.Context, email string) (time.Duration, error) {
+	if m.getCooldownErr != nil {
+		return 0, m.getCooldownErr
+	}
 	return m.cooldownTTL, nil
 }
 func (m *otpRepoTestDouble) ClearCooldown(ctx context.Context, email string) error {
@@ -66,6 +83,9 @@ func (m *otpRepoTestDouble) ClearCooldown(ctx context.Context, email string) err
 	return nil
 }
 func (m *otpRepoTestDouble) IncrementSendCount(ctx context.Context, email string, ttl time.Duration) (int, time.Duration, error) {
+	if m.incrementSendErr != nil {
+		return 0, 0, m.incrementSendErr
+	}
 	m.sendCount++
 	return m.sendCount, m.sendRetryAfter, nil
 }
@@ -180,6 +200,100 @@ func TestOTPServiceNotConfigured(t *testing.T) {
 	if !errors.Is(err, ErrOTPNotConfigured) {
 		t.Fatalf("expected not configured error, got %v", err)
 	}
+}
+
+func TestSendRegisterOTPRejectsInvalidEmail(t *testing.T) {
+	svc := NewOTPService(newOTPRepoTestDouble(), &otpSenderTestDouble{}, otpTestConfig())
+	err := svc.SendRegisterOTP(context.Background(), "   ", "Starter")
+	if !errors.Is(err, ErrOTPInvalid) {
+		t.Fatalf("expected invalid otp error, got %v", err)
+	}
+}
+
+func TestSendRegisterOTPRepositoryErrors(t *testing.T) {
+	tests := map[string]*otpRepoTestDouble{
+		"cooldown":     {getCooldownErr: errors.New("redis down")},
+		"rate limit":   {incrementSendErr: errors.New("redis down")},
+		"store otp":    {setOTPErr: errors.New("redis down")},
+		"set cooldown": {setCooldownErr: errors.New("redis down")},
+	}
+
+	for name, repo := range tests {
+		t.Run(name, func(t *testing.T) {
+			if repo.otp == nil {
+				repo.otp = map[string]string{}
+			}
+			if repo.attempts == nil {
+				repo.attempts = map[string]int{}
+			}
+			svc := NewOTPService(repo, &otpSenderTestDouble{}, otpTestConfig())
+			if err := svc.SendRegisterOTP(context.Background(), "jane@example.com", "Starter"); err == nil {
+				t.Fatal("expected repository error")
+			}
+		})
+	}
+}
+
+func TestSendRegisterOTPReturnsThrottleOnRateLimit(t *testing.T) {
+	repo := newOTPRepoTestDouble()
+	repo.sendCount = 2
+	repo.sendRetryAfter = 20 * time.Second
+	svc := NewOTPService(repo, &otpSenderTestDouble{}, otpTestConfig())
+
+	err := svc.SendRegisterOTP(context.Background(), "jane@example.com", "Starter")
+	var throttle *ThrottleError
+	if !errors.As(err, &throttle) {
+		t.Fatalf("expected throttle error, got %v", err)
+	}
+	if throttle.Reason != "rate_limit" || throttle.RetryAfter != 20*time.Second {
+		t.Fatalf("unexpected throttle error: %+v", throttle)
+	}
+}
+
+func TestVerifyRegisterOTPErrorBranches(t *testing.T) {
+	t.Run("not configured", func(t *testing.T) {
+		err := NewOTPService(nil, nil, otpTestConfig()).VerifyRegisterOTP(context.Background(), "jane@example.com", "123456")
+		if !errors.Is(err, ErrOTPNotConfigured) {
+			t.Fatalf("expected not configured, got %v", err)
+		}
+	})
+	t.Run("invalid input", func(t *testing.T) {
+		svc := NewOTPService(newOTPRepoTestDouble(), nil, otpTestConfig())
+		if err := svc.VerifyRegisterOTP(context.Background(), "", ""); !errors.Is(err, ErrOTPInvalid) {
+			t.Fatalf("expected invalid otp, got %v", err)
+		}
+	})
+	t.Run("missing otp", func(t *testing.T) {
+		svc := NewOTPService(newOTPRepoTestDouble(), nil, otpTestConfig())
+		if err := svc.VerifyRegisterOTP(context.Background(), "jane@example.com", "123456"); !errors.Is(err, ErrOTPInvalid) {
+			t.Fatalf("expected invalid otp, got %v", err)
+		}
+	})
+	t.Run("get otp error", func(t *testing.T) {
+		repo := newOTPRepoTestDouble()
+		repo.getOTPErr = errors.New("redis down")
+		svc := NewOTPService(repo, nil, otpTestConfig())
+		if err := svc.VerifyRegisterOTP(context.Background(), "jane@example.com", "123456"); err == nil {
+			t.Fatal("expected get otp error")
+		}
+	})
+	t.Run("increment attempts error", func(t *testing.T) {
+		repo := newOTPRepoTestDouble()
+		repo.otp["jane@example.com"] = hashOTP("123456", "secret")
+		repo.incrementAttemptErr = errors.New("redis down")
+		svc := NewOTPService(repo, nil, otpTestConfig())
+		if err := svc.VerifyRegisterOTP(context.Background(), "jane@example.com", "123456"); err == nil {
+			t.Fatal("expected increment attempts error")
+		}
+	})
+	t.Run("wrong code before max attempts", func(t *testing.T) {
+		repo := newOTPRepoTestDouble()
+		repo.otp["jane@example.com"] = hashOTP("123456", "secret")
+		svc := NewOTPService(repo, nil, otpTestConfig())
+		if err := svc.VerifyRegisterOTP(context.Background(), "jane@example.com", "000000"); !errors.Is(err, ErrOTPInvalid) {
+			t.Fatalf("expected invalid otp, got %v", err)
+		}
+	})
 }
 
 func TestThrottleErrorString(t *testing.T) {

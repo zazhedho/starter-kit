@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -68,6 +69,66 @@ func TestRedisLoginLimiterRegisterFailure(t *testing.T) {
 	blocked, ttl, err = limiter.RegisterFailure(ctx, "client-1")
 	if err != nil || !blocked || ttl != 5*time.Minute {
 		t.Fatalf("limit failure: blocked=%v ttl=%v err=%v", blocked, ttl, err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redis expectations: %v", err)
+	}
+}
+
+func TestRedisLoginLimiterNilReceiverAndRedisErrors(t *testing.T) {
+	ctx := context.Background()
+	var nilLimiter *redisLoginLimiter
+	if blocked, ttl, err := nilLimiter.IsBlocked(ctx, "client-1"); err != nil || blocked || ttl != 0 {
+		t.Fatalf("nil is blocked: blocked=%v ttl=%v err=%v", blocked, ttl, err)
+	}
+	if blocked, ttl, err := nilLimiter.RegisterFailure(ctx, "client-1"); err != nil || blocked || ttl != 0 {
+		t.Fatalf("nil register failure: blocked=%v ttl=%v err=%v", blocked, ttl, err)
+	}
+	if err := nilLimiter.Reset(ctx, "client-1"); err != nil {
+		t.Fatalf("nil reset: %v", err)
+	}
+
+	client, mock := redismock.NewClientMock()
+	limiter := NewRedisLoginLimiter(client, 2, time.Minute, 5*time.Minute)
+	redisErr := errors.New("redis down")
+
+	mock.ExpectTTL("login_block:client-1").SetErr(redisErr)
+	if _, _, err := limiter.IsBlocked(ctx, "client-1"); err == nil {
+		t.Fatal("expected ttl error")
+	}
+
+	mock.ExpectTTL("login_block:client-1").SetVal(0)
+	if blocked, ttl, err := limiter.IsBlocked(ctx, "client-1"); err != nil || blocked || ttl != 0 {
+		t.Fatalf("expected not blocked, blocked=%v ttl=%v err=%v", blocked, ttl, err)
+	}
+
+	mock.ExpectIncr("login_attempts:client-1").SetErr(redisErr)
+	if _, _, err := limiter.RegisterFailure(ctx, "client-1"); err == nil {
+		t.Fatal("expected incr error")
+	}
+
+	mock.ExpectIncr("login_attempts:client-1").SetVal(1)
+	mock.ExpectExpire("login_attempts:client-1", time.Minute).SetErr(redisErr)
+	if _, _, err := limiter.RegisterFailure(ctx, "client-1"); err == nil {
+		t.Fatal("expected expire error")
+	}
+
+	mock.ExpectIncr("login_attempts:client-1").SetVal(2)
+	mock.ExpectSet("login_block:client-1", "1", 5*time.Minute).SetErr(redisErr)
+	if _, _, err := limiter.RegisterFailure(ctx, "client-1"); err == nil {
+		t.Fatal("expected set block error")
+	}
+
+	mock.ExpectDel("login_attempts:client-1").SetErr(redisErr)
+	if err := limiter.Reset(ctx, "client-1"); err == nil {
+		t.Fatal("expected reset attempts error")
+	}
+
+	mock.ExpectDel("login_attempts:client-1").SetVal(0)
+	mock.ExpectDel("login_block:client-1").SetErr(redisErr)
+	if err := limiter.Reset(ctx, "client-1"); err == nil {
+		t.Fatal("expected reset block error")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

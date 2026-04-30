@@ -19,11 +19,13 @@ import (
 )
 
 type appConfigServiceTestDouble struct {
-	configs   []domainappconfig.AppConfig
-	config    domainappconfig.AppConfig
-	total     int64
-	updateReq dto.UpdateAppConfig
-	err       error
+	configs    []domainappconfig.AppConfig
+	config     domainappconfig.AppConfig
+	total      int64
+	updateReq  dto.UpdateAppConfig
+	err        error
+	getByIDErr error
+	updateErr  error
 }
 
 func (m *appConfigServiceTestDouble) GetAll(ctx context.Context, params filter.BaseParams) ([]domainappconfig.AppConfig, int64, error) {
@@ -33,6 +35,9 @@ func (m *appConfigServiceTestDouble) GetAll(ctx context.Context, params filter.B
 	return m.configs, m.total, nil
 }
 func (m *appConfigServiceTestDouble) GetByID(ctx context.Context, id string) (domainappconfig.AppConfig, error) {
+	if m.getByIDErr != nil {
+		return domainappconfig.AppConfig{}, m.getByIDErr
+	}
 	if m.err != nil {
 		return domainappconfig.AppConfig{}, m.err
 	}
@@ -43,6 +48,9 @@ func (m *appConfigServiceTestDouble) GetByKey(ctx context.Context, configKey str
 }
 func (m *appConfigServiceTestDouble) Update(ctx context.Context, id string, req dto.UpdateAppConfig) (domainappconfig.AppConfig, error) {
 	m.updateReq = req
+	if m.updateErr != nil {
+		return domainappconfig.AppConfig{}, m.updateErr
+	}
 	if m.err != nil {
 		return domainappconfig.AppConfig{}, m.err
 	}
@@ -141,6 +149,33 @@ func TestGetAppConfigByIDReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestGetAllAppConfigsErrorBranches(t *testing.T) {
+	handler := NewAppConfigHandler(&appConfigServiceTestDouble{}, &auditServiceAppConfigTestDouble{})
+	rec := performAppConfigRequest(http.MethodGet, "/configs", "/configs?page=bad", nil, handler.GetAll)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewAppConfigHandler(&appConfigServiceTestDouble{err: errors.New("database down")}, &auditServiceAppConfigTestDouble{})
+	rec = performAppConfigRequest(http.MethodGet, "/configs", "/configs", nil, handler.GetAll)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetAppConfigByIDReturnsOK(t *testing.T) {
+	handler := NewAppConfigHandler(&appConfigServiceTestDouble{config: domainappconfig.AppConfig{
+		Id:        "550e8400-e29b-41d4-a716-446655440000",
+		ConfigKey: "auth.enabled",
+		Value:     "true",
+	}}, &auditServiceAppConfigTestDouble{})
+
+	rec := performAppConfigRequest(http.MethodGet, "/configs/:id", "/configs/550e8400-e29b-41d4-a716-446655440000", nil, handler.GetByID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUpdateAppConfigReturnsOKAndWritesAudit(t *testing.T) {
 	active := true
 	auditSvc := &auditServiceAppConfigTestDouble{}
@@ -175,5 +210,24 @@ func TestUpdateAppConfigMapsServiceErrors(t *testing.T) {
 	}, handler.Update)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateAppConfigRejectsBadInputAndNotFound(t *testing.T) {
+	handler := NewAppConfigHandler(&appConfigServiceTestDouble{}, &auditServiceAppConfigTestDouble{})
+	rec := performAppConfigRequest(http.MethodPut, "/configs/:id", "/configs/not-a-uuid", dto.UpdateAppConfig{Value: "true"}, handler.Update)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid uuid 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = performAppConfigRequest(http.MethodPut, "/configs/:id", "/configs/550e8400-e29b-41d4-a716-446655440000", map[string]interface{}{"is_active": "yes"}, handler.Update)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid json 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewAppConfigHandler(&appConfigServiceTestDouble{updateErr: gorm.ErrRecordNotFound}, &auditServiceAppConfigTestDouble{})
+	rec = performAppConfigRequest(http.MethodPut, "/configs/:id", "/configs/550e8400-e29b-41d4-a716-446655440000", dto.UpdateAppConfig{Value: "true"}, handler.Update)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected not found 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

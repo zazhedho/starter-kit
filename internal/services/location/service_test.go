@@ -21,18 +21,27 @@ type locationRepoTestDouble struct {
 	cities    []domainlocation.City
 	districts []domainlocation.District
 	villages  []domainlocation.Village
+	listErr   error
 
 	activeJob    domainlocation.SyncJob
 	activeJobErr error
 	syncJob      domainlocation.SyncJob
 	syncJobErr   error
 	createdJob   *domainlocation.SyncJob
+	updatedJobs  []domainlocation.SyncJob
 	failMessage  string
 
 	upsertProvinceCount int
 	upsertCityCount     int
 	upsertDistrictCount int
 	upsertVillageCount  int
+	upsertProvinceErr   error
+	upsertCityErr       error
+	upsertDistrictErr   error
+	upsertVillageErr    error
+	createSyncJobErr    error
+	updateSyncJobErr    error
+	failActiveErr       error
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -42,15 +51,27 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (m *locationRepoTestDouble) ListProvinces(ctx context.Context) ([]domainlocation.Province, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	return append([]domainlocation.Province{}, m.provinces...), nil
 }
 func (m *locationRepoTestDouble) ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	return append([]domainlocation.City{}, m.cities...), nil
 }
 func (m *locationRepoTestDouble) ListDistrictsByCity(ctx context.Context, cityCode string) ([]domainlocation.District, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	return append([]domainlocation.District{}, m.districts...), nil
 }
 func (m *locationRepoTestDouble) ListVillagesByDistrict(ctx context.Context, districtCode string) ([]domainlocation.Village, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	return append([]domainlocation.Village{}, m.villages...), nil
 }
 func (m *locationRepoTestDouble) GetProvinceByCode(ctx context.Context, code string) (domainlocation.Province, error) {
@@ -63,28 +84,45 @@ func (m *locationRepoTestDouble) GetDistrictByCode(ctx context.Context, code str
 	return domainlocation.District{}, errors.New("not implemented")
 }
 func (m *locationRepoTestDouble) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
+	if m.upsertProvinceErr != nil {
+		return m.upsertProvinceErr
+	}
 	m.upsertProvinceCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) UpsertCities(ctx context.Context, items []domainlocation.City) error {
+	if m.upsertCityErr != nil {
+		return m.upsertCityErr
+	}
 	m.upsertCityCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) UpsertDistricts(ctx context.Context, items []domainlocation.District) error {
+	if m.upsertDistrictErr != nil {
+		return m.upsertDistrictErr
+	}
 	m.upsertDistrictCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) UpsertVillages(ctx context.Context, items []domainlocation.Village) error {
+	if m.upsertVillageErr != nil {
+		return m.upsertVillageErr
+	}
 	m.upsertVillageCount += len(items)
 	return nil
 }
 func (m *locationRepoTestDouble) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
+	if m.createSyncJobErr != nil {
+		return m.createSyncJobErr
+	}
 	copyJob := *job
 	m.createdJob = &copyJob
 	return nil
 }
 func (m *locationRepoTestDouble) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
-	return nil
+	copyJob := *job
+	m.updatedJobs = append(m.updatedJobs, copyJob)
+	return m.updateSyncJobErr
 }
 func (m *locationRepoTestDouble) GetSyncJobByID(ctx context.Context, id string) (domainlocation.SyncJob, error) {
 	if m.syncJobErr != nil {
@@ -100,7 +138,7 @@ func (m *locationRepoTestDouble) GetActiveSyncJob(ctx context.Context) (domainlo
 }
 func (m *locationRepoTestDouble) FailActiveSyncJobs(ctx context.Context, message string) error {
 	m.failMessage = message
-	return nil
+	return m.failActiveErr
 }
 
 func TestGetProvinceMapsRepositoryRows(t *testing.T) {
@@ -157,12 +195,45 @@ func TestLocationServiceReadMethodsMapRepositoryRows(t *testing.T) {
 	}
 }
 
+func TestLocationServiceReadMethodsReturnRepositoryErrors(t *testing.T) {
+	svc := NewLocationService(&locationRepoTestDouble{listErr: errors.New("database down")})
+	ctx := context.Background()
+
+	if _, err := svc.GetProvince(ctx); err == nil {
+		t.Fatal("expected province error")
+	}
+	if _, err := svc.GetCity(ctx, "31"); err == nil {
+		t.Fatal("expected city error")
+	}
+	if _, err := svc.GetDistrict(ctx, "3171"); err == nil {
+		t.Fatal("expected district error")
+	}
+	if _, err := svc.GetVillage(ctx, "317101"); err == nil {
+		t.Fatal("expected village error")
+	}
+}
+
 func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound})
 
 	_, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "city"}, "user-1")
 	if err == nil || err.Error() != "province_code is required for city sync" {
 		t.Fatalf("expected city sync validation error, got %v", err)
+	}
+
+	_, err = svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "district", ProvinceCode: "31"}, "user-1")
+	if err == nil || err.Error() != "province_code and city_code are required for district sync" {
+		t.Fatalf("expected district sync validation error, got %v", err)
+	}
+
+	_, err = svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "village", ProvinceCode: "31", CityCode: "3171"}, "user-1")
+	if err == nil || err.Error() != "province_code, city_code, and district_code are required for village sync" {
+		t.Fatalf("expected village sync validation error, got %v", err)
+	}
+
+	_, err = svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "unknown"}, "user-1")
+	if err == nil || err.Error() != "invalid sync level" {
+		t.Fatalf("expected invalid level error, got %v", err)
 	}
 }
 
@@ -207,6 +278,18 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 	}
 	if repo.createdJob.RequestedBy != "user-1" {
 		t.Fatalf("expected requested user id, got %+v", repo.createdJob)
+	}
+}
+
+func TestStartSyncRepositoryErrors(t *testing.T) {
+	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: errors.New("database down")})
+	if _, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
+		t.Fatal("expected active job lookup error")
+	}
+
+	svc = NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound, createSyncJobErr: errors.New("database down")})
+	if _, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
+		t.Fatal("expected create sync job error")
 	}
 }
 
@@ -313,6 +396,24 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
 		t.Fatal("expected status error")
 	}
+
+	svc.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, errors.New("network down")
+	})}
+	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
+		t.Fatal("expected transport error")
+	}
+
+	svc.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
+		t.Fatal("expected decode error")
+	}
 }
 
 func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
@@ -368,6 +469,126 @@ func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
 	}
 	if repo.upsertProvinceCount != 1 || repo.upsertCityCount != 1 || repo.upsertDistrictCount != 1 || repo.upsertVillageCount != 1 {
 		t.Fatalf("expected all upserts, repo=%+v", repo)
+	}
+}
+
+func TestLocationSyncIndividualLevels(t *testing.T) {
+	makeService := func(repo *locationRepoTestDouble) *LocationService {
+		return &LocationService{
+			Repo: repo,
+			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				body := `{}`
+				switch {
+				case strings.Contains(req.URL.Path, "list_pro"):
+					body = `{"31":"DKI Jakarta"}`
+				case strings.Contains(req.URL.Path, "list_kab"):
+					body = `{"71":"Jakarta Selatan"}`
+				case strings.Contains(req.URL.Path, "list_kec"):
+					body = `{"01":"Tebet"}`
+				case strings.Contains(req.URL.Path, "list_des"):
+					body = `{"01":"Tebet Barat"}`
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(body)),
+					Header:     make(http.Header),
+				}, nil
+			})},
+		}
+	}
+
+	tests := []dto.SyncLocationRequest{
+		{Level: "province", Year: "2026"},
+		{Level: "city", Year: "2026", ProvinceCode: "31"},
+		{Level: "district", Year: "2026", ProvinceCode: "31", CityCode: "3171"},
+		{Level: "village", Year: "2026", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"},
+	}
+
+	for _, req := range tests {
+		t.Run(req.Level, func(t *testing.T) {
+			repo := &locationRepoTestDouble{}
+			svc := makeService(repo)
+			result, err := svc.sync(context.Background(), req, func(progress syncProgress) {})
+			if err != nil {
+				t.Fatalf("expected sync success, got %v", err)
+			}
+			if result.Message == "" {
+				t.Fatalf("expected result message, got %+v", result)
+			}
+		})
+	}
+
+	svc := makeService(&locationRepoTestDouble{})
+	if _, err := svc.sync(context.Background(), dto.SyncLocationRequest{Level: "bad"}, func(progress syncProgress) {}); err == nil {
+		t.Fatal("expected invalid sync level error")
+	}
+}
+
+func TestLocationSyncUpsertErrors(t *testing.T) {
+	makeService := func(repo *locationRepoTestDouble) *LocationService {
+		return &LocationService{
+			Repo: repo,
+			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				body := `{"31":"DKI Jakarta"}`
+				if strings.Contains(req.URL.Path, "list_kab") {
+					body = `{"71":"Jakarta Selatan"}`
+				}
+				if strings.Contains(req.URL.Path, "list_kec") {
+					body = `{"01":"Tebet"}`
+				}
+				if strings.Contains(req.URL.Path, "list_des") {
+					body = `{"01":"Tebet Barat"}`
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})},
+		}
+	}
+
+	tests := []struct {
+		name string
+		repo *locationRepoTestDouble
+		req  dto.SyncLocationRequest
+	}{
+		{name: "province", repo: &locationRepoTestDouble{upsertProvinceErr: errors.New("database down")}, req: dto.SyncLocationRequest{Level: "province", Year: "2026"}},
+		{name: "city", repo: &locationRepoTestDouble{upsertCityErr: errors.New("database down")}, req: dto.SyncLocationRequest{Level: "city", Year: "2026", ProvinceCode: "31"}},
+		{name: "district", repo: &locationRepoTestDouble{upsertDistrictErr: errors.New("database down")}, req: dto.SyncLocationRequest{Level: "district", Year: "2026", ProvinceCode: "31", CityCode: "3171"}},
+		{name: "village", repo: &locationRepoTestDouble{upsertVillageErr: errors.New("database down")}, req: dto.SyncLocationRequest{Level: "village", Year: "2026", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := makeService(tt.repo)
+			if _, err := svc.sync(context.Background(), tt.req, func(progress syncProgress) {}); err == nil {
+				t.Fatal("expected upsert error")
+			}
+		})
+	}
+}
+
+func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
+	now := time.Now()
+	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: now}}
+	svc := &LocationService{
+		Repo: repo,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"31":"DKI Jakarta"}`)), Header: make(http.Header)}, nil
+		})},
+	}
+
+	svc.runSyncJob("job-1", dto.SyncLocationRequest{Level: "province", Year: "2026"})
+	if len(repo.updatedJobs) < 2 {
+		t.Fatalf("expected running and completed job updates, got %+v", repo.updatedJobs)
+	}
+	if got := repo.updatedJobs[len(repo.updatedJobs)-1]; got.Status != "completed" || got.ProvinceCount != 1 {
+		t.Fatalf("expected completed job, got %+v", got)
+	}
+
+	repo = &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-2", Status: "queued", CreatedAt: now}}
+	svc = &LocationService{Repo: repo}
+	svc.syncing.Store(true)
+	svc.runSyncJob("job-2", dto.SyncLocationRequest{Level: "province", Year: "2026"})
+	if len(repo.updatedJobs) != 1 || repo.updatedJobs[0].Status != "failed" {
+		t.Fatalf("expected busy sync to mark failed, got %+v", repo.updatedJobs)
 	}
 }
 

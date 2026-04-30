@@ -85,6 +85,41 @@ func TestLocationListHandlersValidateRequiredQueries(t *testing.T) {
 	if rec := performLocationRequest(http.MethodGet, "/village", "/village", nil, handler.GetVillage, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected village 400, got %d", rec.Code)
 	}
+
+	if rec := performLocationRequest(http.MethodGet, "/city", "/city?province_code=11", nil, handler.GetCity, nil); rec.Code != http.StatusOK {
+		t.Fatalf("expected city 200, got %d", rec.Code)
+	}
+	if rec := performLocationRequest(http.MethodGet, "/district", "/district?city_code=1101", nil, handler.GetDistrict, nil); rec.Code != http.StatusOK {
+		t.Fatalf("expected district 200, got %d", rec.Code)
+	}
+	if rec := performLocationRequest(http.MethodGet, "/village", "/village?district_code=110101", nil, handler.GetVillage, nil); rec.Code != http.StatusOK {
+		t.Fatalf("expected village 200, got %d", rec.Code)
+	}
+}
+
+func TestLocationListHandlersMapServiceErrors(t *testing.T) {
+	handler := NewLocationHandler(&locationServiceTestDouble{err: errors.New("database down")})
+
+	tests := []struct {
+		name      string
+		routePath string
+		path      string
+		call      gin.HandlerFunc
+	}{
+		{name: "province", routePath: "/province", path: "/province", call: handler.GetProvince},
+		{name: "city", routePath: "/city", path: "/city?province_code=11", call: handler.GetCity},
+		{name: "district", routePath: "/district", path: "/district?city_code=1101", call: handler.GetDistrict},
+		{name: "village", routePath: "/village", path: "/village?district_code=110101", call: handler.GetVillage},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := performLocationRequest(http.MethodGet, tt.routePath, tt.path, nil, tt.call, nil)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
 }
 
 func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
@@ -112,6 +147,11 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
+
+	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", map[string]interface{}{"level": 123}, handler.Sync, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid json 400, got %d", rec.Code)
+	}
 }
 
 func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
@@ -119,5 +159,22 @@ func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
 	rec := performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewLocationHandler(&locationServiceTestDouble{job: dto.LocationSyncJob{ID: "job-1", Status: "done"}})
+	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewLocationHandler(&locationServiceTestDouble{err: errors.New("database down")})
+	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = performLocationRequest(http.MethodGet, "/sync", "/sync", nil, handler.GetSyncJob, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected missing id 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

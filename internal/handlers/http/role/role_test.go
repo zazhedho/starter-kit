@@ -14,28 +14,40 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type roleServiceHandlerTestDouble struct {
-	role      domainrole.Role
-	details   dto.RoleWithDetails
-	roles     []domainrole.Role
-	total     int64
-	assigned  []string
-	deletedID string
-	err       error
+	role                 domainrole.Role
+	details              dto.RoleWithDetails
+	roles                []domainrole.Role
+	total                int64
+	assigned             []string
+	deletedID            string
+	err                  error
+	getByIDErr           error
+	getAllErr            error
+	deleteErr            error
+	assignPermissionsErr error
+	assignMenusErr       error
 }
 
 func (m *roleServiceHandlerTestDouble) Create(ctx context.Context, req dto.RoleCreate) (domainrole.Role, error) {
 	return m.role, m.err
 }
 func (m *roleServiceHandlerTestDouble) GetByID(ctx context.Context, id string) (domainrole.Role, error) {
+	if m.getByIDErr != nil {
+		return domainrole.Role{}, m.getByIDErr
+	}
 	return m.role, nil
 }
 func (m *roleServiceHandlerTestDouble) GetByIDWithDetails(ctx context.Context, id string) (dto.RoleWithDetails, error) {
 	return m.details, m.err
 }
 func (m *roleServiceHandlerTestDouble) GetAll(ctx context.Context, params filter.BaseParams) ([]domainrole.Role, int64, error) {
+	if m.getAllErr != nil {
+		return nil, 0, m.getAllErr
+	}
 	return m.roles, m.total, m.err
 }
 func (m *roleServiceHandlerTestDouble) Update(ctx context.Context, id string, req dto.RoleUpdate) (domainrole.Role, error) {
@@ -43,14 +55,23 @@ func (m *roleServiceHandlerTestDouble) Update(ctx context.Context, id string, re
 }
 func (m *roleServiceHandlerTestDouble) Delete(ctx context.Context, id string) error {
 	m.deletedID = id
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	return m.err
 }
 func (m *roleServiceHandlerTestDouble) AssignPermissions(ctx context.Context, roleId string, req dto.AssignPermissions) error {
 	m.assigned = req.PermissionIds
+	if m.assignPermissionsErr != nil {
+		return m.assignPermissionsErr
+	}
 	return m.err
 }
 func (m *roleServiceHandlerTestDouble) AssignMenus(ctx context.Context, roleId string, req dto.AssignMenus) error {
 	m.assigned = req.MenuIds
+	if m.assignMenusErr != nil {
+		return m.assignMenusErr
+	}
 	return m.err
 }
 func (m *roleServiceHandlerTestDouble) GetRolePermissions(ctx context.Context, roleId string) ([]string, error) {
@@ -171,5 +192,49 @@ func TestRoleHandlersRejectInvalidJSON(t *testing.T) {
 				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestRoleHandlersServiceErrorBranches(t *testing.T) {
+	handler := NewRoleHandler(&roleServiceHandlerTestDouble{err: gorm.ErrRecordNotFound}, &auditServiceRoleTestDouble{})
+	rec := performRoleRequest(http.MethodGet, "/roles/:id", "/roles/role-1", nil, handler.GetByID)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected get by id 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewRoleHandler(&roleServiceHandlerTestDouble{}, &auditServiceRoleTestDouble{})
+	rec = performRoleRequest(http.MethodGet, "/roles", "/roles?page=bad", nil, handler.GetAll)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected get all bad query 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewRoleHandler(&roleServiceHandlerTestDouble{getAllErr: errors.New("database down")}, &auditServiceRoleTestDouble{})
+	rec = performRoleRequest(http.MethodGet, "/roles", "/roles", nil, handler.GetAll)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected get all 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewRoleHandler(&roleServiceHandlerTestDouble{err: errors.New("cannot update system role")}, &auditServiceRoleTestDouble{})
+	rec = performRoleRequest(http.MethodPut, "/roles/:id", "/roles/role-1", dto.RoleUpdate{DisplayName: "System"}, handler.Update)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected update forbidden, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewRoleHandler(&roleServiceHandlerTestDouble{deleteErr: gorm.ErrRecordNotFound}, &auditServiceRoleTestDouble{})
+	rec = performRoleRequest(http.MethodDelete, "/roles/:id", "/roles/role-1", nil, handler.Delete)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected delete 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewRoleHandler(&roleServiceHandlerTestDouble{assignPermissionsErr: errors.New("invalid permission ID: perm-x")}, &auditServiceRoleTestDouble{})
+	rec = performRoleRequest(http.MethodPost, "/roles/:id/permissions", "/roles/role-1/permissions", dto.AssignPermissions{PermissionIds: []string{"perm-x"}}, handler.AssignPermissions)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected assign permissions 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	handler = NewRoleHandler(&roleServiceHandlerTestDouble{assignMenusErr: errors.New("database down")}, &auditServiceRoleTestDouble{})
+	rec = performRoleRequest(http.MethodPost, "/roles/:id/menus", "/roles/role-1/menus", dto.AssignMenus{MenuIds: []string{"menu-1"}}, handler.AssignMenus)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected assign menus 500, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

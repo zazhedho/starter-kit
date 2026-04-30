@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	redismock "github.com/go-redis/redismock/v9"
 	"github.com/spf13/viper"
 )
 
@@ -37,6 +38,27 @@ func TestGetAppConfLoadsLocalEnvFileAndExportsValues(t *testing.T) {
 	}
 	if got := os.Getenv("FEATURE_INT"); got != "42" {
 		t.Fatalf("expected config value exported to env, got %q", got)
+	}
+}
+
+func TestGetAppConfUsesCachedConsulConfig(t *testing.T) {
+	viper.Reset()
+	client, mock := redismock.NewClientMock()
+	t.Setenv("CONSUL", "127.0.0.1:8500")
+	t.Setenv("CONSUL_PATH", "starter")
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("CACHE", "on")
+	t.Setenv("CONFIG_ID", "old-config")
+
+	mock.ExpectGet("cache:config:app").SetVal(`{"config_id":"cached-config","feature_flag":"cached"}`)
+	if got := GetAppConf("FEATURE_FLAG", "fallback", client); got != "cached" {
+		t.Fatalf("expected cached config value, got %v", got)
+	}
+	if got := os.Getenv("CONFIG_ID"); got != "cached-config" {
+		t.Fatalf("expected cached config exported to env, got %q", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redis expectations: %v", err)
 	}
 }
 

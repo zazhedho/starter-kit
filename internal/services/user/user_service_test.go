@@ -40,11 +40,15 @@ type userRepoMock struct {
 	emailErr  error
 	phoneUser domainuser.Users
 	phoneErr  error
+	storeErr  error
+	updateErr error
+	deleteErr error
+	getAllErr error
 }
 
 func (m *userRepoMock) Store(ctx context.Context, data domainuser.Users) error {
 	m.user = data
-	return nil
+	return m.storeErr
 }
 func (m *userRepoMock) GetByID(ctx context.Context, id string) (domainuser.Users, error) {
 	if m.usersByID != nil {
@@ -57,16 +61,19 @@ func (m *userRepoMock) GetByID(ctx context.Context, id string) (domainuser.Users
 	return m.user, nil
 }
 func (m *userRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]domainuser.Users, int64, error) {
+	if m.getAllErr != nil {
+		return nil, 0, m.getAllErr
+	}
 	return append([]domainuser.Users{}, m.users...), int64(len(m.users)), nil
 }
 func (m *userRepoMock) Update(ctx context.Context, data domainuser.Users) error {
 	m.updated = data
 	m.user = data
-	return nil
+	return m.updateErr
 }
 func (m *userRepoMock) Delete(ctx context.Context, id string) error {
 	m.deletedID = id
-	return nil
+	return m.deleteErr
 }
 func (m *userRepoMock) GetByEmail(ctx context.Context, email string) (domainuser.Users, error) {
 	if m.emailErr != nil {
@@ -81,9 +88,11 @@ func (m *userRepoMock) GetByPhone(ctx context.Context, phone string) (domainuser
 	return m.phoneUser, nil
 }
 
-type authRepoMock struct{}
+type authRepoMock struct {
+	err error
+}
 
-func (m *authRepoMock) Store(data domainauth.Blacklist) error { return nil }
+func (m *authRepoMock) Store(data domainauth.Blacklist) error { return m.err }
 func (m *authRepoMock) GetByToken(token string) (domainauth.Blacklist, error) {
 	return domainauth.Blacklist{}, nil
 }
@@ -130,6 +139,7 @@ func (m *roleRepoUserMock) GetRoleMenus(ctx context.Context, roleId string) ([]s
 
 type permissionRepoUserMock struct {
 	userPermissions []domainpermission.Permission
+	err             error
 }
 
 func (m *permissionRepoUserMock) Store(ctx context.Context, data domainpermission.Permission) error {
@@ -152,6 +162,9 @@ func (m *permissionRepoUserMock) GetByResource(ctx context.Context, resource str
 	return nil, nil
 }
 func (m *permissionRepoUserMock) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	return append([]domainpermission.Permission{}, m.userPermissions...), nil
 }
 
@@ -721,5 +734,213 @@ func TestChangePasswordAndForgotResetPasswordFlows(t *testing.T) {
 	}
 	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: token, NewPassword: "AnotherPassword1!"}); err != nil {
 		t.Fatalf("reset password: %v", err)
+	}
+}
+
+func TestRegisterUserValidationAndRepositoryErrors(t *testing.T) {
+	service := NewUserService(&userRepoMock{
+		emailUser: domainuser.Users{Id: "existing-email"},
+	}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err := service.RegisterUser(context.Background(), dto.UserRegister{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+	})
+	if err == nil || err.Error() != "email already exists" {
+		t.Fatalf("expected duplicate email error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{
+		phoneUser: domainuser.Users{Id: "existing-phone"},
+	}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.RegisterUser(context.Background(), dto.UserRegister{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+	})
+	if err == nil || err.Error() != "phone number already exists" {
+		t.Fatalf("expected duplicate phone error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.RegisterUser(context.Background(), dto.UserRegister{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "weak",
+	})
+	if err == nil || err.Error() != "password must be at least 8 characters long" {
+		t.Fatalf("expected weak password error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{storeErr: errors.New("insert failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.RegisterUser(context.Background(), dto.UserRegister{
+		Name:          "Jane Doe",
+		Email:         "jane@example.com",
+		Phone:         "08123456789",
+		Password:      "Password1!",
+		EmailVerified: true,
+	})
+	if err == nil || err.Error() != "insert failed" {
+		t.Fatalf("expected store error, got %v", err)
+	}
+}
+
+func TestAdminCreateUserValidationBranches(t *testing.T) {
+	service := NewUserService(&userRepoMock{emailUser: domainuser.Users{Id: "existing-email"}}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err := service.AdminCreateUser(authContext("admin-1", "Admin", utils.RoleAdmin, "users:assign_role"), dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+		Role:     utils.RoleViewer,
+	})
+	if err == nil || err.Error() != "email already exists" {
+		t.Fatalf("expected duplicate email, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{phoneUser: domainuser.Users{Id: "existing-phone"}}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.AdminCreateUser(authContext("admin-1", "Admin", utils.RoleAdmin, "users:assign_role"), dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+		Role:     utils.RoleViewer,
+	})
+	if err == nil || err.Error() != "phone number already exists" {
+		t.Fatalf("expected duplicate phone, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.AdminCreateUser(authContext("admin-1", "Admin", utils.RoleAdmin, "users:assign_role"), dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+		Role:     utils.RoleSuperAdmin,
+	})
+	if err == nil || err.Error() != "only superadmin can create superadmin users" {
+		t.Fatalf("expected superadmin creation guard, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{err: errors.New("permission lookup failed")})
+	_, err = service.AdminCreateUser(authContext("admin-1", "Admin", utils.RoleAdmin), dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "08123456789",
+		Password: "Password1!",
+		Role:     utils.RoleStaff,
+	})
+	if err == nil || err.Error() != "permission lookup failed" {
+		t.Fatalf("expected permission repo error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{storeErr: errors.New("insert failed")}, &authRepoMock{}, &roleRepoUserMock{roles: map[string]domainrole.Role{
+		utils.RoleViewer: {Id: "role-viewer", Name: utils.RoleViewer},
+	}}, &permissionRepoUserMock{})
+	_, err = service.AdminCreateUser(authContext("admin-1", "Admin", utils.RoleAdmin), dto.AdminCreateUser{
+		Name:     "Jane Doe",
+		Email:    "jane@example.com",
+		Phone:    "",
+		Password: "Password1!",
+		Role:     utils.RoleViewer,
+	})
+	if err == nil || err.Error() != "insert failed" {
+		t.Fatalf("expected store error, got %v", err)
+	}
+}
+
+func TestUserServiceErrorBranches(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret")
+	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+
+	service := NewUserService(&userRepoMock{
+		emailUser: domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer},
+		updateErr: errors.New("update failed"),
+	}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.LoginUser(context.Background(), dto.Login{Identifier: "jane@example.com", Password: "OldPassword1!"}, "log-1", dto.LoginMetadata{})
+	if err == nil || err.Error() != "update failed" {
+		t.Fatalf("expected login update error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{
+		user: domainuser.Users{Id: "root", Role: utils.RoleSuperAdmin},
+	}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.Update(authContext("admin-1", "Admin", utils.RoleAdmin), "root", dto.UserUpdate{Name: "Root"})
+	if err == nil || err.Error() != "cannot modify superadmin users" {
+		t.Fatalf("expected superadmin modify guard, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer}}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.Update(authContext("admin-1", "Admin", utils.RoleAdmin), "user-1", dto.UserUpdate{Role: utils.RoleStaff})
+	if err == nil || err.Error() != "access denied: missing permission users:assign_role" {
+		t.Fatalf("expected role assignment permission guard, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{user: domainuser.Users{Id: "user-1", Role: utils.RoleViewer}, updateErr: errors.New("update failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.Update(authContext("user-1", "Jane", utils.RoleViewer), "user-1", dto.UserUpdate{Name: "Jane Updated"})
+	if err == nil || err.Error() != "update failed" {
+		t.Fatalf("expected update error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{user: domainuser.Users{Id: "user-1", Password: string(oldPassword)}, updateErr: errors.New("update failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "OldPassword1!", NewPassword: "NewPassword1!"})
+	if err == nil || err.Error() != "update failed" {
+		t.Fatalf("expected change password update error, got %v", err)
+	}
+
+	_, err = service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "SamePassword1!", NewPassword: "SamePassword1!"})
+	if err == nil || err.Error() != "new password must be different from current password" {
+		t.Fatalf("expected same password error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	token, err := service.ForgotPassword(context.Background(), dto.ForgotPasswordRequest{Email: "missing@example.com"})
+	if err != nil || token != "" {
+		t.Fatalf("expected missing forgot password to return empty success, token=%q err=%v", token, err)
+	}
+
+	service = NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: "bad-token", NewPassword: "Password1!"}); err == nil || err.Error() != "invalid or expired token" {
+		t.Fatalf("expected invalid token error, got %v", err)
+	}
+	service = NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	if err := service.ResetPasswordByEmail(context.Background(), "missing@example.com", "Password1!"); err == nil || err.Error() != "user not found" {
+		t.Fatalf("expected reset by email missing user, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{}, &authRepoMock{err: errors.New("blacklist failed")}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	if err := service.LogoutUser(context.Background(), "token"); err == nil || err.Error() != "blacklist failed" {
+		t.Fatalf("expected logout store error, got %v", err)
+	}
+
+	service = NewUserService(&userRepoMock{getAllErr: errors.New("list failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	if _, _, err := service.GetAllUsers(context.Background(), filter.BaseParams{}); err == nil || err.Error() != "list failed" {
+		t.Fatalf("expected get all error, got %v", err)
+	}
+}
+
+func TestImpersonationValidationBranches(t *testing.T) {
+	service := NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	if _, err := service.ImpersonateUser(impersonatedAuthContext("target-1", "Target", utils.RoleViewer, "admin-1", "Admin", utils.RoleAdmin), "target-2", "log-1"); err == nil || err.Error() != "cannot start nested impersonation" {
+		t.Fatalf("expected nested impersonation error, got %v", err)
+	}
+	if _, err := service.ImpersonateUser(authContext("user-1", "Jane", utils.RoleViewer), "", "log-1"); err == nil || err.Error() != "target user id is required" {
+		t.Fatalf("expected missing target error, got %v", err)
+	}
+	if _, err := service.ImpersonateUser(authContext("user-1", "Jane", utils.RoleViewer), "user-1", "log-1"); err == nil || err.Error() != "cannot impersonate your own account" {
+		t.Fatalf("expected self impersonation error, got %v", err)
+	}
+
+	if _, err := service.StopImpersonation(authContext("user-1", "Jane", utils.RoleViewer), "log-1"); err == nil || err.Error() != "original user id is required" {
+		t.Fatalf("expected missing original user error, got %v", err)
+	}
+	if _, err := service.StopImpersonation(impersonatedAuthContext("user-1", "Jane", utils.RoleViewer, "user-1", "Jane", utils.RoleViewer), "log-1"); err == nil || err.Error() != "current session is not impersonated" {
+		t.Fatalf("expected not impersonated error, got %v", err)
 	}
 }

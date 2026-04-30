@@ -12,12 +12,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"gorm.io/gorm"
 	"starter-kit/internal/authscope"
 	domainauth "starter-kit/internal/domain/auth"
 	domainsession "starter-kit/internal/domain/session"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
 	serviceotp "starter-kit/internal/services/otp"
+	servicereset "starter-kit/internal/services/reset"
 	serviceuser "starter-kit/internal/services/user"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/messages"
@@ -162,6 +164,7 @@ func (s *userServiceTestDouble) Delete(ctx context.Context, id string) error {
 type blacklistRepoUserHandlerTestDouble struct {
 	blacklisted bool
 	storedToken string
+	err         error
 }
 
 func (m *blacklistRepoUserHandlerTestDouble) Store(data domainauth.Blacklist) error {
@@ -172,6 +175,9 @@ func (m *blacklistRepoUserHandlerTestDouble) GetByToken(token string) (domainaut
 	return domainauth.Blacklist{Token: token}, nil
 }
 func (m *blacklistRepoUserHandlerTestDouble) ExistsByToken(token string) (bool, error) {
+	if m.err != nil {
+		return false, m.err
+	}
 	return m.blacklisted, nil
 }
 
@@ -197,10 +203,17 @@ func (m *otpServiceUserHandlerTestDouble) VerifyRegisterOTP(ctx context.Context,
 }
 
 type sessionServiceUserHandlerTestDouble struct {
-	sessionID string
+	sessionID       string
+	createErr       error
+	refreshErr      error
+	rotateErr       error
+	destroyTokenErr error
 }
 
 func (m *sessionServiceUserHandlerTestDouble) CreateSession(ctx context.Context, user *domainuser.Users, accessToken string, refreshToken string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
+	if m.createErr != nil {
+		return nil, m.createErr
+	}
 	m.sessionID = "session-1"
 	return &domainsession.Session{SessionID: m.sessionID, UserID: user.Id, AccessToken: accessToken, RefreshToken: refreshToken, ExpiresAt: time.Now().Add(time.Hour)}, nil
 }
@@ -214,6 +227,9 @@ func (m *sessionServiceUserHandlerTestDouble) DestroySession(ctx context.Context
 	return nil
 }
 func (m *sessionServiceUserHandlerTestDouble) DestroySessionByToken(ctx context.Context, token string) error {
+	if m.destroyTokenErr != nil {
+		return m.destroyTokenErr
+	}
 	return nil
 }
 func (m *sessionServiceUserHandlerTestDouble) DestroyAllUserSessions(ctx context.Context, userID string) error {
@@ -226,14 +242,64 @@ func (m *sessionServiceUserHandlerTestDouble) GetSessionByToken(ctx context.Cont
 	return &domainsession.Session{SessionID: "session-1"}, nil
 }
 func (m *sessionServiceUserHandlerTestDouble) GetSessionByRefreshToken(ctx context.Context, refreshToken string) (*domainsession.Session, error) {
+	if m.refreshErr != nil {
+		return nil, m.refreshErr
+	}
 	return &domainsession.Session{SessionID: "session-1", RefreshToken: refreshToken}, nil
 }
 func (m *sessionServiceUserHandlerTestDouble) GetSessionBySessionID(ctx context.Context, sessionID string) (*domainsession.Session, error) {
 	return &domainsession.Session{SessionID: sessionID}, nil
 }
 func (m *sessionServiceUserHandlerTestDouble) RotateSessionTokens(ctx context.Context, sessionID string, accessToken string, refreshToken string, expiresAt time.Time) error {
+	if m.rotateErr != nil {
+		return m.rotateErr
+	}
 	m.sessionID = sessionID
 	return nil
+}
+
+type loginLimiterUserHandlerTestDouble struct {
+	blocked         bool
+	ttl             time.Duration
+	isBlockedErr    error
+	registerBlocked bool
+	registerErr     error
+	resetErr        error
+	registeredKey   string
+	resetKey        string
+}
+
+func (m *loginLimiterUserHandlerTestDouble) IsBlocked(ctx context.Context, key string) (bool, time.Duration, error) {
+	return m.blocked, m.ttl, m.isBlockedErr
+}
+
+func (m *loginLimiterUserHandlerTestDouble) RegisterFailure(ctx context.Context, key string) (bool, time.Duration, error) {
+	m.registeredKey = key
+	return m.registerBlocked, m.ttl, m.registerErr
+}
+
+func (m *loginLimiterUserHandlerTestDouble) Reset(ctx context.Context, key string) error {
+	m.resetKey = key
+	return m.resetErr
+}
+
+type resetServiceUserHandlerTestDouble struct {
+	email string
+	err   error
+}
+
+func (m *resetServiceUserHandlerTestDouble) RequestReset(ctx context.Context, email, appName string) error {
+	return m.err
+}
+
+func (m *resetServiceUserHandlerTestDouble) VerifyReset(ctx context.Context, token string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	if m.email == "" {
+		return "jane@example.com", nil
+	}
+	return m.email, nil
 }
 
 func newUserHandlerTestContext(t *testing.T, method, path, body string, scope *authscope.Scope) (*gin.Context, *httptest.ResponseRecorder) {
@@ -512,6 +578,14 @@ func TestUserHandlerRegistrationConfigBranches(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodGet, "/register/status", "", nil)
 	handler.GetRegisterStatus(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
+	handler.Register(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"new@example.com"}`, nil)
+	handler.SendRegisterOTP(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
 }
 
 func TestUserHandlerServiceErrorBranches(t *testing.T) {
@@ -573,10 +647,33 @@ func TestUserHandlerAuthErrorBranches(t *testing.T) {
 	handler.Login(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
 
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"not-an-email@","password":"secret123"}`, nil)
+	handler.Login(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"12","password":"secret123"}`, nil)
+	handler.Login(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	handler.LoginLimiter = &loginLimiterUserHandlerTestDouble{blocked: true, ttl: time.Minute}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"jane@example.com","password":"secret123"}`, nil)
+	handler.Login(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusTooManyRequests)
+
 	handler = NewUserHandler(&userServiceTestDouble{loginErr: errors.New(messages.ErrHashPassword)}, nil, nil, nil, nil, nil, nil, nil)
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"jane@example.com","password":"secret123"}`, nil)
 	handler.Login(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	handler = NewUserHandler(&userServiceTestDouble{loginErr: gorm.ErrRecordNotFound}, nil, nil, &loginLimiterUserHandlerTestDouble{registerBlocked: true, ttl: time.Minute}, nil, nil, nil, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"jane@example.com","password":"secret123"}`, nil)
+	handler.Login(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusTooManyRequests)
+
+	handler = NewUserHandler(&userServiceTestDouble{loginErr: errors.New("database down")}, nil, nil, &loginLimiterUserHandlerTestDouble{isBlockedErr: errors.New("redis down")}, nil, nil, nil, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"jane@example.com","password":"secret123"}`, nil)
+	handler.Login(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
 
 	handler = NewUserHandler(&userServiceTestDouble{googleErr: serviceuser.ErrGoogleNotConfigured}, nil, nil, nil, nil, nil, nil, nil)
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/google/login", `{"id_token":"token"}`, nil)
@@ -593,20 +690,79 @@ func TestUserHandlerAuthErrorBranches(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+refreshToken+`"}`, nil)
 	handler.RefreshToken(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusUnauthorized)
+
+	accessToken, err := utils.GenerateJwt(&user, "log-1")
+	if err != nil {
+		t.Fatalf("generate access token: %v", err)
+	}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+accessToken+`"}`, nil)
+	handler.RefreshToken(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusUnauthorized)
+
+	handler = newUserHandlerForTest()
+	handler.BlacklistRepo = &blacklistRepoUserHandlerTestDouble{err: errors.New("redis down")}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+refreshToken+`"}`, nil)
+	handler.RefreshToken(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+
+	handler = NewUserHandler(&userServiceTestDouble{err: gorm.ErrRecordNotFound}, &blacklistRepoUserHandlerTestDouble{}, nil, nil, nil, nil, nil, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+refreshToken+`"}`, nil)
+	handler.RefreshToken(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusNotFound)
+
+	handler = newUserHandlerForTest()
+	handler.BlacklistRepo = &blacklistRepoUserHandlerTestDouble{}
+	handler.SessionSvc = &sessionServiceUserHandlerTestDouble{refreshErr: errors.New("session missing")}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+refreshToken+`"}`, nil)
+	handler.RefreshToken(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusUnauthorized)
+
+	handler.SessionSvc = &sessionServiceUserHandlerTestDouble{rotateErr: errors.New("rotate failed")}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+refreshToken+`"}`, nil)
+	handler.RefreshToken(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+
+	handler = newUserHandlerForTest()
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/logout", "", nil)
+	handler.Logout(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
 }
 
 func TestUserHandlerOTPErrorBranches(t *testing.T) {
 	handler := newUserHandlerForTest()
+	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"new@example.com"}`, nil)
+	handler.SendRegisterOTP(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
 	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: true}
 
-	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
+	handler.Register(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
 
 	handler.OTPService = &otpServiceUserHandlerTestDouble{err: serviceotp.ErrOTPTooManyAttempt}
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
 	handler.Register(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	handler.OTPService = &otpServiceUserHandlerTestDouble{err: serviceotp.ErrOTPNotConfigured}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register", `{"name":"Jane Doe","email":"new@example.com","phone":"628123456789","password":"secret123","otp_code":"123456"}`, nil)
+	handler.Register(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
+
+	handler.OTPService = &otpServiceUserHandlerTestDouble{}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"jane@example.com"}`, nil)
+	handler.SendRegisterOTP(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	handler.OTPService = nil
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"new@example.com"}`, nil)
+	handler.SendRegisterOTP(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
 
 	handler.OTPService = &otpServiceUserHandlerTestDouble{err: &serviceotp.ThrottleError{Reason: "rate_limit", RetryAfter: time.Second}}
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"new@example.com"}`, nil)
@@ -617,4 +773,111 @@ func TestUserHandlerOTPErrorBranches(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"new@example.com"}`, nil)
 	handler.SendRegisterOTP(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
+
+	handler.OTPService = &otpServiceUserHandlerTestDouble{err: errors.New("redis down")}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/register/otp/send", `{"email":"new@example.com"}`, nil)
+	handler.SendRegisterOTP(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+}
+
+func TestUserHandlerNotFoundAndValidationErrorBranches(t *testing.T) {
+	userID := uuid.NewString()
+	scope := authscope.New(userID, "Jane Doe", "user", nil)
+	handler := NewUserHandler(&userServiceTestDouble{err: gorm.ErrRecordNotFound}, nil, nil, nil, nil, nil, nil, nil)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		scope  *authscope.Scope
+		params gin.Params
+		call   func(*gin.Context)
+		want   int
+	}{
+		{name: "get user by id", method: http.MethodGet, path: "/users/" + userID, params: gin.Params{{Key: "id", Value: userID}}, call: handler.GetUserById, want: http.StatusNotFound},
+		{name: "get user by auth", method: http.MethodGet, path: "/me", scope: &scope, call: handler.GetUserByAuth, want: http.StatusNotFound},
+		{name: "update self", method: http.MethodPatch, path: "/me", body: `{"name":"Jane"}`, scope: &scope, call: handler.Update, want: http.StatusNotFound},
+		{name: "update by id", method: http.MethodPatch, path: "/users/" + userID, body: `{"name":"Jane"}`, params: gin.Params{{Key: "id", Value: userID}}, call: handler.UpdateUserById, want: http.StatusNotFound},
+		{name: "change password", method: http.MethodPatch, path: "/me/password", body: `{"current_password":"secret123","new_password":"secret456"}`, scope: &scope, call: handler.ChangePassword, want: http.StatusNotFound},
+		{name: "delete self", method: http.MethodDelete, path: "/me", scope: &scope, call: handler.Delete, want: http.StatusNotFound},
+		{name: "delete by id", method: http.MethodDelete, path: "/users/" + userID, params: gin.Params{{Key: "id", Value: userID}}, call: handler.DeleteUserById, want: http.StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, rec := newUserHandlerTestContext(t, tt.method, tt.path, tt.body, tt.scope)
+			ctx.Params = tt.params
+			tt.call(ctx)
+			assertUserHandlerStatus(t, rec, tt.want)
+		})
+	}
+
+	handler = NewUserHandler(&userServiceTestDouble{err: errors.New(messages.ErrHashPassword)}, nil, nil, nil, nil, nil, nil, nil)
+	ctx, rec := newUserHandlerTestContext(t, http.MethodPatch, "/me/password", `{"current_password":"bad","new_password":"secret456"}`, &scope)
+	handler.ChangePassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	handler = NewUserHandler(&userServiceTestDouble{err: errors.New("cannot impersonate superadmin users")}, nil, nil, nil, nil, nil, nil, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/users/"+userID+"/impersonate", "", nil)
+	ctx.Params = gin.Params{{Key: "id", Value: userID}}
+	handler.ImpersonateUser(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusForbidden)
+
+	handler = NewUserHandler(&userServiceTestDouble{err: errors.New("database down")}, nil, nil, nil, nil, nil, nil, nil)
+	impersonated := authscope.New("target-1", "Target", "viewer", nil)
+	impersonated.IsImpersonated = true
+	impersonated.OriginalUserID = "admin-1"
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/stop-impersonation", "", &impersonated)
+	handler.StopImpersonation(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+
+	notImpersonated := authscope.New("user-1", "Jane", "viewer", nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/stop-impersonation", "", &notImpersonated)
+	handler.StopImpersonation(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestUserHandlerEmailPasswordResetBranches(t *testing.T) {
+	handler := newUserHandlerForTest()
+	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: true}
+
+	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/forgot-password", `{"email":"jane@example.com"}`, nil)
+	handler.ForgotPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
+
+	handler.ResetService = &resetServiceUserHandlerTestDouble{}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/forgot-password", `{"email":"jane@example.com"}`, nil)
+	handler.ForgotPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusOK)
+
+	handler.ResetService = &resetServiceUserHandlerTestDouble{err: &servicereset.ThrottleError{Reason: "rate_limit", RetryAfter: time.Second}}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/forgot-password", `{"email":"jane@example.com"}`, nil)
+	handler.ForgotPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusTooManyRequests)
+
+	handler.ResetService = &resetServiceUserHandlerTestDouble{err: servicereset.ErrResetDeliveryFailed}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/forgot-password", `{"email":"jane@example.com"}`, nil)
+	handler.ForgotPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
+
+	handler.ResetService = nil
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusServiceUnavailable)
+
+	handler.ResetService = &resetServiceUserHandlerTestDouble{err: servicereset.ErrResetInvalid}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+
+	handler.ResetService = &resetServiceUserHandlerTestDouble{email: "jane@example.com"}
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusOK)
+
+	handler = NewUserHandler(&userServiceTestDouble{err: gorm.ErrDuplicatedKey}, nil, nil, nil, nil, &appConfigServiceUserTestDouble{enabled: true}, nil, &resetServiceUserHandlerTestDouble{email: "jane@example.com"})
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
 }

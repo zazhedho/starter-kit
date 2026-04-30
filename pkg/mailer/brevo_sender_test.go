@@ -70,3 +70,24 @@ func TestExtractEmailAndParseDurationEnv(t *testing.T) {
 		t.Fatalf("expected duration from seconds, got %v", got)
 	}
 }
+
+func TestBrevoSenderSendMethodsReturnSMTPError(t *testing.T) {
+	sender := &BrevoSender{
+		Host:         "127.0.0.1",
+		Port:         1,
+		User:         "apikey",
+		Pass:         "secret",
+		From:         "Starter <noreply@example.com>",
+		Subject:      "OTP",
+		ResetSubject: "",
+		TTL:          time.Minute,
+		AppName:      "Starter",
+	}
+
+	if err := sender.SendOTP("to@example.com", "123456", ""); err == nil {
+		t.Fatal("expected otp smtp error")
+	}
+	if err := sender.SendPasswordReset("to@example.com", "token", "", "", 0); err == nil {
+		t.Fatal("expected reset smtp error")
+	}
+}

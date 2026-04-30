@@ -11,13 +11,18 @@ import (
 )
 
 type resetRepoTestDouble struct {
-	tokens          map[string]string
-	cooldownTTL     time.Duration
-	sendCount       int
-	sendRetryAfter  time.Duration
-	deletedHash     string
-	clearedCooldown string
-	clearedSend     string
+	tokens           map[string]string
+	cooldownTTL      time.Duration
+	sendCount        int
+	sendRetryAfter   time.Duration
+	deletedHash      string
+	clearedCooldown  string
+	clearedSend      string
+	setTokenErr      error
+	getTokenErr      error
+	setCooldownErr   error
+	getCooldownErr   error
+	incrementSendErr error
 }
 
 func newResetRepoTestDouble() *resetRepoTestDouble {
@@ -25,10 +30,16 @@ func newResetRepoTestDouble() *resetRepoTestDouble {
 }
 
 func (m *resetRepoTestDouble) SetToken(ctx context.Context, hash, email string, ttl time.Duration) error {
+	if m.setTokenErr != nil {
+		return m.setTokenErr
+	}
 	m.tokens[hash] = email
 	return nil
 }
 func (m *resetRepoTestDouble) GetEmailByToken(ctx context.Context, hash string) (string, error) {
+	if m.getTokenErr != nil {
+		return "", m.getTokenErr
+	}
 	email, ok := m.tokens[hash]
 	if !ok {
 		return "", redis.Nil
@@ -41,9 +52,15 @@ func (m *resetRepoTestDouble) DeleteToken(ctx context.Context, hash string) erro
 	return nil
 }
 func (m *resetRepoTestDouble) SetCooldown(ctx context.Context, email string, ttl time.Duration) error {
+	if m.setCooldownErr != nil {
+		return m.setCooldownErr
+	}
 	return nil
 }
 func (m *resetRepoTestDouble) GetCooldownTTL(ctx context.Context, email string) (time.Duration, error) {
+	if m.getCooldownErr != nil {
+		return 0, m.getCooldownErr
+	}
 	return m.cooldownTTL, nil
 }
 func (m *resetRepoTestDouble) ClearCooldown(ctx context.Context, email string) error {
@@ -51,6 +68,9 @@ func (m *resetRepoTestDouble) ClearCooldown(ctx context.Context, email string) e
 	return nil
 }
 func (m *resetRepoTestDouble) IncrementSendCount(ctx context.Context, email string, ttl time.Duration) (int, time.Duration, error) {
+	if m.incrementSendErr != nil {
+		return 0, 0, m.incrementSendErr
+	}
 	m.sendCount++
 	return m.sendCount, m.sendRetryAfter, nil
 }
@@ -177,6 +197,78 @@ func TestResetServiceNotConfigured(t *testing.T) {
 	if !errors.Is(err, ErrResetNotConfigured) {
 		t.Fatalf("expected not configured error, got %v", err)
 	}
+}
+
+func TestRequestResetRejectsInvalidEmailAndCooldown(t *testing.T) {
+	svc := NewPasswordResetService(newResetRepoTestDouble(), &resetSenderTestDouble{}, resetTestConfig())
+	if err := svc.RequestReset(context.Background(), " ", "Starter"); !errors.Is(err, ErrResetInvalid) {
+		t.Fatalf("expected invalid reset error, got %v", err)
+	}
+
+	repo := newResetRepoTestDouble()
+	repo.cooldownTTL = 15 * time.Second
+	svc = NewPasswordResetService(repo, &resetSenderTestDouble{}, resetTestConfig())
+	err := svc.RequestReset(context.Background(), "jane@example.com", "Starter")
+	var throttle *ThrottleError
+	if !errors.As(err, &throttle) {
+		t.Fatalf("expected throttle error, got %v", err)
+	}
+	if throttle.Reason != "cooldown" || throttle.RetryAfter != 15*time.Second {
+		t.Fatalf("unexpected throttle error: %+v", throttle)
+	}
+}
+
+func TestRequestResetRepositoryErrors(t *testing.T) {
+	tests := map[string]*resetRepoTestDouble{
+		"cooldown":     {getCooldownErr: errors.New("redis down")},
+		"rate limit":   {incrementSendErr: errors.New("redis down")},
+		"store token":  {setTokenErr: errors.New("redis down")},
+		"set cooldown": {setCooldownErr: errors.New("redis down")},
+	}
+
+	for name, repo := range tests {
+		t.Run(name, func(t *testing.T) {
+			if repo.tokens == nil {
+				repo.tokens = map[string]string{}
+			}
+			svc := NewPasswordResetService(repo, &resetSenderTestDouble{}, resetTestConfig())
+			if err := svc.RequestReset(context.Background(), "jane@example.com", "Starter"); err == nil {
+				t.Fatal("expected repository error")
+			}
+		})
+	}
+}
+
+func TestVerifyResetErrorBranches(t *testing.T) {
+	t.Run("not configured", func(t *testing.T) {
+		_, err := NewPasswordResetService(nil, nil, resetTestConfig()).VerifyReset(context.Background(), "token")
+		if !errors.Is(err, ErrResetNotConfigured) {
+			t.Fatalf("expected not configured, got %v", err)
+		}
+	})
+	t.Run("blank token", func(t *testing.T) {
+		svc := NewPasswordResetService(newResetRepoTestDouble(), nil, resetTestConfig())
+		_, err := svc.VerifyReset(context.Background(), " ")
+		if !errors.Is(err, ErrResetInvalid) {
+			t.Fatalf("expected invalid reset, got %v", err)
+		}
+	})
+	t.Run("missing token", func(t *testing.T) {
+		svc := NewPasswordResetService(newResetRepoTestDouble(), nil, resetTestConfig())
+		_, err := svc.VerifyReset(context.Background(), "missing")
+		if !errors.Is(err, ErrResetInvalid) {
+			t.Fatalf("expected invalid reset, got %v", err)
+		}
+	})
+	t.Run("get token error", func(t *testing.T) {
+		repo := newResetRepoTestDouble()
+		repo.getTokenErr = errors.New("redis down")
+		svc := NewPasswordResetService(repo, nil, resetTestConfig())
+		_, err := svc.VerifyReset(context.Background(), "token")
+		if err == nil {
+			t.Fatal("expected get token error")
+		}
+	})
 }
 
 func TestThrottleErrorString(t *testing.T) {
