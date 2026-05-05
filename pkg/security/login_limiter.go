@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -96,10 +97,10 @@ func (l *redisLoginLimiter) Reset(ctx context.Context, key string) error {
 		return nil
 	}
 
-	if err := l.client.Del(ctx, l.attemptKey(key)).Err(); err != nil && err != redis.Nil {
+	if err := l.client.Del(ctx, l.attemptKey(key)).Err(); err != nil && !errors.Is(err, redis.Nil) {
 		return err
 	}
-	if err := l.client.Del(ctx, l.blockKey(key)).Err(); err != nil && err != redis.Nil {
+	if err := l.client.Del(ctx, l.blockKey(key)).Err(); err != nil && !errors.Is(err, redis.Nil) {
 		return err
 	}
 	return nil

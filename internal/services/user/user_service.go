@@ -282,10 +282,11 @@ func (s *ServiceUser) GetUserByAuth(ctx context.Context, id string) (map[string]
 
 	permissions, err := s.PermissionRepo.GetUserPermissions(ctx, user.Id)
 	if err != nil {
+		//nolint:nilerr // Keep auth response available even if permission enrichment fails.
 		return buildUserAuthResponse(user, nil), nil
 	}
 
-	var permissionNames []string
+	permissionNames := make([]string, 0, len(permissions))
 	for _, perm := range permissions {
 		permissionNames = append(permissionNames, perm.Name)
 	}
@@ -401,6 +402,7 @@ func (s *ServiceUser) ChangePassword(ctx context.Context, id string, req dto.Cha
 func (s *ServiceUser) ForgotPassword(ctx context.Context, req dto.ForgotPasswordRequest) (string, error) {
 	data, err := s.UserRepo.GetByEmail(ctx, utils.SanitizeEmail(req.Email))
 	if err != nil {
+		//nolint:nilerr // Avoid disclosing whether an email is registered.
 		return "", nil
 	}
 

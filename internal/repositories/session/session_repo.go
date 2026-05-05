@@ -3,6 +3,7 @@ package repositorysession
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	domainsession "starter-kit/internal/domain/session"
 	"starter-kit/pkg/logger"
@@ -64,7 +65,7 @@ func (r *SessionRepository) GetBySessionID(ctx context.Context, sessionID string
 	sessionKey := fmt.Sprintf("%s%s", sessionKeyPrefix, sessionID)
 
 	data, err := r.Redis.Get(ctx, sessionKey).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("session not found")
 	}
 	if err != nil {
@@ -105,7 +106,7 @@ func (r *SessionRepository) GetByToken(ctx context.Context, token string) (*doma
 	tokenKey := fmt.Sprintf("%s%s", accessTokenSessionKey, token)
 
 	sessionID, err := r.Redis.Get(ctx, tokenKey).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("session not found for token")
 	}
 	if err != nil {
@@ -119,7 +120,7 @@ func (r *SessionRepository) GetByRefreshToken(ctx context.Context, refreshToken 
 	tokenKey := fmt.Sprintf("%s%s", refreshTokenSessionKey, refreshToken)
 
 	sessionID, err := r.Redis.Get(ctx, tokenKey).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("session not found for refresh token")
 	}
 	if err != nil {
