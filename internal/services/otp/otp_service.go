@@ -8,6 +8,7 @@ import (
 	"starter-kit/pkg/config"
 	"starter-kit/pkg/logger"
 	"starter-kit/pkg/mailer"
+	"starter-kit/utils"
 	"strings"
 	"time"
 
@@ -48,7 +49,7 @@ func (s *ServiceOTP) SendRegisterOTP(ctx context.Context, email, appName string)
 		return ErrOTPNotConfigured
 	}
 
-	normalizedEmail := normalizeEmail(email)
+	normalizedEmail := utils.SanitizeEmail(email)
 	if normalizedEmail == "" {
 		return ErrOTPInvalid
 	}
@@ -106,7 +107,7 @@ func (s *ServiceOTP) VerifyRegisterOTP(ctx context.Context, email, code string) 
 		return ErrOTPNotConfigured
 	}
 
-	normalizedEmail := normalizeEmail(email)
+	normalizedEmail := utils.SanitizeEmail(email)
 	cleanCode := strings.TrimSpace(code)
 	if normalizedEmail == "" || cleanCode == "" {
 		return ErrOTPInvalid

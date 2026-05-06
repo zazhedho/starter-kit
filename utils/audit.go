@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -77,20 +76,4 @@ func MergeMetadata(base map[string]interface{}, extra map[string]interface{}) ma
 	}
 
 	return merged
-}
-
-func InterfaceBool(data interface{}) bool {
-	if data == nil {
-		return false
-	}
-
-	switch v := data.(type) {
-	case bool:
-		return v
-	case string:
-		return strings.EqualFold(strings.TrimSpace(v), "true")
-	default:
-		bytes, _ := json.Marshal(data)
-		return strings.EqualFold(strings.Trim(string(bytes), `"`), "true")
-	}
 }

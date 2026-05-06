@@ -7,12 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"strings"
 )
-
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
 
 func generateOTP() (string, error) {
 	max := big.NewInt(1000000)

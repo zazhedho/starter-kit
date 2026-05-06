@@ -7,6 +7,7 @@ import (
 	interfacereset "starter-kit/internal/interfaces/reset"
 	"starter-kit/pkg/config"
 	"starter-kit/pkg/mailer"
+	"starter-kit/utils"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ func (s *ServiceReset) RequestReset(ctx context.Context, email, appName string) 
 		return ErrResetNotConfigured
 	}
 
-	normalizedEmail := normalizeEmail(email)
+	normalizedEmail := utils.SanitizeEmail(email)
 	if normalizedEmail == "" {
 		return ErrResetInvalid
 	}

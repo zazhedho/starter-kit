@@ -21,6 +21,22 @@ func InterfaceString(data interface{}) string {
 	}
 }
 
+func InterfaceBool(data interface{}) bool {
+	if data == nil {
+		return false
+	}
+
+	switch v := data.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		bytes, _ := json.Marshal(data)
+		return strings.EqualFold(strings.Trim(string(bytes), `"`), "true")
+	}
+}
+
 func ConvertValuesToString(filters map[string]interface{}, keys ...string) map[string]interface{} {
 	if filters == nil {
 		return nil
