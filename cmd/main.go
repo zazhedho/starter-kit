@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/joho/godotenv"
 )
 
@@ -59,7 +61,7 @@ func main() {
 	var port, appName string
 	flag.StringVar(&port, "port", os.Getenv("PORT"), "port of the service")
 	flag.StringVar(&appName, "appname", os.Getenv("APP_NAME"), "service name")
-	flag.BoolVar(&runMigrate, "migrate", false, "run database migration before starting server")
+	flag.BoolVar(&runMigrate, "migrate", utils.GetEnv("RUN_MIGRATION", true), "run database migration before starting server")
 	flag.Parse()
 	logger.WriteLog(logger.LogLevelInfo, "APP: "+appName+"; PORT: "+port)
 
@@ -95,6 +97,7 @@ func main() {
 	routes.PermissionRoutes()
 	routes.MenuRoutes()
 	routes.AppConfigRoutes()
+	routes.AuditRoutes()
 	routes.LocationRoutes()
 
 	// Register session routes if Redis is available
