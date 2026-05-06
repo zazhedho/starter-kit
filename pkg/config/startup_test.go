@@ -74,6 +74,8 @@ func TestValidateStartupConfigValidatesConfiguredSMTPOnly(t *testing.T) {
 func TestValidateStartupConfigIgnoresOptionalLabelsWithoutConnectionConfig(t *testing.T) {
 	clearStartupEnv(t)
 	setRequiredStartupEnv(t)
+	t.Setenv("SMTP_PORT", "587")
+	t.Setenv("SMTP_USER", "apikey")
 	t.Setenv("SMTP_SUBJECT", "Your OTP")
 	t.Setenv("RESET_SUBJECT", "Reset Password")
 	t.Setenv("STORAGE_PROVIDER", "local")

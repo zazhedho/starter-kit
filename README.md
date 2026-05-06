@@ -190,14 +190,20 @@ The current route set includes:
 - `POST /api/location/sync`
 - `GET /api/location/sync/:id`
 
+- `GET /api/audits`
+- `GET /api/audit/:id`
+
+Additional session routes are registered only when Redis is available:
+- `GET /api/user/sessions`
+- `DELETE /api/user/session/:session_id`
+- `POST /api/user/sessions/revoke-others`
+
 Location architecture:
 - PostgreSQL is the source of truth for provinces, cities, districts, and villages
 - Redis is used only as runtime cache
 - external location API is used only for sync/import to the database
 - location sync runs asynchronously; start the job with `POST /api/location/sync` and poll its status via `GET /api/location/sync/:id`
 - use scoped sync for regular updates; `level=all` is intended for initial bootstrap because it performs a full hierarchical import
-
-Additional session routes are registered only when Redis is available.
 
 ## Module Seed Helper
 

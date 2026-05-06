@@ -27,10 +27,11 @@ import (
 )
 
 type userServiceTestDouble struct {
-	user      domainuser.Users
-	err       error
-	googleErr error
-	loginErr  error
+	user        domainuser.Users
+	err         error
+	googleErr   error
+	loginErr    error
+	logoutToken string
 }
 
 func (s *userServiceTestDouble) RegisterUser(ctx context.Context, req dto.UserRegister) (domainuser.Users, error) {
@@ -71,6 +72,7 @@ func (s *userServiceTestDouble) LoginWithGoogle(ctx context.Context, req dto.Goo
 	return s.user, false, nil
 }
 func (s *userServiceTestDouble) LogoutUser(ctx context.Context, token string) error {
+	s.logoutToken = token
 	return s.err
 }
 func (s *userServiceTestDouble) ImpersonateUser(ctx context.Context, targetUserId string, logId string) (string, error) {
@@ -213,6 +215,9 @@ type sessionServiceUserHandlerTestDouble struct {
 	destroyTokenErr error
 	destroyAllErr   error
 	destroyedUserID string
+	rotatedAccess   string
+	rotatedRefresh  string
+	rotatedExpiry   time.Time
 }
 
 func (m *sessionServiceUserHandlerTestDouble) CreateSession(ctx context.Context, user *domainuser.Users, accessToken string, refreshToken string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
@@ -264,6 +269,9 @@ func (m *sessionServiceUserHandlerTestDouble) RotateSessionTokens(ctx context.Co
 		return m.rotateErr
 	}
 	m.sessionID = sessionID
+	m.rotatedAccess = accessToken
+	m.rotatedRefresh = refreshToken
+	m.rotatedExpiry = expiresAt
 	return nil
 }
 
@@ -378,7 +386,9 @@ func TestUserHandlerAuthTokenFlows(t *testing.T) {
 	t.Setenv("REFRESH_TOKEN_EXP_HOURS", "1")
 	handler := newUserHandlerForTest()
 	handler.BlacklistRepo = &blacklistRepoUserHandlerTestDouble{}
-	handler.SessionSvc = &sessionServiceUserHandlerTestDouble{}
+	sessionSvc := &sessionServiceUserHandlerTestDouble{}
+	handler.SessionSvc = sessionSvc
+	userSvc := handler.Service.(*userServiceTestDouble)
 
 	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/login", `{"identifier":"jane@example.com","password":"secret123"}`, nil)
 	handler.Login(ctx)
@@ -396,6 +406,12 @@ func TestUserHandlerAuthTokenFlows(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/refresh-token", `{"refresh_token":"`+refreshToken+`"}`, nil)
 	handler.RefreshToken(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusOK)
+	if userSvc.logoutToken != refreshToken {
+		t.Fatalf("expected old refresh token to be blacklisted, got %q", userSvc.logoutToken)
+	}
+	if sessionSvc.rotatedAccess == "" || sessionSvc.rotatedRefresh == "" || sessionSvc.rotatedExpiry.IsZero() {
+		t.Fatalf("expected session tokens to be rotated, got access=%q refresh=%q expiry=%v", sessionSvc.rotatedAccess, sessionSvc.rotatedRefresh, sessionSvc.rotatedExpiry)
+	}
 }
 
 func TestUserHandlerRegisterOTPAndStopImpersonationFlows(t *testing.T) {

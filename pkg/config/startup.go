@@ -82,7 +82,7 @@ func validateOptionalRedisConfig() []string {
 }
 
 func validateOptionalSMTPConfig() []string {
-	if !hasAnyEnv("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM") {
+	if !hasAnyEnv("SMTP_HOST", "SMTP_PASS", "SMTP_FROM") {
 		return nil
 	}
 
