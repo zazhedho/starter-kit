@@ -1,11 +1,15 @@
 package middlewares
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
+	"starter-kit/infrastructure/database"
 	"starter-kit/internal/authscope"
+	domainpermission "starter-kit/internal/domain/permission"
 	interfaceauth "starter-kit/internal/interfaces/auth"
 	interfacepermission "starter-kit/internal/interfaces/permission"
 	"starter-kit/pkg/logger"
@@ -13,21 +17,25 @@ import (
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type Middleware struct {
-	BlacklistRepo  interfaceauth.RepoAuthInterface
-	PermissionRepo interfacepermission.RepoPermissionInterface
+	BlacklistRepo   interfaceauth.RepoAuthInterface
+	PermissionRepo  interfacepermission.RepoPermissionInterface
+	PermissionCache *redis.Client
 }
 
 func NewMiddleware(blacklistRepo interfaceauth.RepoAuthInterface, permissionRepo interfacepermission.RepoPermissionInterface) *Middleware {
 	return &Middleware{
-		BlacklistRepo:  blacklistRepo,
-		PermissionRepo: permissionRepo,
+		BlacklistRepo:   blacklistRepo,
+		PermissionRepo:  permissionRepo,
+		PermissionCache: database.GetRedisClient(),
 	}
 }
 
@@ -187,29 +195,28 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			return
 		}
 
-		permissions, err := m.PermissionRepo.GetUserPermissions(ctx.Request.Context(), userId)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))
-				res := response.Forbidden(logId, messages.AccessDenied)
-				ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+		targetResource := strings.TrimSpace(resource)
+		targetAction := strings.TrimSpace(action)
+
+		permissionKeys, cacheHit := m.getCachedPermissionKeys(ctx.Request.Context(), userId)
+		if !cacheHit {
+			permissions, err := m.PermissionRepo.GetUserPermissions(ctx.Request.Context(), userId)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))
+					res := response.Forbidden(logId, messages.AccessDenied)
+					ctx.AbortWithStatusJSON(http.StatusForbidden, res)
+					return
+				}
+
+				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
+				res := response.InternalServerError(logId)
+				ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
 				return
 			}
 
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
-			res := response.InternalServerError(logId)
-			ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
-			return
-		}
-
-		targetResource := strings.TrimSpace(resource)
-		targetAction := strings.TrimSpace(action)
-		permissionKeys := make([]string, 0, len(permissions))
-		for _, perm := range permissions {
-			permissionKey := authscope.PermissionKey(perm.Resource, perm.Action)
-			if permissionKey != "" {
-				permissionKeys = append(permissionKeys, permissionKey)
-			}
+			permissionKeys = permissionKeysFromPermissions(permissions)
+			m.setCachedPermissionKeys(ctx.Request.Context(), userId, permissionKeys)
 		}
 
 		dataJWT["permissions"] = permissionKeys
@@ -228,4 +235,62 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 
 		ctx.Next()
 	}
+}
+
+func permissionKeysFromPermissions(permissions []domainpermission.Permission) []string {
+	permissionKeys := make([]string, 0, len(permissions))
+	for _, perm := range permissions {
+		permissionKey := authscope.PermissionKey(perm.Resource, perm.Action)
+		if permissionKey != "" {
+			permissionKeys = append(permissionKeys, permissionKey)
+		}
+	}
+	return permissionKeys
+}
+
+func (m *Middleware) getCachedPermissionKeys(ctx context.Context, userID string) ([]string, bool) {
+	if m.PermissionCache == nil {
+		return nil, false
+	}
+
+	raw, err := m.PermissionCache.Get(ctx, permissionCacheKey(userID)).Result()
+	if err != nil {
+		return nil, false
+	}
+
+	var permissionKeys []string
+	if err := json.Unmarshal([]byte(raw), &permissionKeys); err != nil {
+		return nil, false
+	}
+	return permissionKeys, true
+}
+
+func (m *Middleware) setCachedPermissionKeys(ctx context.Context, userID string, permissionKeys []string) {
+	if m.PermissionCache == nil {
+		return
+	}
+
+	raw, err := json.Marshal(permissionKeys)
+	if err != nil {
+		return
+	}
+	_ = m.PermissionCache.Set(ctx, permissionCacheKey(userID), string(raw), permissionCacheTTL()).Err()
+}
+
+func permissionCacheKey(userID string) string {
+	return "permission:user:" + userID
+}
+
+func permissionCacheTTL() time.Duration {
+	if ttl := strings.TrimSpace(utils.GetEnv("PERMISSION_CACHE_TTL", "")); ttl != "" {
+		if parsed, err := time.ParseDuration(ttl); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+
+	seconds := utils.GetEnv("PERMISSION_CACHE_TTL_SECONDS", 60)
+	if seconds <= 0 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
 }

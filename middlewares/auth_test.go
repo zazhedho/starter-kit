@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	redismock "github.com/go-redis/redismock/v9"
 	"gorm.io/gorm"
 )
 
@@ -40,6 +41,7 @@ func (m *authRepoTestDouble) DeleteExpired(ctx context.Context, now time.Time) e
 type permissionRepoTestDouble struct {
 	permissions []domainpermission.Permission
 	err         error
+	calls       int
 }
 
 func (m *permissionRepoTestDouble) Store(ctx context.Context, data domainpermission.Permission) error {
@@ -62,6 +64,7 @@ func (m *permissionRepoTestDouble) GetByResource(ctx context.Context, resource s
 	return nil, nil
 }
 func (m *permissionRepoTestDouble) GetUserPermissions(ctx context.Context, userId string) ([]domainpermission.Permission, error) {
+	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -248,6 +251,60 @@ func TestPermissionMiddlewareAllowsOwnedPermission(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPermissionMiddlewareUsesCachedPermissionsWhenAvailable(t *testing.T) {
+	client, mock := redismock.NewClientMock()
+	repo := &permissionRepoTestDouble{
+		permissions: []domainpermission.Permission{{Resource: "users", Action: "delete"}},
+	}
+	mdw := NewMiddleware(&authRepoTestDouble{}, repo)
+	mdw.PermissionCache = client
+	mock.ExpectGet("permission:user:user-1").SetVal(`["users:list"]`)
+
+	rec := performMiddlewareRequest(
+		testToken(t, "access", utils.RoleViewer),
+		mdw.AuthMiddleware(),
+		mdw.PermissionMiddleware("users", "list"),
+	)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if repo.calls != 0 {
+		t.Fatalf("expected permission repo not to be called on cache hit, got %d calls", repo.calls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redis expectations: %v", err)
+	}
+}
+
+func TestPermissionMiddlewareFallsBackAndCachesPermissionsOnCacheMiss(t *testing.T) {
+	t.Setenv("PERMISSION_CACHE_TTL", "2m")
+	client, mock := redismock.NewClientMock()
+	repo := &permissionRepoTestDouble{
+		permissions: []domainpermission.Permission{{Resource: "users", Action: "list"}},
+	}
+	mdw := NewMiddleware(&authRepoTestDouble{}, repo)
+	mdw.PermissionCache = client
+	mock.ExpectGet("permission:user:user-1").RedisNil()
+	mock.ExpectSet("permission:user:user-1", `["users:list"]`, 2*time.Minute).SetVal("OK")
+
+	rec := performMiddlewareRequest(
+		testToken(t, "access", utils.RoleViewer),
+		mdw.AuthMiddleware(),
+		mdw.PermissionMiddleware("users", "list"),
+	)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if repo.calls != 1 {
+		t.Fatalf("expected permission repo to be called once on cache miss, got %d calls", repo.calls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redis expectations: %v", err)
 	}
 }
 
