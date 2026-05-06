@@ -32,3 +32,23 @@ func TestZeroValue(t *testing.T) {
 		t.Fatalf("expected zero struct, got %+v", got)
 	}
 }
+
+func TestColumnIdentifierSafety(t *testing.T) {
+	validColumns := []string{"name", "users.email", "_internal_id", "role_id2"}
+	for _, column := range validColumns {
+		if !isSafeColumnIdentifier(column) {
+			t.Fatalf("expected %q to be safe", column)
+		}
+	}
+
+	invalidColumns := []string{"", "1name", "name;", "users..email", "name OR 1=1", "name DESC"}
+	for _, column := range invalidColumns {
+		if isSafeColumnIdentifier(column) {
+			t.Fatalf("expected %q to be unsafe", column)
+		}
+	}
+
+	if got := safeColumnIdentifiers([]string{"name", "bad column", "users.email"}); len(got) != 2 {
+		t.Fatalf("expected 2 safe columns, got %v", got)
+	}
+}

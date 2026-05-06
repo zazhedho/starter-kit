@@ -46,6 +46,12 @@ func (r *GenericRepository[T]) Upsert(ctx context.Context, values []T, conflictC
 	if len(updateColumns) == 0 {
 		return errors.New("update columns are required")
 	}
+	if err := validateColumnIdentifiers(conflictColumns); err != nil {
+		return err
+	}
+	if err := validateColumnIdentifiers(updateColumns); err != nil {
+		return err
+	}
 
 	columns := make([]clause.Column, 0, len(conflictColumns))
 	for _, column := range conflictColumns {
@@ -68,6 +74,10 @@ func (r *GenericRepository[T]) GetByID(ctx context.Context, id string) (ret T, e
 }
 
 func (r *GenericRepository[T]) GetOneByField(ctx context.Context, field string, value interface{}) (ret T, err error) {
+	if err = validateColumnIdentifier(field); err != nil {
+		return zeroValue[T](), err
+	}
+
 	err = r.DB.WithContext(ctx).Where(fmt.Sprintf("%s = ?", field), value).First(&ret).Error
 	if err != nil {
 		return zeroValue[T](), err
@@ -77,6 +87,10 @@ func (r *GenericRepository[T]) GetOneByField(ctx context.Context, field string, 
 }
 
 func (r *GenericRepository[T]) GetManyByField(ctx context.Context, field string, value interface{}) (ret []T, err error) {
+	if err = validateColumnIdentifier(field); err != nil {
+		return nil, err
+	}
+
 	err = r.DB.WithContext(ctx).Where(fmt.Sprintf("%s = ?", field), value).Find(&ret).Error
 	if err != nil {
 		return nil, err
@@ -86,6 +100,10 @@ func (r *GenericRepository[T]) GetManyByField(ctx context.Context, field string,
 }
 
 func (r *GenericRepository[T]) ExistsByField(ctx context.Context, field string, value interface{}) (exists bool, err error) {
+	if err = validateColumnIdentifier(field); err != nil {
+		return false, err
+	}
+
 	var count int64
 	err = r.DB.WithContext(ctx).Model(new(T)).Where(fmt.Sprintf("%s = ?", field), value).Count(&count).Error
 	if err != nil {
@@ -98,6 +116,9 @@ func (r *GenericRepository[T]) ExistsByField(ctx context.Context, field string, 
 func (r *GenericRepository[T]) ExistsByFields(ctx context.Context, filters map[string]interface{}) (exists bool, err error) {
 	query := r.DB.WithContext(ctx).Model(new(T))
 	for key, value := range filters {
+		if err = validateColumnIdentifier(key); err != nil {
+			return false, err
+		}
 		query = query.Where(fmt.Sprintf("%s = ?", key), value)
 	}
 
@@ -147,16 +168,18 @@ func (r *GenericRepository[T]) Delete(ctx context.Context, id string) error {
 }
 
 func BuildSearchFunc(columns ...string) SearchFunc {
+	safeColumns := safeColumnIdentifiers(columns)
+
 	return func(query *gorm.DB, search string) *gorm.DB {
-		if len(columns) == 0 {
+		if len(safeColumns) == 0 {
 			return query
 		}
 
 		searchPattern := "%" + search + "%"
-		parts := make([]string, 0, len(columns))
-		args := make([]interface{}, 0, len(columns))
+		parts := make([]string, 0, len(safeColumns))
+		args := make([]interface{}, 0, len(safeColumns))
 
-		for _, column := range columns {
+		for _, column := range safeColumns {
 			parts = append(parts, fmt.Sprintf("LOWER(%s) LIKE LOWER(?)", column))
 			args = append(args, searchPattern)
 		}

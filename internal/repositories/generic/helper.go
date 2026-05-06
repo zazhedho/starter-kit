@@ -31,6 +31,9 @@ func applyFilter(query *gorm.DB, key string, value interface{}) *gorm.DB {
 	if value == nil {
 		return query
 	}
+	if !isSafeColumnIdentifier(key) {
+		return query
+	}
 
 	switch v := value.(type) {
 	case string:
@@ -51,12 +54,23 @@ func applyOrdering(query *gorm.DB, params filter.BaseParams, opts QueryOptions) 
 		if !contains(opts.AllowedOrderColumns, params.OrderBy) {
 			return nil, fmt.Errorf("invalid orderBy column: %s", params.OrderBy)
 		}
+		if err := validateColumnIdentifier(params.OrderBy); err != nil {
+			return nil, err
+		}
+		direction, err := normalizeOrderDirection(params.OrderDirection)
+		if err != nil {
+			return nil, err
+		}
 
-		return query.Order(fmt.Sprintf("%s %s", params.OrderBy, params.OrderDirection)), nil
+		return query.Order(fmt.Sprintf("%s %s", params.OrderBy, direction)), nil
 	}
 
 	for _, order := range opts.DefaultOrders {
-		query = query.Order(order)
+		safeOrder, err := safeOrderClause(order)
+		if err != nil {
+			return nil, err
+		}
+		query = query.Order(safeOrder)
 	}
 
 	return query, nil
@@ -89,4 +103,104 @@ func isSliceValue(value interface{}) bool {
 func zeroValue[T any]() T {
 	var zero T
 	return zero
+}
+
+func validateColumnIdentifiers(columns []string) error {
+	for _, column := range columns {
+		if err := validateColumnIdentifier(column); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateColumnIdentifier(column string) error {
+	if !isSafeColumnIdentifier(column) {
+		return fmt.Errorf("invalid column: %s", column)
+	}
+
+	return nil
+}
+
+func safeColumnIdentifiers(columns []string) []string {
+	safeColumns := make([]string, 0, len(columns))
+	for _, column := range columns {
+		if isSafeColumnIdentifier(column) {
+			safeColumns = append(safeColumns, column)
+		}
+	}
+
+	return safeColumns
+}
+
+func isSafeColumnIdentifier(column string) bool {
+	column = strings.TrimSpace(column)
+	if column == "" {
+		return false
+	}
+
+	parts := strings.Split(column, ".")
+	for _, part := range parts {
+		if !isSafeColumnSegment(part) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isSafeColumnSegment(segment string) bool {
+	if segment == "" {
+		return false
+	}
+
+	for i := 0; i < len(segment); i++ {
+		char := segment[i]
+		if i == 0 {
+			if !isASCIILetter(char) && char != '_' {
+				return false
+			}
+			continue
+		}
+		if !isASCIILetter(char) && !isASCIIDigit(char) && char != '_' {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isASCIILetter(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
+}
+
+func isASCIIDigit(char byte) bool {
+	return char >= '0' && char <= '9'
+}
+
+func normalizeOrderDirection(direction string) (string, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(direction))
+	switch normalized {
+	case "ASC", "DESC":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid order direction: %s", direction)
+	}
+}
+
+func safeOrderClause(order string) (string, error) {
+	parts := strings.Fields(order)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid default order: %s", order)
+	}
+	if err := validateColumnIdentifier(parts[0]); err != nil {
+		return "", err
+	}
+	direction, err := normalizeOrderDirection(parts[1])
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s %s", parts[0], direction), nil
 }

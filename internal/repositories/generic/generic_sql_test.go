@@ -97,6 +97,29 @@ func TestGenericRepositoryUpsertValidation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "update columns are required") {
 		t.Fatalf("expected update columns error, got %v", err)
 	}
+
+	err = repo.Upsert(context.Background(), []sampleRecord{record}, []string{"id OR 1=1"}, []string{"name"})
+	if err == nil || !strings.Contains(err.Error(), "invalid column") {
+		t.Fatalf("expected invalid column error, got %v", err)
+	}
+}
+
+func TestGenericRepositoryRejectsUnsafeColumns(t *testing.T) {
+	repo := New[sampleRecord](newDryRunDB(t))
+	ctx := context.Background()
+
+	if _, err := repo.GetOneByField(ctx, "name OR 1=1", "Jane"); err == nil || !strings.Contains(err.Error(), "invalid column") {
+		t.Fatalf("expected get one invalid column error, got %v", err)
+	}
+	if _, err := repo.GetManyByField(ctx, "status; DROP TABLE users", "active"); err == nil || !strings.Contains(err.Error(), "invalid column") {
+		t.Fatalf("expected get many invalid column error, got %v", err)
+	}
+	if _, err := repo.ExistsByField(ctx, "status)", "active"); err == nil || !strings.Contains(err.Error(), "invalid column") {
+		t.Fatalf("expected exists invalid column error, got %v", err)
+	}
+	if _, err := repo.ExistsByFields(ctx, map[string]interface{}{"status OR 1=1": "active"}); err == nil || !strings.Contains(err.Error(), "invalid column") {
+		t.Fatalf("expected exists fields invalid column error, got %v", err)
+	}
 }
 
 func TestGenericRepositoryGetAllDryRunAppliesQueryOptions(t *testing.T) {
@@ -151,21 +174,38 @@ func TestBuildSearchFuncAndFilteringBranches(t *testing.T) {
 		t.Fatalf("expected search SQL to include name column, got %q", sql)
 	}
 
+	unsafeQuery := BuildSearchFunc("name", "status) OR 1=1")(db, "Jane")
+	unsafeQuery.Find(&rows)
+	if sql := unsafeQuery.Statement.SQL.String(); strings.Contains(sql, "OR 1=1") {
+		t.Fatalf("expected unsafe search column to be skipped, got %q", sql)
+	}
+
 	query = applyFilters(db, map[string]interface{}{
-		"name":   "Jane",
-		"status": []string{"active", "pending"},
-		"empty":  " ",
-		"nil":    nil,
+		"name":        "Jane",
+		"status":      []string{"active", "pending"},
+		"unsafe) = ?": "ignored",
+		"empty":       " ",
+		"nil":         nil,
 	}, QueryOptions{
-		AllowedFilters: []string{"name", "status", "empty", "nil"},
+		AllowedFilters: []string{"name", "status", "unsafe) = ?", "empty", "nil"},
 	})
 	if query == nil {
 		t.Fatal("expected filtered query")
+	}
+	query.Find(&rows)
+	if sql := query.Statement.SQL.String(); strings.Contains(sql, "unsafe") {
+		t.Fatalf("expected unsafe filter to be skipped, got %q", sql)
 	}
 
 	ordered, err := applyOrdering(db, filter.BaseParams{}, QueryOptions{DefaultOrders: []string{"name ASC", "status DESC"}})
 	if err != nil || ordered == nil {
 		t.Fatalf("default ordering: query=%v err=%v", ordered, err)
+	}
+	if _, err := applyOrdering(db, filter.BaseParams{OrderBy: "name", OrderDirection: "SIDEWAYS"}, QueryOptions{AllowedOrderColumns: []string{"name"}}); err == nil || !strings.Contains(err.Error(), "invalid order direction") {
+		t.Fatalf("expected invalid direction error, got %v", err)
+	}
+	if _, err := applyOrdering(db, filter.BaseParams{}, QueryOptions{DefaultOrders: []string{"name; DROP DESC"}}); err == nil || !strings.Contains(err.Error(), "invalid default order") {
+		t.Fatalf("expected invalid default order error, got %v", err)
 	}
 
 	if got := BuildSearchFunc()(db, "Jane"); got != db {
