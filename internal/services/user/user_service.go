@@ -158,7 +158,7 @@ func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUs
 }
 
 func (s *ServiceUser) LoginUser(ctx context.Context, req dto.Login, logId string, metadata dto.LoginMetadata) (string, error) {
-	identifier, err := resolveLoginIdentifier(req)
+	identifier, err := ResolveLoginIdentifier(req)
 	if err != nil {
 		return "", err
 	}

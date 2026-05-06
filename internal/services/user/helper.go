@@ -79,7 +79,7 @@ func findRoleIDByName(ctx context.Context, roleRepo interfacerole.RepoRoleInterf
 	return &roleEntity.Id, true
 }
 
-func resolveLoginIdentifier(req dto.Login) (string, error) {
+func ResolveLoginIdentifier(req dto.Login) (string, error) {
 	identifier := strings.TrimSpace(req.Identifier)
 	if identifier == "" {
 		identifier = strings.TrimSpace(req.Email)

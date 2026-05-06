@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/mail"
 	"reflect"
 	"starter-kit/internal/authscope"
 	domainaudit "starter-kit/internal/domain/audit"
@@ -372,34 +371,12 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	}
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
 
-	rawIdentifier := strings.TrimSpace(req.Identifier)
-	if rawIdentifier == "" {
-		rawIdentifier = strings.TrimSpace(req.Email)
-	}
-	if rawIdentifier == "" {
+	normalizedIdentifier, err := serviceuser.ResolveLoginIdentifier(req)
+	if err != nil {
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "identifier or email is required"}
+		res.Error = response.Errors{Code: http.StatusBadRequest, Message: err.Error()}
 		ctx.JSON(http.StatusBadRequest, res)
 		return
-	}
-
-	var normalizedIdentifier string
-	if strings.Contains(rawIdentifier, "@") {
-		normalizedIdentifier = utils.SanitizeEmail(rawIdentifier)
-		if _, err := mail.ParseAddress(normalizedIdentifier); err != nil {
-			res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "identifier must be a valid email or phone number"}
-			ctx.JSON(http.StatusBadRequest, res)
-			return
-		}
-	} else {
-		normalizedIdentifier = utils.NormalizePhoneTo62(rawIdentifier)
-		if len(normalizedIdentifier) < 9 || len(normalizedIdentifier) > 15 {
-			res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "identifier must be a valid email or phone number"}
-			ctx.JSON(http.StatusBadRequest, res)
-			return
-		}
 	}
 
 	loginIdentifier := fmt.Sprintf("%s:%s", ctx.ClientIP(), normalizedIdentifier)

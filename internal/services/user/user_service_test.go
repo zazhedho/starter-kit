@@ -416,6 +416,59 @@ func TestLoginUserRejectsInvalidRandomIdentifier(t *testing.T) {
 	}
 }
 
+func TestResolveLoginIdentifier(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     dto.Login
+		want    string
+		wantErr string
+	}{
+		{
+			name: "email identifier",
+			req:  dto.Login{Identifier: " Jane.Doe@Example.COM "},
+			want: "jane.doe@example.com",
+		},
+		{
+			name: "email fallback",
+			req:  dto.Login{Email: " Jane.Doe@Example.COM "},
+			want: "jane.doe@example.com",
+		},
+		{
+			name: "phone identifier",
+			req:  dto.Login{Identifier: "0812-3456-7890"},
+			want: "6281234567890",
+		},
+		{
+			name:    "empty identifier",
+			req:     dto.Login{},
+			wantErr: "identifier or email is required",
+		},
+		{
+			name:    "invalid identifier",
+			req:     dto.Login{Identifier: "randomtext"},
+			wantErr: "identifier must be a valid email or phone number",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveLoginIdentifier(tt.req)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("expected error %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("expected identifier %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestImpersonateUserGeneratesTokenWithOriginalUserClaims(t *testing.T) {
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 
