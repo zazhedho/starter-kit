@@ -167,14 +167,14 @@ type blacklistRepoUserHandlerTestDouble struct {
 	err         error
 }
 
-func (m *blacklistRepoUserHandlerTestDouble) Store(data domainauth.Blacklist) error {
+func (m *blacklistRepoUserHandlerTestDouble) Store(ctx context.Context, data domainauth.Blacklist) error {
 	m.storedToken = data.Token
 	return nil
 }
-func (m *blacklistRepoUserHandlerTestDouble) GetByToken(token string) (domainauth.Blacklist, error) {
+func (m *blacklistRepoUserHandlerTestDouble) GetByToken(ctx context.Context, token string) (domainauth.Blacklist, error) {
 	return domainauth.Blacklist{Token: token}, nil
 }
-func (m *blacklistRepoUserHandlerTestDouble) ExistsByToken(token string) (bool, error) {
+func (m *blacklistRepoUserHandlerTestDouble) ExistsByToken(ctx context.Context, token string) (bool, error) {
 	if m.err != nil {
 		return false, m.err
 	}

@@ -1,9 +1,12 @@
 package interfaceauth
 
-import domainauth "starter-kit/internal/domain/auth"
+import (
+	"context"
+	domainauth "starter-kit/internal/domain/auth"
+)
 
 type RepoAuthInterface interface {
-	Store(m domainauth.Blacklist) error
-	GetByToken(token string) (domainauth.Blacklist, error)
-	ExistsByToken(token string) (bool, error)
+	Store(ctx context.Context, m domainauth.Blacklist) error
+	GetByToken(ctx context.Context, token string) (domainauth.Blacklist, error)
+	ExistsByToken(ctx context.Context, token string) (bool, error)
 }

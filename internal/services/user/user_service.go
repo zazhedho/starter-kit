@@ -205,7 +205,7 @@ func (s *ServiceUser) LogoutUser(ctx context.Context, token string) error {
 		CreatedAt: time.Now(),
 	}
 
-	err := s.BlacklistRepo.Store(blacklist)
+	err := s.BlacklistRepo.Store(ctx, blacklist)
 	if err != nil {
 		return err
 	}
@@ -424,6 +424,14 @@ func (s *ServiceUser) ResetPassword(ctx context.Context, req dto.ResetPasswordRe
 		return errors.New("invalid or expired token")
 	}
 
+	isUsed, err := s.BlacklistRepo.ExistsByToken(ctx, req.Token)
+	if err != nil {
+		return err
+	}
+	if isUsed {
+		return errors.New("invalid or expired token")
+	}
+
 	userId := claims["user_id"].(string)
 
 	data, err := s.UserRepo.GetByID(ctx, userId)
@@ -439,11 +447,13 @@ func (s *ServiceUser) ResetPassword(ctx context.Context, req dto.ResetPasswordRe
 	data.Password = string(hashedPwd)
 	data.PasswordChangedAt = new(time.Now())
 
-	if err = s.UserRepo.Update(ctx, data); err != nil {
+	if err = s.LogoutUser(ctx, req.Token); err != nil {
 		return err
 	}
 
-	_ = s.LogoutUser(ctx, req.Token)
+	if err = s.UserRepo.Update(ctx, data); err != nil {
+		return err
+	}
 
 	return nil
 }

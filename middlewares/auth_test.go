@@ -22,16 +22,16 @@ type authRepoTestDouble struct {
 	stored      domainauth.Blacklist
 }
 
-func (m *authRepoTestDouble) Store(data domainauth.Blacklist) error {
+func (m *authRepoTestDouble) Store(ctx context.Context, data domainauth.Blacklist) error {
 	m.stored = data
 	return nil
 }
 
-func (m *authRepoTestDouble) GetByToken(token string) (domainauth.Blacklist, error) {
+func (m *authRepoTestDouble) GetByToken(ctx context.Context, token string) (domainauth.Blacklist, error) {
 	return domainauth.Blacklist{Token: token}, nil
 }
 
-func (m *authRepoTestDouble) ExistsByToken(token string) (bool, error) {
+func (m *authRepoTestDouble) ExistsByToken(ctx context.Context, token string) (bool, error) {
 	return m.blacklisted, m.err
 }
 

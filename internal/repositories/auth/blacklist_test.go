@@ -1,6 +1,7 @@
 package repositoryauth
 
 import (
+	"context"
 	domainauth "starter-kit/internal/domain/auth"
 	"testing"
 )
@@ -20,7 +21,8 @@ func TestNewBlacklistRepoAndNilDBMethodPanics(t *testing.T) {
 	if repo == nil {
 		t.Fatal("expected repo")
 	}
-	expectPanic(t, func() { _ = repo.Store(domainauth.Blacklist{Token: "token"}) })
-	expectPanic(t, func() { _, _ = repo.GetByToken("token") })
-	expectPanic(t, func() { _, _ = repo.ExistsByToken("token") })
+	ctx := context.Background()
+	expectPanic(t, func() { _ = repo.Store(ctx, domainauth.Blacklist{Token: "token"}) })
+	expectPanic(t, func() { _, _ = repo.GetByToken(ctx, "token") })
+	expectPanic(t, func() { _, _ = repo.ExistsByToken(ctx, "token") })
 }

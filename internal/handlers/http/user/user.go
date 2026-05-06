@@ -707,7 +707,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		return
 	}
 
-	isBlacklisted, err := h.BlacklistRepo.ExistsByToken(req.RefreshToken)
+	isBlacklisted, err := h.BlacklistRepo.ExistsByToken(ctx.Request.Context(), req.RefreshToken)
 	if err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),

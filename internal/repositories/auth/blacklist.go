@@ -1,37 +1,28 @@
 package repositoryauth
 
 import (
+	"context"
 	domainauth "starter-kit/internal/domain/auth"
 	interfaceauth "starter-kit/internal/interfaces/auth"
+	repositorygeneric "starter-kit/internal/repositories/generic"
 
 	"gorm.io/gorm"
 )
 
 type blacklistRepo struct {
-	DB *gorm.DB
+	*repositorygeneric.GenericRepository[domainauth.Blacklist]
 }
 
 func NewBlacklistRepo(db *gorm.DB) interfaceauth.RepoAuthInterface {
 	return &blacklistRepo{
-		DB: db,
+		GenericRepository: repositorygeneric.New[domainauth.Blacklist](db),
 	}
 }
 
-func (r *blacklistRepo) Store(blacklist domainauth.Blacklist) error {
-	return r.DB.Create(&blacklist).Error
+func (r *blacklistRepo) GetByToken(ctx context.Context, token string) (domainauth.Blacklist, error) {
+	return r.GetOneByField(ctx, "token", token)
 }
 
-func (r *blacklistRepo) GetByToken(token string) (domainauth.Blacklist, error) {
-	var blacklist domainauth.Blacklist
-	err := r.DB.Where("token = ?", token).First(&blacklist).Error
-	return blacklist, err
-}
-
-func (r *blacklistRepo) ExistsByToken(token string) (bool, error) {
-	var count int64
-	if err := r.DB.Model(&domainauth.Blacklist{}).Where("token = ?", token).Count(&count).Error; err != nil {
-		return false, err
-	}
-
-	return count > 0, nil
+func (r *blacklistRepo) ExistsByToken(ctx context.Context, token string) (bool, error) {
+	return r.ExistsByField(ctx, "token", token)
 }

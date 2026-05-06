@@ -89,14 +89,31 @@ func (m *userRepoMock) GetByPhone(ctx context.Context, phone string) (domainuser
 }
 
 type authRepoMock struct {
-	err error
+	err       error
+	existsErr error
+	tokens    map[string]struct{}
 }
 
-func (m *authRepoMock) Store(data domainauth.Blacklist) error { return m.err }
-func (m *authRepoMock) GetByToken(token string) (domainauth.Blacklist, error) {
+func (m *authRepoMock) Store(ctx context.Context, data domainauth.Blacklist) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.tokens == nil {
+		m.tokens = make(map[string]struct{})
+	}
+	m.tokens[data.Token] = struct{}{}
+	return nil
+}
+func (m *authRepoMock) GetByToken(ctx context.Context, token string) (domainauth.Blacklist, error) {
 	return domainauth.Blacklist{}, nil
 }
-func (m *authRepoMock) ExistsByToken(token string) (bool, error) { return false, nil }
+func (m *authRepoMock) ExistsByToken(ctx context.Context, token string) (bool, error) {
+	if m.existsErr != nil {
+		return false, m.existsErr
+	}
+	_, ok := m.tokens[token]
+	return ok, nil
+}
 
 type roleRepoUserMock struct {
 	roles map[string]domainrole.Role
@@ -721,7 +738,8 @@ func TestChangePasswordAndForgotResetPasswordFlows(t *testing.T) {
 		user:      domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer},
 		emailUser: domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer},
 	}
-	service := NewUserService(userRepo, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	authRepo := &authRepoMock{}
+	service := NewUserService(userRepo, authRepo, &roleRepoUserMock{}, &permissionRepoUserMock{})
 
 	changed, err := service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "OldPassword1!", NewPassword: "NewPassword1!"})
 	if err != nil || changed.PasswordChangedAt == nil {
@@ -734,6 +752,12 @@ func TestChangePasswordAndForgotResetPasswordFlows(t *testing.T) {
 	}
 	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: token, NewPassword: "AnotherPassword1!"}); err != nil {
 		t.Fatalf("reset password: %v", err)
+	}
+	if _, ok := authRepo.tokens[token]; !ok {
+		t.Fatalf("expected reset token to be blacklisted")
+	}
+	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: token, NewPassword: "AnotherPassword1!"}); err == nil || err.Error() != "invalid or expired token" {
+		t.Fatalf("expected used reset token to fail, got %v", err)
 	}
 }
 
@@ -909,6 +933,21 @@ func TestUserServiceErrorBranches(t *testing.T) {
 	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: "bad-token", NewPassword: "Password1!"}); err == nil || err.Error() != "invalid or expired token" {
 		t.Fatalf("expected invalid token error, got %v", err)
 	}
+
+	resetUser := domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer}
+	resetToken, err := utils.GenerateJwt(&resetUser, "reset_password")
+	if err != nil {
+		t.Fatalf("generate reset token: %v", err)
+	}
+	userRepo := &userRepoMock{user: resetUser}
+	service = NewUserService(userRepo, &authRepoMock{err: errors.New("blacklist failed")}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: resetToken, NewPassword: "Password1!"}); err == nil || err.Error() != "blacklist failed" {
+		t.Fatalf("expected reset token blacklist error, got %v", err)
+	}
+	if userRepo.updated.Id != "" {
+		t.Fatalf("expected password update to be skipped when reset token blacklist fails")
+	}
+
 	service = NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
 	if err := service.ResetPasswordByEmail(context.Background(), "missing@example.com", "Password1!"); err == nil || err.Error() != "user not found" {
 		t.Fatalf("expected reset by email missing user, got %v", err)

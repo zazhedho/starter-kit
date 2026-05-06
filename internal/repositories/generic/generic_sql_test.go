@@ -55,6 +55,12 @@ func TestGenericRepositoryDryRunCRUDMethods(t *testing.T) {
 	if err := repo.Store(ctx, record); err != nil {
 		t.Fatalf("store: %v", err)
 	}
+	if err := repo.Upsert(ctx, []sampleRecord{record}, []string{"id"}, []string{"name", "status"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := repo.Upsert(ctx, nil, []string{"id"}, []string{"name"}); err != nil {
+		t.Fatalf("empty upsert: %v", err)
+	}
 	if _, err := repo.GetByID(ctx, "record-1"); err != nil {
 		t.Fatalf("get by id: %v", err)
 	}
@@ -75,6 +81,21 @@ func TestGenericRepositoryDryRunCRUDMethods(t *testing.T) {
 	}
 	if err := repo.Delete(ctx, "record-1"); err != nil {
 		t.Fatalf("delete: %v", err)
+	}
+}
+
+func TestGenericRepositoryUpsertValidation(t *testing.T) {
+	repo := New[sampleRecord](newDryRunDB(t))
+	record := sampleRecord{ID: "record-1", Name: "Jane", Status: "active"}
+
+	err := repo.Upsert(context.Background(), []sampleRecord{record}, nil, []string{"name"})
+	if err == nil || !strings.Contains(err.Error(), "conflict columns are required") {
+		t.Fatalf("expected conflict columns error, got %v", err)
+	}
+
+	err = repo.Upsert(context.Background(), []sampleRecord{record}, []string{"id"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "update columns are required") {
+		t.Fatalf("expected update columns error, got %v", err)
 	}
 }
 
