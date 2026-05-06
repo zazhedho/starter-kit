@@ -106,21 +106,22 @@ Minimum required variables:
 - `APP_NAME`
 - `APP_ENV`
 - `PORT`
-- `DB_HOST`
-- `DB_PORT`
-- `DB_USERNAME`
-- `DB_PASS`
-- `DB_NAME`
-- `DB_SSLMODE`
+- `DATABASE_URL`, or these database parts when `DATABASE_URL` is empty:
+  - `DB_HOST`
+  - `DB_PORT`
+  - `DB_USERNAME`
+  - `DB_NAME`
+  - `DB_PASS`
+  - `DB_SSLMODE`
 - `JWT_KEY` (minimum 32 characters; use a random secret for production)
 - `JWT_EXP`
 - `PATH_MIGRATE`
 
 Optional but recommended:
-- Redis settings for sessions and rate limiting
-- storage settings for file upload use cases
+- Redis settings for sessions and rate limiting. These stay optional; when any Redis env is set, `REDIS_URL`, `REDIS_PORT`, and `REDIS_DB` format is validated.
+- storage settings for file upload use cases. These stay optional; when storage connection env is set, provider and required storage credentials are validated.
 - `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
-- SMTP settings for register OTP and password reset email flows
+- SMTP settings for register OTP and password reset email flows. These stay optional; when SMTP connection env is set, `SMTP_HOST`, `SMTP_PASS`, `SMTP_FROM`, and `SMTP_PORT` format are validated.
 
 ## Run Locally
 

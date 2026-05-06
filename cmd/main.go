@@ -65,7 +65,7 @@ func main() {
 
 	confID := config.GetAppConf("CONFIG_ID", "", nil)
 	logger.WriteLog(logger.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
-	FailOnError(utils.ValidateJWTKeyConfigured(), "Invalid app configuration")
+	FailOnError(config.ValidateStartupConfig(port), "Invalid app configuration")
 
 	if runMigrate {
 		runMigration()

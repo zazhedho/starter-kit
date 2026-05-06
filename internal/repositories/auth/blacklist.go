@@ -2,6 +2,7 @@ package repositoryauth
 
 import (
 	"context"
+	"errors"
 	domainauth "starter-kit/internal/domain/auth"
 	interfaceauth "starter-kit/internal/interfaces/auth"
 	repositorygeneric "starter-kit/internal/repositories/generic"
@@ -9,6 +10,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+var ErrBlacklistExpiryRequired = errors.New("blacklist expiry is required")
 
 type blacklistRepo struct {
 	*repositorygeneric.GenericRepository[domainauth.Blacklist]
@@ -21,6 +24,10 @@ func NewBlacklistRepo(db *gorm.DB) interfaceauth.RepoAuthInterface {
 }
 
 func (r *blacklistRepo) Store(ctx context.Context, blacklist domainauth.Blacklist) error {
+	if blacklist.ExpiresAt.IsZero() {
+		return ErrBlacklistExpiryRequired
+	}
+
 	if err := r.DeleteExpired(ctx, time.Now()); err != nil {
 		return err
 	}
