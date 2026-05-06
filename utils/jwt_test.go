@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	domainuser "starter-kit/internal/domain/user"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -50,6 +51,41 @@ func TestGenerateRefreshJwtIncludesRefreshTokenType(t *testing.T) {
 	}
 	if claims["token_type"] != "refresh" {
 		t.Fatalf("expected refresh token type, got %+v", claims)
+	}
+}
+
+func TestJwtExpiresAt(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+
+	token, err := GenerateJwt(&domainuser.Users{
+		Id:   "user-1",
+		Name: "Jane",
+		Role: RoleViewer,
+	}, "log-1")
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	expiresAt, err := JwtExpiresAt(token)
+	if err != nil {
+		t.Fatalf("expected token expiry, got %v", err)
+	}
+	if expiresAt.IsZero() || time.Until(expiresAt) <= 0 {
+		t.Fatalf("expected future token expiry, got %v", expiresAt)
+	}
+}
+
+func TestJwtExpiresAtRequiresExpClaim(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"user_id": "user-1"})
+	tokenString, err := token.SignedString([]byte("test-secret-must-be-at-least-32-bytes"))
+	if err != nil {
+		t.Fatalf("failed to sign test token: %v", err)
+	}
+
+	if _, err := JwtExpiresAt(tokenString); err == nil || err.Error() != "token expiry is required" {
+		t.Fatalf("expected token expiry error, got %v", err)
 	}
 }
 

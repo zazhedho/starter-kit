@@ -11,6 +11,7 @@ import (
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -34,6 +35,7 @@ func (m *authRepoTestDouble) GetByToken(ctx context.Context, token string) (doma
 func (m *authRepoTestDouble) ExistsByToken(ctx context.Context, token string) (bool, error) {
 	return m.blacklisted, m.err
 }
+func (m *authRepoTestDouble) DeleteExpired(ctx context.Context, now time.Time) error { return nil }
 
 type permissionRepoTestDouble struct {
 	permissions []domainpermission.Permission

@@ -199,13 +199,19 @@ func (s *ServiceUser) LoginUser(ctx context.Context, req dto.Login, logId string
 }
 
 func (s *ServiceUser) LogoutUser(ctx context.Context, token string) error {
+	expiresAt, err := utils.JwtExpiresAt(token)
+	if err != nil {
+		return err
+	}
+
 	blacklist := domainauth.Blacklist{
 		ID:        utils.CreateUUID(),
 		Token:     token,
 		CreatedAt: time.Now(),
+		ExpiresAt: expiresAt,
 	}
 
-	err := s.BlacklistRepo.Store(ctx, blacklist)
+	err = s.BlacklistRepo.Store(ctx, blacklist)
 	if err != nil {
 		return err
 	}

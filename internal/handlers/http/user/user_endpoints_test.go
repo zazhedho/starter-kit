@@ -180,6 +180,9 @@ func (m *blacklistRepoUserHandlerTestDouble) ExistsByToken(ctx context.Context, 
 	}
 	return m.blacklisted, nil
 }
+func (m *blacklistRepoUserHandlerTestDouble) DeleteExpired(ctx context.Context, now time.Time) error {
+	return nil
+}
 
 type otpServiceUserHandlerTestDouble struct {
 	sentEmail     string

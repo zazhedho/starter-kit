@@ -31,7 +31,9 @@ CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users(locked_until);
 CREATE TABLE IF NOT EXISTS blacklist (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token TEXT UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_blacklist_token ON blacklist(token);
+CREATE INDEX IF NOT EXISTS idx_blacklist_expires_at ON blacklist(expires_at);

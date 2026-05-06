@@ -12,6 +12,7 @@ import (
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -92,12 +93,14 @@ type authRepoMock struct {
 	err       error
 	existsErr error
 	tokens    map[string]struct{}
+	stored    domainauth.Blacklist
 }
 
 func (m *authRepoMock) Store(ctx context.Context, data domainauth.Blacklist) error {
 	if m.err != nil {
 		return m.err
 	}
+	m.stored = data
 	if m.tokens == nil {
 		m.tokens = make(map[string]struct{})
 	}
@@ -114,6 +117,7 @@ func (m *authRepoMock) ExistsByToken(ctx context.Context, token string) (bool, e
 	_, ok := m.tokens[token]
 	return ok, nil
 }
+func (m *authRepoMock) DeleteExpired(ctx context.Context, now time.Time) error { return nil }
 
 type roleRepoUserMock struct {
 	roles map[string]domainrole.Role
@@ -682,6 +686,7 @@ func TestResetPasswordByEmailNormalizesEmailAndUpdatesPassword(t *testing.T) {
 }
 
 func TestUserServicePassThroughAndFilteringMethods(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	userRepo := &userRepoMock{
 		user:      domainuser.Users{Id: "user-1", Name: "Jane", Email: "jane@example.com", Phone: "628123456789", Role: utils.RoleViewer},
 		emailUser: domainuser.Users{Id: "user-1", Email: "jane@example.com"},
@@ -717,7 +722,11 @@ func TestUserServicePassThroughAndFilteringMethods(t *testing.T) {
 		t.Fatalf("expected superadmin to see all users, users=%+v total=%d err=%v", users, total, err)
 	}
 
-	if err := service.LogoutUser(context.Background(), "token"); err != nil {
+	logoutToken, err := utils.GenerateJwt(&userRepo.user, "logout-test")
+	if err != nil {
+		t.Fatalf("generate logout token: %v", err)
+	}
+	if err := service.LogoutUser(context.Background(), logoutToken); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 	if err := service.Delete(context.Background(), "user-1"); err != nil {
@@ -755,6 +764,9 @@ func TestChangePasswordAndForgotResetPasswordFlows(t *testing.T) {
 	}
 	if _, ok := authRepo.tokens[token]; !ok {
 		t.Fatalf("expected reset token to be blacklisted")
+	}
+	if authRepo.stored.ExpiresAt.IsZero() || time.Until(authRepo.stored.ExpiresAt) <= 0 {
+		t.Fatalf("expected reset token blacklist expiry, got %v", authRepo.stored.ExpiresAt)
 	}
 	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: token, NewPassword: "AnotherPassword1!"}); err == nil || err.Error() != "invalid or expired token" {
 		t.Fatalf("expected used reset token to fail, got %v", err)
@@ -953,8 +965,12 @@ func TestUserServiceErrorBranches(t *testing.T) {
 		t.Fatalf("expected reset by email missing user, got %v", err)
 	}
 
+	logoutToken, err := utils.GenerateJwt(&resetUser, "logout-test")
+	if err != nil {
+		t.Fatalf("generate logout token: %v", err)
+	}
 	service = NewUserService(&userRepoMock{}, &authRepoMock{err: errors.New("blacklist failed")}, &roleRepoUserMock{}, &permissionRepoUserMock{})
-	if err := service.LogoutUser(context.Background(), "token"); err == nil || err.Error() != "blacklist failed" {
+	if err := service.LogoutUser(context.Background(), logoutToken); err == nil || err.Error() != "blacklist failed" {
 		t.Fatalf("expected logout store error, got %v", err)
 	}
 

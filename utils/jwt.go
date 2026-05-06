@@ -140,6 +140,20 @@ func JwtClaim(tokenString string) (map[string]interface{}, error) {
 	return nil, err
 }
 
+func JwtExpiresAt(tokenString string) (time.Time, error) {
+	claims, err := JwtClaim(tokenString)
+	if err != nil {
+		return time.Time{}, errors.New("invalid or expired token")
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return time.Time{}, errors.New("token expiry is required")
+	}
+
+	return time.Unix(int64(exp), 0), nil
+}
+
 func jwtSecret() ([]byte, error) {
 	secret := strings.TrimSpace(os.Getenv("JWT_KEY"))
 	if secret == "" {
