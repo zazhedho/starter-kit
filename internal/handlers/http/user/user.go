@@ -1,6 +1,7 @@
 package handleruser
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1471,6 +1472,26 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			ctx.JSON(statusCode, res)
 			return
 		}
+		userID := ""
+		if h.SessionSvc != nil {
+			user, err := h.Service.GetUserByEmail(reqCtx, email)
+			if err != nil {
+				h.writeAudit(ctx, domainaudit.AuditEvent{
+					Action:       domainaudit.ActionUpdate,
+					Resource:     "user_password_reset",
+					Status:       domainaudit.StatusFailed,
+					Message:      "Failed to load user for password reset",
+					ErrorMessage: err.Error(),
+					AfterData: map[string]interface{}{
+						"email": email,
+					},
+				})
+				statusCode, res := userMutationErrorResponse(logId, err)
+				ctx.JSON(statusCode, res)
+				return
+			}
+			userID = user.Id
+		}
 		if err := h.Service.ResetPasswordByEmail(reqCtx, email, req.NewPassword); err != nil {
 			h.writeAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionUpdate,
@@ -1484,6 +1505,22 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			})
 			statusCode, res := userMutationErrorResponse(logId, err)
 			ctx.JSON(statusCode, res)
+			return
+		}
+		if err := h.revokePasswordResetSessions(reqCtx, userID); err != nil {
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:       domainaudit.ActionUpdate,
+				Resource:     "user_password_reset",
+				Status:       domainaudit.StatusFailed,
+				Message:      "Failed to revoke sessions after password reset",
+				ErrorMessage: err.Error(),
+				AfterData: map[string]interface{}{
+					"email": email,
+				},
+			})
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; SessionSvc.DestroyAllUserSessions; ERROR: %s;", logPrefix, err))
+			res := response.InternalServerError(logId)
+			ctx.JSON(http.StatusInternalServerError, res)
 			return
 		}
 
@@ -1515,6 +1552,29 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
+	if h.SessionSvc != nil {
+		claims, err := utils.JwtClaim(req.Token)
+		if err != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; JwtClaim after reset; ERROR: %s;", logPrefix, err))
+			res := response.InternalServerError(logId)
+			ctx.JSON(http.StatusInternalServerError, res)
+			return
+		}
+		if err := h.revokePasswordResetSessions(reqCtx, utils.InterfaceString(claims["user_id"])); err != nil {
+			h.writeAudit(ctx, domainaudit.AuditEvent{
+				Action:       domainaudit.ActionUpdate,
+				Resource:     "user_password_reset",
+				Status:       domainaudit.StatusFailed,
+				Message:      "Failed to revoke sessions after password reset",
+				ErrorMessage: err.Error(),
+				AfterData:    req,
+			})
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; SessionSvc.DestroyAllUserSessions; ERROR: %s;", logPrefix, err))
+			res := response.InternalServerError(logId)
+			ctx.JSON(http.StatusInternalServerError, res)
+			return
+		}
+	}
 	h.writeAudit(ctx, domainaudit.AuditEvent{
 		Action:   domainaudit.ActionUpdate,
 		Resource: "user_password_reset",
@@ -1527,6 +1587,14 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 
 	res := response.Response(http.StatusOK, "Password reset successfully", logId, nil)
 	ctx.JSON(http.StatusOK, res)
+}
+
+func (h *HandlerUser) revokePasswordResetSessions(ctx context.Context, userID string) error {
+	if h.SessionSvc == nil || strings.TrimSpace(userID) == "" {
+		return nil
+	}
+
+	return h.SessionSvc.DestroyAllUserSessions(ctx, userID)
 }
 
 func (h *HandlerUser) Delete(ctx *gin.Context) {

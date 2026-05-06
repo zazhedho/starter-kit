@@ -208,6 +208,8 @@ type sessionServiceUserHandlerTestDouble struct {
 	refreshErr      error
 	rotateErr       error
 	destroyTokenErr error
+	destroyAllErr   error
+	destroyedUserID string
 }
 
 func (m *sessionServiceUserHandlerTestDouble) CreateSession(ctx context.Context, user *domainuser.Users, accessToken string, refreshToken string, requestMeta domainsession.RequestMeta) (*domainsession.Session, error) {
@@ -233,6 +235,10 @@ func (m *sessionServiceUserHandlerTestDouble) DestroySessionByToken(ctx context.
 	return nil
 }
 func (m *sessionServiceUserHandlerTestDouble) DestroyAllUserSessions(ctx context.Context, userID string) error {
+	if m.destroyAllErr != nil {
+		return m.destroyAllErr
+	}
+	m.destroyedUserID = userID
 	return nil
 }
 func (m *sessionServiceUserHandlerTestDouble) DestroyOtherSessions(ctx context.Context, userID string, currentSessionID string) error {
@@ -880,4 +886,38 @@ func TestUserHandlerEmailPasswordResetBranches(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
 	handler.ResetPassword(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestUserHandlerResetPasswordRevokesSessions(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+
+	user := domainuser.Users{Id: "user-1", Email: "jane@example.com", Role: utils.RoleViewer}
+	service := &userServiceTestDouble{user: user}
+	sessionSvc := &sessionServiceUserHandlerTestDouble{}
+	handler := NewUserHandler(service, nil, sessionSvc, nil, nil, &appConfigServiceUserTestDouble{enabled: true}, nil, &resetServiceUserHandlerTestDouble{email: user.Email})
+
+	ctx, rec := newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusOK)
+	if sessionSvc.destroyedUserID != user.Id {
+		t.Fatalf("expected email reset to revoke sessions for %q, got %q", user.Id, sessionSvc.destroyedUserID)
+	}
+
+	handler = NewUserHandler(service, nil, &sessionServiceUserHandlerTestDouble{destroyAllErr: errors.New("session revoke failed")}, nil, nil, &appConfigServiceUserTestDouble{enabled: true}, nil, &resetServiceUserHandlerTestDouble{email: user.Email})
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"reset-token","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
+
+	token, err := utils.GenerateJwt(&user, "reset_password")
+	if err != nil {
+		t.Fatalf("generate reset token: %v", err)
+	}
+	sessionSvc = &sessionServiceUserHandlerTestDouble{}
+	handler = NewUserHandler(service, nil, sessionSvc, nil, nil, &appConfigServiceUserTestDouble{enabled: false}, nil, nil)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/reset-password", `{"token":"`+token+`","new_password":"secret456"}`, nil)
+	handler.ResetPassword(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusOK)
+	if sessionSvc.destroyedUserID != user.Id {
+		t.Fatalf("expected jwt reset to revoke sessions for %q, got %q", user.Id, sessionSvc.destroyedUserID)
+	}
 }
