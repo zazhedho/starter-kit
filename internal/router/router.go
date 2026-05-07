@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/infrastructure/database"
+	permissioncache "starter-kit/internal/cache/permission"
 	appConfigHandler "starter-kit/internal/handlers/http/appconfig"
 	auditHandler "starter-kit/internal/handlers/http/audit"
 	locationHandler "starter-kit/internal/handlers/http/location"
@@ -76,7 +77,9 @@ func (r *Routes) UserRoutes() {
 	repo := userRepo.NewUserRepo(r.DB)
 	rRepo := roleRepo.NewRoleRepo(r.DB)
 	pRepo := permissionRepo.NewPermissionRepo(r.DB)
-	uc := userSvc.NewUserService(repo, blacklistRepo, rRepo, pRepo)
+	redisClient := database.GetRedisClient()
+	permissionInvalidator := permissioncache.NewInvalidator(redisClient)
+	uc := userSvc.NewUserService(repo, blacklistRepo, rRepo, pRepo, permissionInvalidator)
 	var userSessionSvc interfacesession.ServiceSessionInterface
 	repoAudit := auditRepo.NewAuditRepo(r.DB)
 	svcAudit := auditSvc.NewAuditService(repoAudit)
@@ -84,7 +87,6 @@ func (r *Routes) UserRoutes() {
 	svcAppConfig := appConfigSvc.NewAppConfigService(repoAppConfig)
 
 	// Setup login limiter if Redis is available
-	redisClient := database.GetRedisClient()
 	var loginLimiter security.LoginLimiter
 	var registerOTPService = otpSvc.NewOTPService(nil, nil, config.LoadOTPConfig())
 	var passwordResetService = resetSvc.NewPasswordResetService(nil, nil, config.LoadPasswordResetConfig())
@@ -160,7 +162,8 @@ func (r *Routes) RoleRoutes() {
 	repoRole := roleRepo.NewRoleRepo(r.DB)
 	repoPermission := permissionRepo.NewPermissionRepo(r.DB)
 	repoMenu := menuRepo.NewMenuRepo(r.DB)
-	svc := roleSvc.NewRoleService(repoRole, repoPermission, repoMenu)
+	permissionInvalidator := permissioncache.NewInvalidator(database.GetRedisClient())
+	svc := roleSvc.NewRoleService(repoRole, repoPermission, repoMenu, permissionInvalidator)
 	repoAudit := auditRepo.NewAuditRepo(r.DB)
 	svcAudit := auditSvc.NewAuditService(repoAudit)
 	h := roleHandler.NewRoleHandler(svc, svcAudit)
@@ -185,7 +188,8 @@ func (r *Routes) RoleRoutes() {
 
 func (r *Routes) PermissionRoutes() {
 	repo := permissionRepo.NewPermissionRepo(r.DB)
-	svc := permissionSvc.NewPermissionService(repo)
+	permissionInvalidator := permissioncache.NewInvalidator(database.GetRedisClient())
+	svc := permissionSvc.NewPermissionService(repo, permissionInvalidator)
 	repoAudit := auditRepo.NewAuditRepo(r.DB)
 	svcAudit := auditSvc.NewAuditService(repoAudit)
 	h := permissionHandler.NewPermissionHandler(svc, svcAudit)

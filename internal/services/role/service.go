@@ -3,7 +3,6 @@ package servicerole
 import (
 	"context"
 	"errors"
-	"starter-kit/infrastructure/database"
 	"starter-kit/internal/authscope"
 	permissioncache "starter-kit/internal/cache/permission"
 	domainrole "starter-kit/internal/domain/role"
@@ -18,21 +17,27 @@ import (
 )
 
 type RoleService struct {
-	RoleRepo       interfacerole.RepoRoleInterface
-	PermissionRepo interfacepermission.RepoPermissionInterface
-	MenuRepo       interfacemenu.RepoMenuInterface
+	RoleRepo        interfacerole.RepoRoleInterface
+	PermissionRepo  interfacepermission.RepoPermissionInterface
+	MenuRepo        interfacemenu.RepoMenuInterface
+	PermissionCache permissioncache.Invalidator
 }
 
 func NewRoleService(
 	roleRepo interfacerole.RepoRoleInterface,
 	permissionRepo interfacepermission.RepoPermissionInterface,
 	menuRepo interfacemenu.RepoMenuInterface,
+	invalidators ...permissioncache.Invalidator,
 ) *RoleService {
-	return &RoleService{
+	service := &RoleService{
 		RoleRepo:       roleRepo,
 		PermissionRepo: permissionRepo,
 		MenuRepo:       menuRepo,
 	}
+	if len(invalidators) > 0 {
+		service.PermissionCache = invalidators[0]
+	}
+	return service
 }
 
 func (s *RoleService) Create(ctx context.Context, req dto.RoleCreate) (domainrole.Role, error) {
@@ -152,7 +157,7 @@ func (s *RoleService) Delete(ctx context.Context, id string) error {
 	if err := s.RoleRepo.Delete(ctx, id); err != nil {
 		return err
 	}
-	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	s.invalidatePermissionCache(ctx)
 	return nil
 }
 
@@ -185,8 +190,14 @@ func (s *RoleService) AssignPermissions(ctx context.Context, roleId string, req 
 	if err := s.RoleRepo.AssignPermissions(ctx, roleId, req.PermissionIds); err != nil {
 		return err
 	}
-	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	s.invalidatePermissionCache(ctx)
 	return nil
+}
+
+func (s *RoleService) invalidatePermissionCache(ctx context.Context) {
+	if s.PermissionCache != nil {
+		s.PermissionCache.DeleteAll(ctx)
+	}
 }
 
 func (s *RoleService) AssignMenus(ctx context.Context, roleId string, req dto.AssignMenus) error {

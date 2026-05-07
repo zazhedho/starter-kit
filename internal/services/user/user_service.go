@@ -3,7 +3,6 @@ package serviceuser
 import (
 	"context"
 	"errors"
-	"starter-kit/infrastructure/database"
 	"starter-kit/internal/authscope"
 	permissioncache "starter-kit/internal/cache/permission"
 	domainauth "starter-kit/internal/domain/auth"
@@ -23,19 +22,24 @@ import (
 )
 
 type ServiceUser struct {
-	UserRepo       interfaceuser.RepoUserInterface
-	BlacklistRepo  interfaceauth.RepoAuthInterface
-	RoleRepo       interfacerole.RepoRoleInterface
-	PermissionRepo interfacepermission.RepoPermissionInterface
+	UserRepo        interfaceuser.RepoUserInterface
+	BlacklistRepo   interfaceauth.RepoAuthInterface
+	RoleRepo        interfacerole.RepoRoleInterface
+	PermissionRepo  interfacepermission.RepoPermissionInterface
+	PermissionCache permissioncache.Invalidator
 }
 
-func NewUserService(userRepo interfaceuser.RepoUserInterface, blacklistRepo interfaceauth.RepoAuthInterface, roleRepo interfacerole.RepoRoleInterface, permissionRepo interfacepermission.RepoPermissionInterface) *ServiceUser {
-	return &ServiceUser{
+func NewUserService(userRepo interfaceuser.RepoUserInterface, blacklistRepo interfaceauth.RepoAuthInterface, roleRepo interfacerole.RepoRoleInterface, permissionRepo interfacepermission.RepoPermissionInterface, invalidators ...permissioncache.Invalidator) *ServiceUser {
+	service := &ServiceUser{
 		UserRepo:       userRepo,
 		BlacklistRepo:  blacklistRepo,
 		RoleRepo:       roleRepo,
 		PermissionRepo: permissionRepo,
 	}
+	if len(invalidators) > 0 {
+		service.PermissionCache = invalidators[0]
+	}
+	return service
 }
 
 func (s *ServiceUser) RegisterUser(ctx context.Context, req dto.UserRegister) (domainuser.Users, error) {
@@ -371,7 +375,7 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 		return domainuser.Users{}, err
 	}
 	if strings.TrimSpace(req.Role) != "" {
-		permissioncache.DeleteUserPermissionKeys(ctx, database.GetRedisClient(), id)
+		s.invalidateUserPermissionCache(ctx, id)
 	}
 
 	return data, nil
@@ -498,8 +502,14 @@ func (s *ServiceUser) Delete(ctx context.Context, id string) error {
 	if err := s.UserRepo.Delete(ctx, id); err != nil {
 		return err
 	}
-	permissioncache.DeleteUserPermissionKeys(ctx, database.GetRedisClient(), id)
+	s.invalidateUserPermissionCache(ctx, id)
 	return nil
+}
+
+func (s *ServiceUser) invalidateUserPermissionCache(ctx context.Context, userIDs ...string) {
+	if s.PermissionCache != nil {
+		s.PermissionCache.DeleteUser(ctx, userIDs...)
+	}
 }
 
 var _ interfaceuser.ServiceUserInterface = (*ServiceUser)(nil)

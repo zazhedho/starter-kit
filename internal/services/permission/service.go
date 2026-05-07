@@ -3,7 +3,6 @@ package servicepermission
 import (
 	"context"
 	"errors"
-	"starter-kit/infrastructure/database"
 	permissioncache "starter-kit/internal/cache/permission"
 	domainpermission "starter-kit/internal/domain/permission"
 	"starter-kit/internal/dto"
@@ -14,13 +13,18 @@ import (
 )
 
 type PermissionService struct {
-	PermissionRepo interfacepermission.RepoPermissionInterface
+	PermissionRepo  interfacepermission.RepoPermissionInterface
+	PermissionCache permissioncache.Invalidator
 }
 
-func NewPermissionService(permissionRepo interfacepermission.RepoPermissionInterface) *PermissionService {
-	return &PermissionService{
+func NewPermissionService(permissionRepo interfacepermission.RepoPermissionInterface, invalidators ...permissioncache.Invalidator) *PermissionService {
+	service := &PermissionService{
 		PermissionRepo: permissionRepo,
 	}
+	if len(invalidators) > 0 {
+		service.PermissionCache = invalidators[0]
+	}
+	return service
 }
 
 func (s *PermissionService) Create(ctx context.Context, req dto.PermissionCreate) (domainpermission.Permission, error) {
@@ -42,7 +46,7 @@ func (s *PermissionService) Create(ctx context.Context, req dto.PermissionCreate
 	if err := s.PermissionRepo.Store(ctx, data); err != nil {
 		return domainpermission.Permission{}, err
 	}
-	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	s.invalidatePermissionCache(ctx)
 
 	return data, nil
 }
@@ -84,7 +88,7 @@ func (s *PermissionService) Update(ctx context.Context, id string, req dto.Permi
 	if err := s.PermissionRepo.Update(ctx, permission); err != nil {
 		return domainpermission.Permission{}, err
 	}
-	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	s.invalidatePermissionCache(ctx)
 
 	return permission, nil
 }
@@ -93,8 +97,14 @@ func (s *PermissionService) Delete(ctx context.Context, id string) error {
 	if err := s.PermissionRepo.Delete(ctx, id); err != nil {
 		return err
 	}
-	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	s.invalidatePermissionCache(ctx)
 	return nil
+}
+
+func (s *PermissionService) invalidatePermissionCache(ctx context.Context) {
+	if s.PermissionCache != nil {
+		s.PermissionCache.DeleteAll(ctx)
+	}
 }
 
 var _ interfacepermission.ServicePermissionInterface = (*PermissionService)(nil)
