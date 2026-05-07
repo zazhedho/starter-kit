@@ -54,6 +54,19 @@ Behavior:
 - if a config exists but `is_active = false`, the helper also returns the fallback
 - parsing errors are returned only when an active config exists but contains an invalid value
 
+For feature flags, `is_active` controls whether the stored config overrides the code fallback. The actual on/off value is stored in `value`.
+
+Public registration example:
+- missing config: allowed, because code fallback is `true`
+- `is_active = false`: allowed, because the config is ignored and fallback `true` is used
+- `is_active = true`, `value = true`: allowed
+- `is_active = true`, `value = false`: disabled
+
+Default auth config rows are seeded by the existing app config migration:
+- `auth.public_registration_enabled`: active, value `true`
+- `auth.register_otp_enabled`: active, value `false`
+- `auth.password_reset_email_enabled`: active, value `false`
+
 ## Current Modules
 
 System modules currently included:
