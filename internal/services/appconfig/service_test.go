@@ -83,6 +83,50 @@ func TestGetBoolReturnsDefaultWhenConfigInactive(t *testing.T) {
 	}
 }
 
+func TestIsEnabledReturnsFallbackWhenConfigMissing(t *testing.T) {
+	service := NewAppConfigService(&appConfigRepoMock{byKey: map[string]domainappconfig.AppConfig{}})
+
+	value, err := service.IsEnabled(context.Background(), "feature.example", true)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !value {
+		t.Fatal("expected missing feature flag to use fallback")
+	}
+}
+
+func TestIsEnabledReturnsFallbackWhenConfigInactive(t *testing.T) {
+	service := NewAppConfigService(&appConfigRepoMock{
+		byKey: map[string]domainappconfig.AppConfig{
+			"feature.example": {ConfigKey: "feature.example", Value: "false", IsActive: false},
+		},
+	})
+
+	value, err := service.IsEnabled(context.Background(), "feature.example", true)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !value {
+		t.Fatal("expected inactive feature flag to use fallback")
+	}
+}
+
+func TestIsEnabledReturnsValueWhenConfigActive(t *testing.T) {
+	service := NewAppConfigService(&appConfigRepoMock{
+		byKey: map[string]domainappconfig.AppConfig{
+			"feature.example": {ConfigKey: "feature.example", Value: "false", IsActive: true},
+		},
+	})
+
+	value, err := service.IsEnabled(context.Background(), "feature.example", true)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if value {
+		t.Fatal("expected active feature flag value to be used")
+	}
+}
+
 func TestGetBoolParsesFeatureFlagValue(t *testing.T) {
 	service := NewAppConfigService(&appConfigRepoMock{
 		byKey: map[string]domainappconfig.AppConfig{
