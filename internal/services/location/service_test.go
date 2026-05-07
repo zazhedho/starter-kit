@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	redismock "github.com/go-redis/redismock/v9"
 	"gorm.io/gorm"
 )
 
@@ -294,19 +293,6 @@ func TestStartSyncRepositoryErrors(t *testing.T) {
 }
 
 func TestLocationHelperCacheKeysAndCodeNormalization(t *testing.T) {
-	t.Setenv("LOCATION_CACHE_TTL", "-1s")
-	if locationCacheTTL() != defaultLocationCacheTTL {
-		t.Fatal("expected invalid cache ttl to fall back to default")
-	}
-	if provinceCacheKey() != "location:province" {
-		t.Fatalf("unexpected province cache key")
-	}
-	if cityCacheKey("11") != "location:city:11" || districtCacheKey("1101") != "location:district:1101" || villageCacheKey("110101") != "location:village:110101" {
-		t.Fatal("unexpected scoped cache keys")
-	}
-	if locationCachePrefix() != "location:" {
-		t.Fatal("unexpected cache prefix")
-	}
 	if got := normalizeChildCode("11", "01"); got != "1101" {
 		t.Fatalf("expected normalized child code, got %q", got)
 	}
@@ -316,29 +302,6 @@ func TestLocationHelperCacheKeysAndCodeNormalization(t *testing.T) {
 	wantCandidates := []string{"01", "1101"}
 	if got := childCodeCandidates("11", "1101"); !reflect.DeepEqual(got, wantCandidates) {
 		t.Fatalf("expected %v, got %v", wantCandidates, got)
-	}
-}
-
-func TestLocationCacheHelpersUseRedis(t *testing.T) {
-	client, mock := redismock.NewClientMock()
-	svc := &LocationService{Redis: client}
-	ctx := context.Background()
-
-	mock.ExpectGet("location:province").SetVal(`[{"code":"11","name":"Aceh"}]`)
-	got, ok := svc.getCachedLocations(ctx, "location:province")
-	if !ok || len(got) != 1 || got[0].Code != "11" {
-		t.Fatalf("expected cached locations, ok=%v got=%+v", ok, got)
-	}
-
-	mock.Regexp().ExpectSet("location:province", `.+`, defaultLocationCacheTTL).SetVal("OK")
-	svc.setCachedLocations(ctx, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}})
-
-	mock.ExpectScan(0, "location:*", 100).SetVal([]string{"location:province", "location:city:11"}, 0)
-	mock.ExpectDel("location:province", "location:city:11").SetVal(2)
-	svc.deleteCacheKeys("location:")
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("redis expectations: %v", err)
 	}
 }
 
