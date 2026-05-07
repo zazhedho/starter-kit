@@ -3,7 +3,9 @@ package serviceuser
 import (
 	"context"
 	"errors"
+	"starter-kit/infrastructure/database"
 	"starter-kit/internal/authscope"
+	permissioncache "starter-kit/internal/cache/permission"
 	domainauth "starter-kit/internal/domain/auth"
 	domainuser "starter-kit/internal/domain/user"
 	"starter-kit/internal/dto"
@@ -368,6 +370,9 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 	if err = s.UserRepo.Update(ctx, data); err != nil {
 		return domainuser.Users{}, err
 	}
+	if strings.TrimSpace(req.Role) != "" {
+		permissioncache.DeleteUserPermissionKeys(ctx, database.GetRedisClient(), id)
+	}
 
 	return data, nil
 }
@@ -490,7 +495,11 @@ func (s *ServiceUser) ResetPasswordByEmail(ctx context.Context, email, newPasswo
 }
 
 func (s *ServiceUser) Delete(ctx context.Context, id string) error {
-	return s.UserRepo.Delete(ctx, id)
+	if err := s.UserRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	permissioncache.DeleteUserPermissionKeys(ctx, database.GetRedisClient(), id)
+	return nil
 }
 
 var _ interfaceuser.ServiceUserInterface = (*ServiceUser)(nil)

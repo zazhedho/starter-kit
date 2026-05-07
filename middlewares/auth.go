@@ -1,14 +1,13 @@
 package middlewares
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"starter-kit/infrastructure/database"
 	"starter-kit/internal/authscope"
+	permissioncache "starter-kit/internal/cache/permission"
 	domainpermission "starter-kit/internal/domain/permission"
 	interfaceauth "starter-kit/internal/interfaces/auth"
 	interfacepermission "starter-kit/internal/interfaces/permission"
@@ -17,7 +16,6 @@ import (
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -198,7 +196,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 		targetResource := strings.TrimSpace(resource)
 		targetAction := strings.TrimSpace(action)
 
-		permissionKeys, cacheHit := m.getCachedPermissionKeys(ctx.Request.Context(), userId)
+		permissionKeys, cacheHit := permissioncache.GetUserPermissionKeys(ctx.Request.Context(), m.PermissionCache, userId)
 		if !cacheHit {
 			permissions, err := m.PermissionRepo.GetUserPermissions(ctx.Request.Context(), userId)
 			if err != nil {
@@ -216,7 +214,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			}
 
 			permissionKeys = permissionKeysFromPermissions(permissions)
-			m.setCachedPermissionKeys(ctx.Request.Context(), userId, permissionKeys)
+			permissioncache.SetUserPermissionKeys(ctx.Request.Context(), m.PermissionCache, userId, permissionKeys)
 		}
 
 		dataJWT["permissions"] = permissionKeys
@@ -246,51 +244,4 @@ func permissionKeysFromPermissions(permissions []domainpermission.Permission) []
 		}
 	}
 	return permissionKeys
-}
-
-func (m *Middleware) getCachedPermissionKeys(ctx context.Context, userID string) ([]string, bool) {
-	if m.PermissionCache == nil {
-		return nil, false
-	}
-
-	raw, err := m.PermissionCache.Get(ctx, permissionCacheKey(userID)).Result()
-	if err != nil {
-		return nil, false
-	}
-
-	var permissionKeys []string
-	if err := json.Unmarshal([]byte(raw), &permissionKeys); err != nil {
-		return nil, false
-	}
-	return permissionKeys, true
-}
-
-func (m *Middleware) setCachedPermissionKeys(ctx context.Context, userID string, permissionKeys []string) {
-	if m.PermissionCache == nil {
-		return
-	}
-
-	raw, err := json.Marshal(permissionKeys)
-	if err != nil {
-		return
-	}
-	_ = m.PermissionCache.Set(ctx, permissionCacheKey(userID), string(raw), permissionCacheTTL()).Err()
-}
-
-func permissionCacheKey(userID string) string {
-	return "permission:user:" + userID
-}
-
-func permissionCacheTTL() time.Duration {
-	if ttl := strings.TrimSpace(utils.GetEnv("PERMISSION_CACHE_TTL", "")); ttl != "" {
-		if parsed, err := time.ParseDuration(ttl); err == nil && parsed > 0 {
-			return parsed
-		}
-	}
-
-	seconds := utils.GetEnv("PERMISSION_CACHE_TTL_SECONDS", 60)
-	if seconds <= 0 {
-		seconds = 60
-	}
-	return time.Duration(seconds) * time.Second
 }

@@ -119,7 +119,7 @@ Minimum required variables:
 
 Optional but recommended:
 - Redis settings for sessions and rate limiting. These stay optional; when any Redis env is set, `REDIS_URL`, `REDIS_PORT`, and `REDIS_DB` format is validated.
-- Permission cache settings such as `PERMISSION_CACHE_TTL` or `PERMISSION_CACHE_TTL_SECONDS`. These only apply when Redis is available; otherwise permission checks read from the database.
+- Permission cache settings such as `PERMISSION_CACHE_TTL` or `PERMISSION_CACHE_TTL_SECONDS` (default `5m`). These only apply when Redis is available; otherwise permission checks read from the database. Cache entries are invalidated after role-permission, permission, user-role, and user-delete mutations; TTL remains the fallback when Redis invalidation fails.
 - storage settings for file upload use cases. These stay optional; when storage connection env is set, provider and required storage credentials are validated.
 - `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
 - SMTP settings for register OTP and password reset email flows. These stay optional; when SMTP connection env is set, `SMTP_HOST`, `SMTP_PASS`, `SMTP_FROM`, and `SMTP_PORT` format are validated.

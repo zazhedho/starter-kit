@@ -3,6 +3,8 @@ package servicepermission
 import (
 	"context"
 	"errors"
+	"starter-kit/infrastructure/database"
+	permissioncache "starter-kit/internal/cache/permission"
 	domainpermission "starter-kit/internal/domain/permission"
 	"starter-kit/internal/dto"
 	interfacepermission "starter-kit/internal/interfaces/permission"
@@ -40,6 +42,7 @@ func (s *PermissionService) Create(ctx context.Context, req dto.PermissionCreate
 	if err := s.PermissionRepo.Store(ctx, data); err != nil {
 		return domainpermission.Permission{}, err
 	}
+	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
 
 	return data, nil
 }
@@ -81,12 +84,17 @@ func (s *PermissionService) Update(ctx context.Context, id string, req dto.Permi
 	if err := s.PermissionRepo.Update(ctx, permission); err != nil {
 		return domainpermission.Permission{}, err
 	}
+	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
 
 	return permission, nil
 }
 
 func (s *PermissionService) Delete(ctx context.Context, id string) error {
-	return s.PermissionRepo.Delete(ctx, id)
+	if err := s.PermissionRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	return nil
 }
 
 var _ interfacepermission.ServicePermissionInterface = (*PermissionService)(nil)

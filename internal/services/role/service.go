@@ -3,7 +3,9 @@ package servicerole
 import (
 	"context"
 	"errors"
+	"starter-kit/infrastructure/database"
 	"starter-kit/internal/authscope"
+	permissioncache "starter-kit/internal/cache/permission"
 	domainrole "starter-kit/internal/domain/role"
 	"starter-kit/internal/dto"
 	interfacemenu "starter-kit/internal/interfaces/menu"
@@ -147,7 +149,11 @@ func (s *RoleService) Delete(ctx context.Context, id string) error {
 		return errors.New("cannot delete system roles")
 	}
 
-	return s.RoleRepo.Delete(ctx, id)
+	if err := s.RoleRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	return nil
 }
 
 func (s *RoleService) AssignPermissions(ctx context.Context, roleId string, req dto.AssignPermissions) error {
@@ -176,7 +182,11 @@ func (s *RoleService) AssignPermissions(ctx context.Context, roleId string, req 
 		}
 	}
 
-	return s.RoleRepo.AssignPermissions(ctx, roleId, req.PermissionIds)
+	if err := s.RoleRepo.AssignPermissions(ctx, roleId, req.PermissionIds); err != nil {
+		return err
+	}
+	permissioncache.DeleteAllUserPermissionKeys(ctx, database.GetRedisClient())
+	return nil
 }
 
 func (s *RoleService) AssignMenus(ctx context.Context, roleId string, req dto.AssignMenus) error {
