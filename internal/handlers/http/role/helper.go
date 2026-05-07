@@ -36,7 +36,7 @@ func roleMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 		return http.StatusForbidden, response.Forbidden(logId, messages.AccessDenied)
 	case strings.HasPrefix(errMsg, "invalid permission ID:"),
 		strings.Contains(errMsg, "menu access is derived"):
-		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, errMsg)
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, errMsg)
 	default:
 		return http.StatusInternalServerError, response.InternalServerError(logId)
 	}

@@ -52,7 +52,7 @@ func IPRateLimitMiddleware(redisClient *redis.Client, prefix string, limit int, 
 				ctx.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
 			}
 
-			res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
+			res := response.Response(http.StatusTooManyRequests, messages.MsgSomethingWrong, logId, nil)
 			res.Error = response.Errors{
 				Code:    http.StatusTooManyRequests,
 				Message: "Too many requests from this IP, please try again later",
@@ -102,7 +102,7 @@ func EndpointRateLimitMiddleware(redisClient *redis.Client, limit int, window ti
 				ctx.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
 			}
 
-			res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
+			res := response.Response(http.StatusTooManyRequests, messages.MsgSomethingWrong, logId, nil)
 			res.Error = response.Errors{
 				Code:    http.StatusTooManyRequests,
 				Message: "Rate limit exceeded for this endpoint",

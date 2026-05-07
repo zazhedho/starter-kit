@@ -35,7 +35,7 @@ func (h *HandlerUser) respondTooManyLoginAttempts(ctx *gin.Context, logId uuid.U
 		message = fmt.Sprintf("Too many login attempts. Try again in %d seconds.", int(ttl.Seconds()))
 	}
 
-	res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
+	res := response.Response(http.StatusTooManyRequests, messages.MsgSomethingWrong, logId, nil)
 	res.Error = response.Errors{Code: http.StatusTooManyRequests, Message: message}
 	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
 }
@@ -49,7 +49,7 @@ func (h *HandlerUser) respondThrottle(ctx *gin.Context, logId uuid.UUID, ttl tim
 		message = "Too many requests. Please try again later."
 	}
 
-	res := response.Response(http.StatusTooManyRequests, messages.MsgFail, logId, nil)
+	res := response.Response(http.StatusTooManyRequests, messages.MsgSomethingWrong, logId, nil)
 	res.Error = response.Errors{Code: http.StatusTooManyRequests, Message: message}
 	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
 }
@@ -113,7 +113,7 @@ func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 	case errMsg == "user not found":
 		return http.StatusNotFound, response.ErrorResponse(http.StatusNotFound, messages.MsgNotFound, logId, "user not found")
 	case errMsg == "invalid or expired token":
-		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, "invalid or expired reset token")
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, "invalid or expired reset token")
 	case strings.HasPrefix(errMsg, "access denied:"),
 		strings.Contains(errMsg, "superadmin"):
 		return http.StatusForbidden, response.Forbidden(logId, messages.AccessDenied)
@@ -122,7 +122,7 @@ func userMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiRe
 	case strings.HasPrefix(errMsg, "invalid role:"),
 		strings.HasPrefix(errMsg, "password must "),
 		strings.HasPrefix(errMsg, "new password must "):
-		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, errMsg)
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, errMsg)
 	default:
 		return http.StatusInternalServerError, response.InternalServerError(logId)
 	}
@@ -141,7 +141,7 @@ func impersonationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiR
 		strings.HasPrefix(errMsg, "target user id"),
 		strings.HasPrefix(errMsg, "original user id"),
 		strings.HasPrefix(errMsg, "current session"):
-		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgFail, logId, errMsg)
+		return http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.MsgSomethingWrong, logId, errMsg)
 	default:
 		return http.StatusInternalServerError, response.InternalServerError(logId)
 	}

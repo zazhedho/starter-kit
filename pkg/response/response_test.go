@@ -19,6 +19,9 @@ func TestResponseSetsStatusFromCode(t *testing.T) {
 	if failed.Status {
 		t.Fatalf("expected failed status for 400, got %+v", failed)
 	}
+	if failed.Message != "Bad Request" || failed.Error.(Errors).Message != "bad request" {
+		t.Fatalf("unexpected failed response message: %+v", failed)
+	}
 }
 
 func TestErrorHelpersHideInternalDetails(t *testing.T) {
@@ -33,17 +36,26 @@ func TestErrorHelpersHideInternalDetails(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected response.Errors, got %#v", got.Error)
 	}
-	if errBody.Code != http.StatusInternalServerError || errBody.Message != "Internal server error" {
+	if errBody.Code != http.StatusInternalServerError || errBody.Message != "Something went wrong. Please contact support with the log ID." {
 		t.Fatalf("unexpected error body: %+v", errBody)
+	}
+	if got.Message != "Something went wrong" {
+		t.Fatalf("unexpected internal server error title: %+v", got)
 	}
 
 	unauthorized := Unauthorized(logID, "login required")
 	if unauthorized.Status || unauthorized.Error.(Errors).Code != http.StatusUnauthorized {
 		t.Fatalf("unexpected unauthorized response: %+v", unauthorized)
 	}
+	if unauthorized.Message != "Unauthorized" || unauthorized.Error.(Errors).Message != "login required" {
+		t.Fatalf("unexpected unauthorized message: %+v", unauthorized)
+	}
 	forbidden := Forbidden(logID, "denied")
 	if forbidden.Status || forbidden.Error.(Errors).Code != http.StatusForbidden {
 		t.Fatalf("unexpected forbidden response: %+v", forbidden)
+	}
+	if forbidden.Message != "Forbidden" || forbidden.Error.(Errors).Message != "denied" {
+		t.Fatalf("unexpected forbidden message: %+v", forbidden)
 	}
 }
 

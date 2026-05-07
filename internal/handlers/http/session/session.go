@@ -103,7 +103,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			ErrorMessage: "The requested session was not found",
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetSessionBySessionID; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusNotFound, messages.MsgFail, logId, nil)
+		res := response.Response(http.StatusNotFound, messages.MsgSomethingWrong, logId, nil)
 		res.Error = "session not found"
 		ctx.JSON(http.StatusNotFound, res)
 		return

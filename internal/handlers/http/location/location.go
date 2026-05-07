@@ -135,14 +135,14 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 	data, err := h.Service.StartSync(reqCtx, req, requestedByUserID)
 	if err != nil {
 		if errors.Is(err, servicelocation.ErrLocationSyncRunning) {
-			res := response.Response(http.StatusConflict, messages.MsgFail, logId, data)
+			res := response.Response(http.StatusConflict, messages.MsgSomethingWrong, logId, data)
 			res.Error = response.Errors{Code: http.StatusConflict, Message: err.Error()}
 			ctx.JSON(http.StatusConflict, res)
 			return
 		}
 
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
-		res := response.Response(http.StatusBadRequest, messages.MsgFail, logId, nil)
+		res := response.Response(http.StatusBadRequest, messages.MsgSomethingWrong, logId, nil)
 		res.Error = response.Errors{Code: http.StatusBadRequest, Message: err.Error()}
 		ctx.JSON(http.StatusBadRequest, res)
 		return

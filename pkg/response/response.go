@@ -44,9 +44,18 @@ type PaginatedResponse struct {
 func Response(code int, msg string, logId uuid.UUID, data interface{}) *ApiResponse {
 	res := new(ApiResponse)
 	res.Id = logId
-	res.Message = msg
 	res.Data = data
 	res.Status = code >= http.StatusOK && code < http.StatusMultipleChoices
+	if res.Status {
+		res.Message = msg
+		return res
+	}
+
+	if msg == "" {
+		msg = http.StatusText(code)
+	}
+	res.Message = errorTitle(code)
+	res.Error = Errors{Code: code, Message: msg}
 
 	return res
 }
@@ -58,15 +67,24 @@ func ErrorResponse(code int, msg string, logId uuid.UUID, publicError string) *A
 }
 
 func InternalServerError(logId uuid.UUID) *ApiResponse {
-	return ErrorResponse(http.StatusInternalServerError, messages.MsgInternal, logId, "Internal server error")
+	res := ErrorResponse(http.StatusInternalServerError, messages.MsgSomethingWrong, logId, messages.MsgInternal)
+	res.Message = messages.MsgSomethingWrong
+	return res
 }
 
 func Unauthorized(logId uuid.UUID, publicError string) *ApiResponse {
-	return ErrorResponse(http.StatusUnauthorized, messages.MsgFail, logId, publicError)
+	return ErrorResponse(http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized), logId, publicError)
 }
 
 func Forbidden(logId uuid.UUID, publicError string) *ApiResponse {
-	return ErrorResponse(http.StatusForbidden, messages.MsgDenied, logId, publicError)
+	return ErrorResponse(http.StatusForbidden, http.StatusText(http.StatusForbidden), logId, publicError)
+}
+
+func errorTitle(code int) string {
+	if title := http.StatusText(code); title != "" {
+		return title
+	}
+	return messages.MsgSomethingWrong
 }
 
 func PaginationResponse(code, total, page, perPage int, logId uuid.UUID, data interface{}) *PaginatedResponse {
