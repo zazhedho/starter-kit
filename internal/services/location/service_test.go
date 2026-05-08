@@ -114,8 +114,7 @@ func (m *locationRepoTestDouble) CreateSyncJob(ctx context.Context, job *domainl
 	if m.createSyncJobErr != nil {
 		return m.createSyncJobErr
 	}
-	copyJob := *job
-	m.createdJob = &copyJob
+	m.createdJob = new(*job)
 	return nil
 }
 func (m *locationRepoTestDouble) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {

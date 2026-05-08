@@ -75,11 +75,10 @@ func (m *permissionRepoMenuTestDouble) GetUserPermissions(ctx context.Context, u
 }
 
 func TestGetUserMenusDerivesMenusFromPermissionResources(t *testing.T) {
-	parentID := "settings"
 	svc := NewMenuService(
 		&menuRepoTestDouble{activeMenus: []domainmenu.MenuItem{
 			{Id: "dashboard", Name: "dashboard", IsActive: true},
-			{Id: "users", Name: "users", ParentId: &parentID, IsActive: true},
+			{Id: "users", Name: "users", ParentId: new("settings"), IsActive: true},
 			{Id: "settings", Name: "settings", IsActive: true},
 		}},
 		&permissionRepoMenuTestDouble{
@@ -102,7 +101,6 @@ func TestGetUserMenusDerivesMenusFromPermissionResources(t *testing.T) {
 
 func TestUpdateOnlyAppliesProvidedMenuFields(t *testing.T) {
 	orderIndex := 42
-	isActive := false
 	parentID := "parent-1"
 	repo := &menuRepoTestDouble{menu: domainmenu.MenuItem{
 		Id:          "menu-1",
@@ -118,7 +116,7 @@ func TestUpdateOnlyAppliesProvidedMenuFields(t *testing.T) {
 		DisplayName: "User Management",
 		ParentId:    &parentID,
 		OrderIndex:  &orderIndex,
-		IsActive:    &isActive,
+		IsActive:    new(false),
 	})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)

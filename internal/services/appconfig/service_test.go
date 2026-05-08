@@ -252,8 +252,7 @@ func TestAppConfigServicePassThroughMethodsAndIsEnabled(t *testing.T) {
 		t.Fatalf("is enabled: enabled=%v err=%v", enabled, err)
 	}
 
-	inactive := false
-	updated, err := service.Update(context.Background(), "cfg-1", dto.UpdateAppConfig{Value: "false", IsActive: &inactive})
+	updated, err := service.Update(context.Background(), "cfg-1", dto.UpdateAppConfig{Value: "false", IsActive: new(false)})
 	if err != nil {
 		t.Fatalf("update inactive: %v", err)
 	}

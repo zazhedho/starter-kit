@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"gorm.io/gorm"
 	"starter-kit/internal/authscope"
 	domainauth "starter-kit/internal/domain/auth"
 	domainsession "starter-kit/internal/domain/session"
@@ -24,6 +23,8 @@ import (
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/messages"
 	"starter-kit/utils"
+
+	"gorm.io/gorm"
 )
 
 type userServiceTestDouble struct {
@@ -857,8 +858,7 @@ func TestUserHandlerNotFoundAndValidationErrorBranches(t *testing.T) {
 	handler.StopImpersonation(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusInternalServerError)
 
-	notImpersonated := authscope.New("user-1", "Jane", "viewer", nil)
-	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/stop-impersonation", "", &notImpersonated)
+	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/stop-impersonation", "", new(authscope.New("user-1", "Jane", "viewer", nil)))
 	handler.StopImpersonation(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusBadRequest)
 }

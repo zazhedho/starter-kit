@@ -177,7 +177,6 @@ func TestGetAppConfigByIDReturnsOK(t *testing.T) {
 }
 
 func TestUpdateAppConfigReturnsOKAndWritesAudit(t *testing.T) {
-	active := true
 	auditSvc := &auditServiceAppConfigTestDouble{}
 	service := &appConfigServiceTestDouble{config: domainappconfig.AppConfig{
 		Id:        "550e8400-e29b-41d4-a716-446655440000",
@@ -189,7 +188,7 @@ func TestUpdateAppConfigReturnsOKAndWritesAudit(t *testing.T) {
 
 	rec := performAppConfigRequest(http.MethodPut, "/configs/:id", "/configs/550e8400-e29b-41d4-a716-446655440000", dto.UpdateAppConfig{
 		Value:    "true",
-		IsActive: &active,
+		IsActive: new(true),
 	}, handler.Update)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())

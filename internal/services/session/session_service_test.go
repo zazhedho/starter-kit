@@ -19,8 +19,7 @@ type sessionRepoTestDouble struct {
 }
 
 func (m *sessionRepoTestDouble) Create(ctx context.Context, session *domainsession.Session) error {
-	copySession := *session
-	m.session = &copySession
+	m.session = new(*session)
 	return nil
 }
 func (m *sessionRepoTestDouble) GetBySessionID(ctx context.Context, sessionID string) (*domainsession.Session, error) {
