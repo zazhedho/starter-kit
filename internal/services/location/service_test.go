@@ -20,6 +20,8 @@ type locationRepoTestDouble struct {
 	cities    []domainlocation.City
 	districts []domainlocation.District
 	villages  []domainlocation.Village
+	city      domainlocation.City
+	district  domainlocation.District
 	listErr   error
 
 	activeJob    domainlocation.SyncJob
@@ -77,10 +79,26 @@ func (m *locationRepoTestDouble) GetProvinceByCode(ctx context.Context, code str
 	return domainlocation.Province{}, errors.New("not implemented")
 }
 func (m *locationRepoTestDouble) GetCityByCode(ctx context.Context, code string) (domainlocation.City, error) {
-	return domainlocation.City{}, errors.New("not implemented")
+	if m.city.Code != "" {
+		return m.city, nil
+	}
+	for _, city := range m.cities {
+		if city.Code == code {
+			return city, nil
+		}
+	}
+	return domainlocation.City{}, gorm.ErrRecordNotFound
 }
 func (m *locationRepoTestDouble) GetDistrictByCode(ctx context.Context, code string) (domainlocation.District, error) {
-	return domainlocation.District{}, errors.New("not implemented")
+	if m.district.Code != "" {
+		return m.district, nil
+	}
+	for _, district := range m.districts {
+		if district.Code == code {
+			return district, nil
+		}
+	}
+	return domainlocation.District{}, gorm.ErrRecordNotFound
 }
 func (m *locationRepoTestDouble) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
 	if m.upsertProvinceErr != nil {
@@ -211,6 +229,57 @@ func TestLocationServiceReadMethodsReturnRepositoryErrors(t *testing.T) {
 	}
 }
 
+func TestLocationServiceReadMethodsFallbackToLocationServiceWhenRepositoryEmpty(t *testing.T) {
+	repo := &locationRepoTestDouble{
+		city:     domainlocation.City{Code: "1671", ProvinceCode: "16", Name: "Palembang"},
+		district: domainlocation.District{Code: "167101", CityCode: "1671", Name: "Ilir Timur I"},
+	}
+	svc := &LocationService{
+		Repo: repo,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body := `{}`
+			switch {
+			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"16","name":"Sumatera Selatan"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/regencies"):
+				if got := req.URL.Query().Get("province_code"); got != "16" {
+					t.Fatalf("expected province_code 16, got %q", got)
+				}
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Kota Palembang"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/districts"):
+				if got := req.URL.Query().Get("regency_code"); got != "71" {
+					t.Fatalf("expected regency_code 71, got %q", got)
+				}
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Ilir Timur I"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/villages"):
+				if got := req.URL.Query().Get("district_code"); got != "01" {
+					t.Fatalf("expected district_code 01, got %q", got)
+				}
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"1001","name":"Sungai Pangeran"}]}`
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})},
+	}
+	ctx := context.Background()
+
+	provinces, err := svc.GetProvince(ctx)
+	if err != nil || len(provinces) != 1 || provinces[0].Code != "16" {
+		t.Fatalf("province fallback failed: rows=%+v err=%v", provinces, err)
+	}
+	cities, err := svc.GetCity(ctx, "16")
+	if err != nil || len(cities) != 1 || cities[0].Code != "1671" {
+		t.Fatalf("city fallback failed: rows=%+v err=%v", cities, err)
+	}
+	districts, err := svc.GetDistrict(ctx, "1671")
+	if err != nil || len(districts) != 1 || districts[0].Code != "167101" {
+		t.Fatalf("district fallback failed: rows=%+v err=%v", districts, err)
+	}
+	villages, err := svc.GetVillage(ctx, "167101")
+	if err != nil || len(villages) != 1 || villages[0].Code != "1671011001" {
+		t.Fatalf("village fallback failed: rows=%+v err=%v", villages, err)
+	}
+}
+
 func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound})
 
@@ -336,7 +405,7 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 	svc := &LocationService{HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"11":"Aceh"}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"11","full_code":"11","name":"Aceh","level":"province"}]}`)),
 			Header:     make(http.Header),
 		}, nil
 	})}}
@@ -385,14 +454,26 @@ func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			body := `{}`
 			switch {
-			case strings.Contains(req.URL.Path, "list_pro"):
-				body = `{"31":"DKI Jakarta"}`
-			case strings.Contains(req.URL.Path, "list_kab"):
-				body = `{"71":"Jakarta Selatan"}`
-			case strings.Contains(req.URL.Path, "list_kec"):
-				body = `{"01":"Tebet"}`
-			case strings.Contains(req.URL.Path, "list_des"):
-				body = `{"01":"Tebet Barat"}`
+			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","full_code":"31","name":"DKI Jakarta","level":"province"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/regencies"):
+				if got := req.URL.Query().Get("province_code"); got != "31" {
+					t.Fatalf("expected province_code 31, got %q", got)
+				}
+				if got := req.URL.Query().Get("code_format"); got != "short" {
+					t.Fatalf("expected short code format, got %q", got)
+				}
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","full_code":"31.71","name":"Jakarta Selatan","level":"regency","parent_code":"31"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/districts"):
+				if got := req.URL.Query().Get("regency_code"); got != "71" {
+					t.Fatalf("expected regency_code 71, got %q", got)
+				}
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01","name":"Tebet","level":"district","parent_code":"31.71"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/villages"):
+				if got := req.URL.Query().Get("district_code"); got != "01" {
+					t.Fatalf("expected district_code 01, got %q", got)
+				}
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01.0001","name":"Tebet Barat","level":"village","parent_code":"31.71.01"}]}`
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -441,14 +522,14 @@ func TestLocationSyncIndividualLevels(t *testing.T) {
 			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				body := `{}`
 				switch {
-				case strings.Contains(req.URL.Path, "list_pro"):
-					body = `{"31":"DKI Jakarta"}`
-				case strings.Contains(req.URL.Path, "list_kab"):
-					body = `{"71":"Jakarta Selatan"}`
-				case strings.Contains(req.URL.Path, "list_kec"):
-					body = `{"01":"Tebet"}`
-				case strings.Contains(req.URL.Path, "list_des"):
-					body = `{"01":"Tebet Barat"}`
+				case strings.Contains(req.URL.Path, "/api/locations/provinces"):
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
+				case strings.Contains(req.URL.Path, "/api/locations/regencies"):
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
+				case strings.Contains(req.URL.Path, "/api/locations/districts"):
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
+				case strings.Contains(req.URL.Path, "/api/locations/villages"):
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
@@ -491,15 +572,15 @@ func TestLocationSyncUpsertErrors(t *testing.T) {
 		return &LocationService{
 			Repo: repo,
 			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				body := `{"31":"DKI Jakarta"}`
-				if strings.Contains(req.URL.Path, "list_kab") {
-					body = `{"71":"Jakarta Selatan"}`
+				body := `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
+				if strings.Contains(req.URL.Path, "/api/locations/regencies") {
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
 				}
-				if strings.Contains(req.URL.Path, "list_kec") {
-					body = `{"01":"Tebet"}`
+				if strings.Contains(req.URL.Path, "/api/locations/districts") {
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
 				}
-				if strings.Contains(req.URL.Path, "list_des") {
-					body = `{"01":"Tebet Barat"}`
+				if strings.Contains(req.URL.Path, "/api/locations/villages") {
+					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 			})},
@@ -533,7 +614,7 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	svc := &LocationService{
 		Repo: repo,
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"31":"DKI Jakarta"}`)), Header: make(http.Header)}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`)), Header: make(http.Header)}, nil
 		})},
 	}
 

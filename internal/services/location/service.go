@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const defaultLocationServiceBaseURL = "https://location-service-y7si.onrender.com"
+
 type LocationService struct {
 	Repo       interfacelocation.RepoLocationInterface
 	Redis      *redis.Client
@@ -44,7 +46,7 @@ func NewLocationService(repo interfacelocation.RepoLocationInterface, redisClien
 	service := &LocationService{
 		Repo:       repo,
 		Redis:      redisClient,
-		HTTPClient: &http.Client{Timeout: 20 * time.Second},
+		HTTPClient: &http.Client{Timeout: locationServiceTimeout()},
 	}
 
 	if err := service.Repo.FailActiveSyncJobs(context.Background(), "Service restarted before the previous location sync completed."); err != nil {
@@ -57,7 +59,9 @@ func NewLocationService(repo interfacelocation.RepoLocationInterface, redisClien
 func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, error) {
 	cacheKey := locationcache.ProvinceKey()
 	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
-		return data, nil
+		if len(data) > 0 {
+			return data, nil
+		}
 	}
 
 	rows, err := s.Repo.ListProvinces(ctx)
@@ -66,14 +70,26 @@ func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, erro
 	}
 
 	locations := mapProvinces(rows)
-	locationcache.Set(ctx, s.Redis, cacheKey, locations)
+	if len(locations) == 0 {
+		fetched, fetchErr := s.fetchProvinces(ctx, "")
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if err := s.Repo.UpsertProvinces(ctx, fetched); err != nil {
+			return nil, err
+		}
+		locations = mapProvinces(fetched)
+	}
+	setLocationCache(ctx, s.Redis, cacheKey, locations)
 	return locations, nil
 }
 
 func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error) {
 	cacheKey := locationcache.CityKey(provinceCode)
 	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
-		return data, nil
+		if len(data) > 0 {
+			return data, nil
+		}
 	}
 
 	rows, err := s.Repo.ListCitiesByProvince(ctx, provinceCode)
@@ -82,14 +98,26 @@ func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]d
 	}
 
 	locations := mapCities(rows)
-	locationcache.Set(ctx, s.Redis, cacheKey, locations)
+	if len(locations) == 0 {
+		fetched, fetchErr := s.fetchCities(ctx, "", provinceCode)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if err := s.Repo.UpsertCities(ctx, fetched); err != nil {
+			return nil, err
+		}
+		locations = mapCities(fetched)
+	}
+	setLocationCache(ctx, s.Redis, cacheKey, locations)
 	return locations, nil
 }
 
 func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error) {
 	cacheKey := locationcache.DistrictKey(cityCode)
 	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
-		return data, nil
+		if len(data) > 0 {
+			return data, nil
+		}
 	}
 
 	rows, err := s.Repo.ListDistrictsByCity(ctx, cityCode)
@@ -98,14 +126,30 @@ func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]d
 	}
 
 	locations := mapDistricts(rows)
-	locationcache.Set(ctx, s.Redis, cacheKey, locations)
+	if len(locations) == 0 {
+		city, cityErr := s.Repo.GetCityByCode(ctx, cityCode)
+		if cityErr != nil {
+			return nil, cityErr
+		}
+		fetched, fetchErr := s.fetchDistricts(ctx, "", city.ProvinceCode, cityCode)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if err := s.Repo.UpsertDistricts(ctx, fetched); err != nil {
+			return nil, err
+		}
+		locations = mapDistricts(fetched)
+	}
+	setLocationCache(ctx, s.Redis, cacheKey, locations)
 	return locations, nil
 }
 
 func (s *LocationService) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
 	cacheKey := locationcache.VillageKey(districtCode)
 	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
-		return data, nil
+		if len(data) > 0 {
+			return data, nil
+		}
 	}
 
 	rows, err := s.Repo.ListVillagesByDistrict(ctx, districtCode)
@@ -114,7 +158,25 @@ func (s *LocationService) GetVillage(ctx context.Context, districtCode string) (
 	}
 
 	locations := mapVillages(rows)
-	locationcache.Set(ctx, s.Redis, cacheKey, locations)
+	if len(locations) == 0 {
+		district, districtErr := s.Repo.GetDistrictByCode(ctx, districtCode)
+		if districtErr != nil {
+			return nil, districtErr
+		}
+		city, cityErr := s.Repo.GetCityByCode(ctx, district.CityCode)
+		if cityErr != nil {
+			return nil, cityErr
+		}
+		fetched, fetchErr := s.fetchVillages(ctx, "", city.ProvinceCode, district.CityCode, districtCode)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if err := s.Repo.UpsertVillages(ctx, fetched); err != nil {
+			return nil, err
+		}
+		locations = mapVillages(fetched)
+	}
+	setLocationCache(ctx, s.Redis, cacheKey, locations)
 	return locations, nil
 }
 
@@ -423,7 +485,8 @@ func (s *LocationService) syncAll(ctx context.Context, year string, progress fun
 }
 
 func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
-	dataMap, err := s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_pro?thn=%s", year), "province")
+	_ = year
+	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/provinces", nil), "province")
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +505,12 @@ func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]do
 }
 
 func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
-	dataMap, err := s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_kab?thn=%s&lvl=11&pro=%s", year, provinceCode), "city")
+	_ = year
+	cleanProvinceCode := normalizeCodeSegment(provinceCode)
+	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/regencies", map[string]string{
+		"province_code": cleanProvinceCode,
+		"code_format":   "short",
+	}), "city")
 	if err != nil {
 		return nil, err
 	}
@@ -451,8 +519,8 @@ func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode st
 	now := time.Now()
 	for code, name := range dataMap {
 		items = append(items, domainlocation.City{
-			Code:         normalizeChildCode(provinceCode, code),
-			ProvinceCode: provinceCode,
+			Code:         normalizeChildCode(cleanProvinceCode, code),
+			ProvinceCode: cleanProvinceCode,
 			Name:         name,
 			CreatedAt:    now,
 		})
@@ -462,17 +530,15 @@ func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode st
 }
 
 func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
-	var (
-		dataMap map[string]string
-		err     error
-	)
-
-	for _, cityParam := range childCodeCandidates(provinceCode, cityCode) {
-		dataMap, err = s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_kec?thn=%s&lvl=12&pro=%s&kab=%s", year, provinceCode, cityParam), "district")
-		if err == nil {
-			break
-		}
-	}
+	_ = year
+	cleanProvinceCode := normalizeCodeSegment(provinceCode)
+	cleanCityCode := normalizeCodeSegment(cityCode)
+	cityParam := childCodeParam(cleanProvinceCode, cleanCityCode)
+	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/districts", map[string]string{
+		"province_code": cleanProvinceCode,
+		"regency_code":  cityParam,
+		"code_format":   "short",
+	}), "district")
 	if err != nil {
 		return nil, err
 	}
@@ -481,8 +547,8 @@ func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode
 	now := time.Now()
 	for code, name := range dataMap {
 		items = append(items, domainlocation.District{
-			Code:      normalizeChildCode(cityCode, code),
-			CityCode:  cityCode,
+			Code:      normalizeChildCode(cleanCityCode, code),
+			CityCode:  cleanCityCode,
 			Name:      name,
 			CreatedAt: now,
 		})
@@ -492,25 +558,16 @@ func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode
 }
 
 func (s *LocationService) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
-	var (
-		dataMap map[string]string
-		err     error
-	)
-
-	cityCandidates := childCodeCandidates(provinceCode, cityCode)
-	districtCandidates := childCodeCandidates(cityCode, districtCode)
-
-	for _, cityParam := range cityCandidates {
-		for _, districtParam := range districtCandidates {
-			dataMap, err = s.fetchLocationMap(ctx, fmt.Sprintf("https://sipedas.pertanian.go.id/api/wilayah/list_des?thn=%s&lvl=13&pro=%s&kab=%s&kec=%s", year, provinceCode, cityParam, districtParam), "village")
-			if err == nil {
-				break
-			}
-		}
-		if err == nil {
-			break
-		}
-	}
+	_ = year
+	cleanProvinceCode := normalizeCodeSegment(provinceCode)
+	cleanCityCode := normalizeCodeSegment(cityCode)
+	cleanDistrictCode := normalizeCodeSegment(districtCode)
+	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/villages", map[string]string{
+		"province_code": cleanProvinceCode,
+		"regency_code":  childCodeParam(cleanProvinceCode, cleanCityCode),
+		"district_code": childCodeParam(cleanCityCode, cleanDistrictCode),
+		"code_format":   "short",
+	}), "village")
 	if err != nil {
 		return nil, err
 	}
@@ -519,8 +576,8 @@ func (s *LocationService) fetchVillages(ctx context.Context, year, provinceCode,
 	now := time.Now()
 	for code, name := range dataMap {
 		items = append(items, domainlocation.Village{
-			Code:         normalizeChildCode(districtCode, code),
-			DistrictCode: districtCode,
+			Code:         normalizeChildCode(cleanDistrictCode, code),
+			DistrictCode: cleanDistrictCode,
 			Name:         name,
 			CreatedAt:    now,
 		})
