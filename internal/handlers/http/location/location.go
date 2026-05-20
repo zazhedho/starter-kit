@@ -131,8 +131,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 		return
 	}
 
-	requestedByUserID, _ := utils.GetActorContext(ctx)
-	data, err := h.Service.StartSync(reqCtx, req, requestedByUserID)
+	data, err := h.Service.StartSync(reqCtx, req)
 	if err != nil {
 		if errors.Is(err, servicelocation.ErrLocationSyncRunning) {
 			res := response.Response(http.StatusConflict, messages.MsgSomethingWrong, logId, data)

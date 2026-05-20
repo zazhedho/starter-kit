@@ -92,6 +92,20 @@ func (s Scope) Has(resource, action string) bool {
 	return ok
 }
 
+func (s Scope) ActorUserID() string {
+	if s.IsImpersonated && strings.TrimSpace(s.OriginalUserID) != "" {
+		return strings.TrimSpace(s.OriginalUserID)
+	}
+	return strings.TrimSpace(s.UserID)
+}
+
+func (s Scope) ActorRole() string {
+	if s.IsImpersonated && strings.TrimSpace(s.OriginalRole) != "" {
+		return strings.TrimSpace(s.OriginalRole)
+	}
+	return strings.TrimSpace(s.Role)
+}
+
 func normalizePermissionKey(permission string) string {
 	parts := strings.SplitN(strings.TrimSpace(permission), ":", 2)
 	if len(parts) != 2 {

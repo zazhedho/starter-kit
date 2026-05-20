@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"starter-kit/internal/authscope"
 	locationcache "starter-kit/internal/cache/location"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
@@ -180,11 +182,12 @@ func (s *LocationService) GetVillage(ctx context.Context, districtCode string) (
 	return locations, nil
 }
 
-func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error) {
+func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error) {
 	normalizedReq, err := s.normalizeAndValidateRequest(req)
 	if err != nil {
 		return dto.LocationSyncJob{}, err
 	}
+	requestedByUserID := authscope.FromContext(ctx).ActorUserID()
 
 	activeJob, err := s.Repo.GetActiveSyncJob(ctx)
 	switch {

@@ -2,6 +2,8 @@ package handlercommon
 
 import (
 	"fmt"
+
+	"starter-kit/internal/authscope"
 	domainaudit "starter-kit/internal/domain/audit"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	"starter-kit/pkg/logger"
@@ -15,12 +17,12 @@ func WriteAudit(ctx *gin.Context, auditService interfaceaudit.ServiceAuditInterf
 		return
 	}
 
-	actorUserID, actorRole := utils.GetActorContext(ctx)
-	if event.ActorUserID == "" && actorUserID != "" {
-		event.ActorUserID = actorUserID
+	scopeData := authscope.FromContext(ctx.Request.Context())
+	if event.ActorUserID == "" && scopeData.ActorUserID() != "" {
+		event.ActorUserID = scopeData.ActorUserID()
 	}
-	if event.ActorRole == "" && actorRole != "" {
-		event.ActorRole = actorRole
+	if event.ActorRole == "" && scopeData.ActorRole() != "" {
+		event.ActorRole = scopeData.ActorRole()
 	}
 	event.RequestID = utils.GetRequestID(ctx)
 	event.IPAddress = ctx.ClientIP()

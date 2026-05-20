@@ -62,3 +62,20 @@ func TestSuperadminHasEveryPermission(t *testing.T) {
 		t.Fatal("expected superadmin to bypass permission map")
 	}
 }
+
+func TestActorUserIDAndRolePreferOriginalImpersonator(t *testing.T) {
+	scope := NewFromClaims(map[string]interface{}{
+		"user_id":          "member-1",
+		"role":             "member",
+		"is_impersonated":  true,
+		"original_user_id": "admin-1",
+		"original_role":    "superadmin",
+	}, nil)
+
+	if scope.ActorUserID() != "admin-1" {
+		t.Fatalf("expected original actor user id, got %q", scope.ActorUserID())
+	}
+	if scope.ActorRole() != "superadmin" {
+		t.Fatalf("expected original actor role, got %q", scope.ActorRole())
+	}
+}

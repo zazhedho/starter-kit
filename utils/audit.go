@@ -20,26 +20,6 @@ func GetRequestID(ctx *gin.Context) string {
 	return GenerateLogId(ctx).String()
 }
 
-func GetActorContext(ctx *gin.Context) (string, string) {
-	authData := GetAuthData(ctx)
-	if authData == nil {
-		return "", ""
-	}
-
-	isImpersonated, _ := authData["is_impersonated"].(bool)
-	if isImpersonated {
-		originalUserID := strings.TrimSpace(InterfaceString(authData["original_user_id"]))
-		originalRole := strings.TrimSpace(InterfaceString(authData["original_role"]))
-		if originalUserID != "" {
-			return originalUserID, originalRole
-		}
-	}
-
-	userID := strings.TrimSpace(InterfaceString(authData["user_id"]))
-	role := strings.TrimSpace(InterfaceString(authData["role"]))
-	return userID, role
-}
-
 func GetImpersonationMetadata(ctx *gin.Context) map[string]interface{} {
 	authData := GetAuthData(ctx)
 	if authData == nil {

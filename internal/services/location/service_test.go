@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+
+	"starter-kit/internal/authscope"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	"strings"
@@ -283,22 +285,22 @@ func TestLocationServiceReadMethodsFallbackToLocationServiceWhenRepositoryEmpty(
 func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound})
 
-	_, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "city"}, "user-1")
+	_, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "city"})
 	if err == nil || err.Error() != "province_code is required for city sync" {
 		t.Fatalf("expected city sync validation error, got %v", err)
 	}
 
-	_, err = svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "district", ProvinceCode: "31"}, "user-1")
+	_, err = svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "district", ProvinceCode: "31"})
 	if err == nil || err.Error() != "province_code and city_code are required for district sync" {
 		t.Fatalf("expected district sync validation error, got %v", err)
 	}
 
-	_, err = svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "village", ProvinceCode: "31", CityCode: "3171"}, "user-1")
+	_, err = svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "village", ProvinceCode: "31", CityCode: "3171"})
 	if err == nil || err.Error() != "province_code, city_code, and district_code are required for village sync" {
 		t.Fatalf("expected village sync validation error, got %v", err)
 	}
 
-	_, err = svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "unknown"}, "user-1")
+	_, err = svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "unknown"})
 	if err == nil || err.Error() != "invalid sync level" {
 		t.Fatalf("expected invalid level error, got %v", err)
 	}
@@ -318,7 +320,7 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 		},
 	})
 
-	got, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "all", Year: "2025"}, "user-1")
+	got, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2025"})
 	if !errors.Is(err, ErrLocationSyncRunning) {
 		t.Fatalf("expected ErrLocationSyncRunning, got %v", err)
 	}
@@ -332,7 +334,7 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 	repo := &locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound}
 	svc := NewLocationService(repo)
 
-	got, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "province"}, "user-1")
+	got, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "province"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -350,12 +352,12 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 
 func TestStartSyncRepositoryErrors(t *testing.T) {
 	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: errors.New("database down")})
-	if _, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
+	if _, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2026"}); err == nil {
 		t.Fatal("expected active job lookup error")
 	}
 
 	svc = NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound, createSyncJobErr: errors.New("database down")})
-	if _, err := svc.StartSync(context.Background(), dto.SyncLocationRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
+	if _, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2026"}); err == nil {
 		t.Fatal("expected create sync job error")
 	}
 }
@@ -371,6 +373,10 @@ func TestLocationHelperCacheKeysAndCodeNormalization(t *testing.T) {
 	if got := childCodeCandidates("11", "1101"); !reflect.DeepEqual(got, wantCandidates) {
 		t.Fatalf("expected %v, got %v", wantCandidates, got)
 	}
+}
+
+func locationTestActorContext(userID string) context.Context {
+	return authscope.WithContext(context.Background(), authscope.New(userID, "admin", "admin", nil))
 }
 
 func TestLocationMapAndSortHelpers(t *testing.T) {

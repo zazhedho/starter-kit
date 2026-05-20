@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+
+	"starter-kit/internal/authscope"
 	"starter-kit/internal/dto"
 	servicelocation "starter-kit/internal/services/location"
 	"starter-kit/utils"
@@ -36,9 +38,9 @@ func (m *locationServiceTestDouble) GetDistrict(ctx context.Context, cityCode st
 func (m *locationServiceTestDouble) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
 	return m.locations, m.err
 }
-func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error) {
+func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error) {
 	m.startReq = req
-	m.requested = requestedByUserID
+	m.requested = authscope.FromContext(ctx).ActorUserID()
 	return m.job, m.err
 }
 func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error) {
@@ -51,6 +53,7 @@ func performLocationRequest(method, routePath, requestPath string, body interfac
 	router.Handle(method, routePath, func(ctx *gin.Context) {
 		if authData != nil {
 			ctx.Set(utils.CtxKeyAuthData, authData)
+			ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.NewFromClaims(authData, nil)))
 		}
 		handler(ctx)
 	})

@@ -8,6 +8,6 @@ type ServiceLocationInterface interface {
 	GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error)
 	GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error)
 	GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error)
-	StartSync(ctx context.Context, req dto.SyncLocationRequest, requestedByUserID string) (dto.LocationSyncJob, error)
+	StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error)
 	GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error)
 }
