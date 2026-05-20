@@ -3,6 +3,7 @@ package filter
 import (
 	"encoding/json"
 	"fmt"
+	"starter-kit/utils"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -41,7 +42,7 @@ func GetBaseParams(ctx *gin.Context, defOrderBy, defOrderDirection string, defLi
 		req.OrderBy = defOrderBy
 	}
 	validDirs := map[string]bool{"asc": true, "desc": true}
-	if !validDirs[strings.ToLower(req.OrderDirection)] {
+	if !validDirs[utils.NormalizeKey(req.OrderDirection)] {
 		req.OrderDirection = defOrderDirection
 	}
 

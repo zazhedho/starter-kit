@@ -1,7 +1,6 @@
 package config
 
 import (
-	"strings"
 	"time"
 
 	"starter-kit/utils"
@@ -17,26 +16,9 @@ type OTPConfig struct {
 }
 
 func LoadOTPConfig() OTPConfig {
-	ttl := time.Duration(utils.GetEnv("OTP_TTL_SECONDS", 300)) * time.Second
-	if value := strings.TrimSpace(utils.GetEnv("OTP_TTL", "")); value != "" {
-		if parsed, err := time.ParseDuration(value); err == nil {
-			ttl = parsed
-		}
-	}
-
-	cooldown := time.Duration(utils.GetEnv("OTP_COOLDOWN_SECONDS", 60)) * time.Second
-	if value := strings.TrimSpace(utils.GetEnv("OTP_COOLDOWN", "")); value != "" {
-		if parsed, err := time.ParseDuration(value); err == nil {
-			cooldown = parsed
-		}
-	}
-
-	rateWindow := time.Duration(utils.GetEnv("OTP_RATE_WINDOW_SECONDS", int(ttl.Seconds()))) * time.Second
-	if value := strings.TrimSpace(utils.GetEnv("OTP_RATE_WINDOW", "")); value != "" {
-		if parsed, err := time.ParseDuration(value); err == nil {
-			rateWindow = parsed
-		}
-	}
+	ttl := utils.DurationFromEnv([]string{"OTP_TTL"}, time.Duration(utils.GetEnv("OTP_TTL_SECONDS", 300))*time.Second)
+	cooldown := utils.DurationFromEnv([]string{"OTP_COOLDOWN"}, time.Duration(utils.GetEnv("OTP_COOLDOWN_SECONDS", 60))*time.Second)
+	rateWindow := utils.DurationFromEnv([]string{"OTP_RATE_WINDOW"}, time.Duration(utils.GetEnv("OTP_RATE_WINDOW_SECONDS", int(ttl.Seconds())))*time.Second)
 
 	return OTPConfig{
 		TTL:         ttl,
@@ -44,6 +26,6 @@ func LoadOTPConfig() OTPConfig {
 		RateLimit:   utils.GetEnv("OTP_RATE_LIMIT", 5),
 		RateWindow:  rateWindow,
 		Cooldown:    cooldown,
-		Secret:      strings.TrimSpace(utils.GetEnv("OTP_SECRET", "otp-secret")),
+		Secret:      utils.GetEnv("OTP_SECRET", "otp-secret"),
 	}
 }

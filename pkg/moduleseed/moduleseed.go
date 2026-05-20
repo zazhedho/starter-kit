@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"starter-kit/utils"
 	"strings"
 )
 
@@ -22,12 +23,12 @@ type Definition struct {
 }
 
 func (d Definition) Normalize() Definition {
-	d.Name = strings.TrimSpace(strings.ToLower(d.Name))
+	d.Name = utils.NormalizeKey(d.Name)
 	d.DisplayName = strings.TrimSpace(d.DisplayName)
 	d.Path = strings.TrimSpace(d.Path)
 	d.Icon = strings.TrimSpace(d.Icon)
-	d.ParentName = strings.TrimSpace(strings.ToLower(d.ParentName))
-	d.Resource = strings.TrimSpace(strings.ToLower(d.Resource))
+	d.ParentName = utils.NormalizeKey(d.ParentName)
+	d.Resource = utils.NormalizeKey(d.Resource)
 
 	if d.Resource == "" {
 		d.Resource = d.Name
@@ -38,7 +39,7 @@ func (d Definition) Normalize() Definition {
 
 	normalizedActions := make([]string, 0, len(d.Actions))
 	for _, action := range d.Actions {
-		action = strings.TrimSpace(strings.ToLower(action))
+		action = utils.NormalizeKey(action)
 		if action == "" || slices.Contains(normalizedActions, action) {
 			continue
 		}
@@ -48,7 +49,7 @@ func (d Definition) Normalize() Definition {
 
 	normalizedRoles := make([]string, 0, len(d.GrantRoles))
 	for _, role := range d.GrantRoles {
-		role = strings.TrimSpace(strings.ToLower(role))
+		role = utils.NormalizeKey(role)
 		if role == "" || slices.Contains(normalizedRoles, role) {
 			continue
 		}
@@ -166,22 +167,11 @@ func renderRolePermissionInsert(def Definition) string {
 }
 
 func permissionName(action, moduleName string) string {
-	return fmt.Sprintf("%s_%s", strings.ToLower(strings.TrimSpace(action)), strings.ToLower(strings.TrimSpace(moduleName)))
+	return fmt.Sprintf("%s_%s", utils.NormalizeKey(action), utils.NormalizeKey(moduleName))
 }
 
 func permissionDisplayName(action, displayName string) string {
-	return fmt.Sprintf("%s %s", humanize(action), displayName)
-}
-
-func humanize(input string) string {
-	parts := strings.Fields(strings.ReplaceAll(strings.TrimSpace(input), "_", " "))
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(part[:1]) + part[1:]
-	}
-	return strings.Join(parts, " ")
+	return fmt.Sprintf("%s %s", utils.TitleHumanized(action), displayName)
 }
 
 func quote(value string) string {

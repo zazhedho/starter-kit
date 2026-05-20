@@ -73,3 +73,13 @@ func GetEnv[T any](key string, def T) T {
 
 	return def
 }
+
+func DurationFromEnv(keys []string, fallback time.Duration) time.Duration {
+	for _, key := range keys {
+		value := GetEnv(key, time.Duration(0))
+		if value > 0 {
+			return value
+		}
+	}
+	return fallback
+}

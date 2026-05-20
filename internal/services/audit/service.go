@@ -38,19 +38,19 @@ func (s *AuditService) Store(ctx context.Context, req domainaudit.AuditEvent) er
 		occurredAt = time.Now()
 	}
 
-	before := sanitizePayload(req.BeforeData)
-	after := sanitizePayload(req.AfterData)
-	meta := sanitizePayload(req.Metadata)
+	before := utils.RedactSensitivePayload(req.BeforeData)
+	after := utils.RedactSensitivePayload(req.AfterData)
+	meta := utils.RedactSensitivePayload(req.Metadata)
 
 	data := domainaudit.AuditTrail{
 		ID:           utils.CreateUUID(),
 		OccurredAt:   occurredAt,
 		ActorUserID:  utils.NormalizeUUIDPointer(req.ActorUserID),
 		ActorRole:    strings.TrimSpace(req.ActorRole),
-		Action:       humanizeAuditValue(req.Action),
+		Action:       utils.HumanizeKey(req.Action),
 		Resource:     strings.TrimSpace(req.Resource),
 		ResourceID:   strings.TrimSpace(req.ResourceID),
-		Status:       humanizeAuditValue(req.Status),
+		Status:       utils.HumanizeKey(req.Status),
 		Message:      strings.TrimSpace(req.Message),
 		ErrorMessage: strings.TrimSpace(req.ErrorMessage),
 		RequestID:    strings.TrimSpace(req.RequestID),

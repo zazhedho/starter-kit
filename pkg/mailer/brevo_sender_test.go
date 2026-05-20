@@ -1,6 +1,7 @@
 package mailer
 
 import (
+	"starter-kit/utils"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestBuildMailerMessagesEscapeHTMLAndIncludeFallbackMinutes(t *testing.T) {
 	}
 }
 
-func TestExtractEmailAndParseDurationEnv(t *testing.T) {
+func TestExtractEmailAndDurationFromEnv(t *testing.T) {
 	if got := extractEmail("Starter <noreply@example.com>"); got != "noreply@example.com" {
 		t.Fatalf("unexpected extracted email: %q", got)
 	}
@@ -66,7 +67,7 @@ func TestExtractEmailAndParseDurationEnv(t *testing.T) {
 
 	t.Setenv("DURATION_A", "")
 	t.Setenv("DURATION_B", "120")
-	if got := parseDurationEnv([]string{"DURATION_A", "DURATION_B"}, time.Minute); got != 120*time.Second {
+	if got := utils.DurationFromEnv([]string{"DURATION_A", "DURATION_B"}, time.Minute); got != 120*time.Second {
 		t.Fatalf("expected duration from seconds, got %v", got)
 	}
 }

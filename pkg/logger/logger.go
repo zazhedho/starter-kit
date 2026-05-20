@@ -55,10 +55,10 @@ func WriteLog(level int, msg ...any) {
 
 	logger := getLogger()
 	attrs := []slog.Attr{
-		slog.String("server_ip", os.Getenv("ServerIP")),
+		slog.String("server_ip", utils.GetEnv("ServerIP", "")),
 	}
 	attrs = append(attrs, callerAttrs(2)...)
-	if node := os.Getenv("NODE"); node != "" {
+	if node := utils.GetEnv("NODE", ""); node != "" {
 		attrs = append(attrs, slog.String("node", node))
 	}
 
@@ -86,10 +86,10 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 
 	logger := getLogger()
 	attrs := []slog.Attr{
-		slog.String("server_ip", os.Getenv("ServerIP")),
+		slog.String("server_ip", utils.GetEnv("ServerIP", "")),
 	}
 	attrs = append(attrs, callerAttrs(2)...)
-	if node := os.Getenv("NODE"); node != "" {
+	if node := utils.GetEnv("NODE", ""); node != "" {
 		attrs = append(attrs, slog.String("node", node))
 	}
 
@@ -124,7 +124,7 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 
 func getLogger() *slog.Logger {
 	loggerOnce.Do(func() {
-		format := strings.ToLower(utils.GetEnv("LOG_FORMAT", "json"))
+		format := utils.NormalizeKey(utils.GetEnv("LOG_FORMAT", "json"))
 		options := &slog.HandlerOptions{Level: slog.LevelDebug}
 
 		var handler slog.Handler

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/mail"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -43,17 +42,17 @@ func validateRequiredPort(port string) []string {
 }
 
 func validateDatabaseConfig() []string {
-	if strings.TrimSpace(os.Getenv("DATABASE_URL")) != "" {
+	if utils.GetEnv("DATABASE_URL", "") != "" {
 		return nil
 	}
 
 	var problems []string
 	for _, key := range []string{"DB_HOST", "DB_PORT", "DB_USERNAME", "DB_NAME"} {
-		if strings.TrimSpace(os.Getenv(key)) == "" {
+		if utils.GetEnv(key, "") == "" {
 			problems = append(problems, key+" is required when DATABASE_URL is empty")
 		}
 	}
-	if port := strings.TrimSpace(os.Getenv("DB_PORT")); port != "" && !validPort(port) {
+	if port := utils.GetEnv("DB_PORT", ""); port != "" && !validPort(port) {
 		problems = append(problems, "DB_PORT must be a number between 1 and 65535")
 	}
 	return problems
@@ -65,15 +64,15 @@ func validateOptionalRedisConfig() []string {
 	}
 
 	var problems []string
-	if rawURL := strings.TrimSpace(os.Getenv("REDIS_URL")); rawURL != "" {
+	if rawURL := utils.GetEnv("REDIS_URL", ""); rawURL != "" {
 		if _, err := redis.ParseURL(rawURL); err != nil {
 			problems = append(problems, "REDIS_URL is invalid")
 		}
 	}
-	if port := strings.TrimSpace(os.Getenv("REDIS_PORT")); port != "" && !validPort(port) {
+	if port := utils.GetEnv("REDIS_PORT", ""); port != "" && !validPort(port) {
 		problems = append(problems, "REDIS_PORT must be a number between 1 and 65535")
 	}
-	if db := strings.TrimSpace(os.Getenv("REDIS_DB")); db != "" {
+	if db := utils.GetEnv("REDIS_DB", ""); db != "" {
 		if parsed, err := strconv.Atoi(db); err != nil || parsed < 0 {
 			problems = append(problems, "REDIS_DB must be a non-negative integer")
 		}
@@ -88,14 +87,14 @@ func validateOptionalSMTPConfig() []string {
 
 	var problems []string
 	for _, key := range []string{"SMTP_HOST", "SMTP_PASS", "SMTP_FROM"} {
-		if strings.TrimSpace(os.Getenv(key)) == "" {
+		if utils.GetEnv(key, "") == "" {
 			problems = append(problems, key+" is required when SMTP is configured")
 		}
 	}
-	if port := strings.TrimSpace(os.Getenv("SMTP_PORT")); port != "" && !validPort(port) {
+	if port := utils.GetEnv("SMTP_PORT", ""); port != "" && !validPort(port) {
 		problems = append(problems, "SMTP_PORT must be a number between 1 and 65535")
 	}
-	if from := strings.TrimSpace(os.Getenv("SMTP_FROM")); from != "" {
+	if from := utils.GetEnv("SMTP_FROM", ""); from != "" {
 		if _, err := mail.ParseAddress(from); err != nil {
 			problems = append(problems, "SMTP_FROM must be a valid email address")
 		}
@@ -109,7 +108,7 @@ func validateOptionalStorageConfig() []string {
 	}
 
 	var problems []string
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_PROVIDER")))
+	provider := utils.NormalizeKey(utils.GetEnv("STORAGE_PROVIDER", ""))
 	if provider == "" {
 		provider = "minio"
 	}
@@ -120,11 +119,11 @@ func validateOptionalStorageConfig() []string {
 	}
 
 	for _, key := range []string{"STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME"} {
-		if strings.TrimSpace(os.Getenv(key)) == "" {
+		if utils.GetEnv(key, "") == "" {
 			problems = append(problems, key+" is required when storage is configured")
 		}
 	}
-	if baseURL := strings.TrimSpace(os.Getenv("STORAGE_BASE_URL")); baseURL != "" {
+	if baseURL := utils.GetEnv("STORAGE_BASE_URL", ""); baseURL != "" {
 		if _, err := url.ParseRequestURI(baseURL); err != nil {
 			problems = append(problems, "STORAGE_BASE_URL must be a valid URL")
 		}
@@ -139,7 +138,7 @@ func validPort(value string) bool {
 
 func hasAnyEnv(keys ...string) bool {
 	for _, key := range keys {
-		if strings.TrimSpace(os.Getenv(key)) != "" {
+		if utils.GetEnv(key, "") != "" {
 			return true
 		}
 	}

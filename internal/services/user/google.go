@@ -157,7 +157,7 @@ func verifyGoogleIDToken(ctx context.Context, idToken string) (googleTokenInfo, 
 func googleAllowedAudiences() map[string]struct{} {
 	values := make(map[string]struct{})
 
-	rawList := strings.TrimSpace(utils.GetEnv("GOOGLE_CLIENT_IDS", ""))
+	rawList := utils.GetEnv("GOOGLE_CLIENT_IDS", "")
 	if rawList != "" {
 		for _, item := range strings.Split(rawList, ",") {
 			normalized := strings.TrimSpace(item)
@@ -167,7 +167,7 @@ func googleAllowedAudiences() map[string]struct{} {
 		}
 	}
 
-	single := strings.TrimSpace(utils.GetEnv("GOOGLE_CLIENT_ID", ""))
+	single := utils.GetEnv("GOOGLE_CLIENT_ID", "")
 	if single != "" {
 		values[single] = struct{}{}
 	}

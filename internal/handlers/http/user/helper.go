@@ -65,18 +65,6 @@ func (h *HandlerUser) isRuntimeConfigEnabled(ctx context.Context, configKey stri
 	return h.AppConfigService.IsEnabled(ctx, configKey, fallback)
 }
 
-func publicRegistrationConfigKey() string {
-	return utils.GetEnv("CONFIG_PUBLIC_REGISTRATION", defaultConfigPublicRegistrationEnabled)
-}
-
-func registerOTPConfigKey() string {
-	return utils.GetEnv("CONFIG_REGISTER_OTP", defaultConfigRegisterOTPEnabled)
-}
-
-func passwordResetEmailConfigKey() string {
-	return utils.GetEnv("CONFIG_PASSWORD_RESET_EMAIL", defaultConfigPasswordResetEmailEnabled)
-}
-
 func authEmailAppName() string {
 	appName := utils.GetEnv("AUTH_EMAIL_APP_NAME", "")
 	if appName != "" {

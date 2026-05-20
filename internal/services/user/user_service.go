@@ -123,7 +123,7 @@ func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUs
 		return domainuser.Users{}, err
 	}
 
-	roleName := strings.ToLower(strings.TrimSpace(req.Role))
+	roleName := utils.NormalizeKey(req.Role)
 	canAssignRole, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "users", "assign_role")
 	if err != nil {
 		return domainuser.Users{}, err
@@ -352,7 +352,7 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 	}
 
 	if reqRole := strings.TrimSpace(req.Role); reqRole != "" {
-		newRoleName := strings.ToLower(reqRole)
+		newRoleName := utils.NormalizeKey(reqRole)
 		canAssignRole, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "users", "assign_role")
 		if err != nil {
 			return domainuser.Users{}, err

@@ -90,15 +90,9 @@ func DeleteAllUserPermissionKeys(ctx context.Context, client *redis.Client) {
 }
 
 func TTL() time.Duration {
-	if ttl := strings.TrimSpace(utils.GetEnv("PERMISSION_CACHE_TTL", "")); ttl != "" {
-		if parsed, err := time.ParseDuration(ttl); err == nil && parsed > 0 {
-			return parsed
-		}
+	fallback := time.Duration(utils.GetEnv("PERMISSION_CACHE_TTL_SECONDS", 300)) * time.Second
+	if fallback <= 0 {
+		fallback = 300 * time.Second
 	}
-
-	seconds := utils.GetEnv("PERMISSION_CACHE_TTL_SECONDS", 300)
-	if seconds <= 0 {
-		seconds = 300
-	}
-	return time.Duration(seconds) * time.Second
+	return utils.DurationFromEnv([]string{"PERMISSION_CACHE_TTL"}, fallback)
 }

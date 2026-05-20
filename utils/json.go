@@ -29,3 +29,15 @@ func NormalizePayload(input interface{}) interface{} {
 
 	return normalized
 }
+
+func MustJSON(value interface{}) json.RawMessage {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return EmptyJSON()
+	}
+	return body
+}
+
+func EmptyJSON() json.RawMessage {
+	return json.RawMessage(`{}`)
+}

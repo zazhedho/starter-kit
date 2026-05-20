@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 	"strings"
 
 	"gorm.io/gorm"
@@ -180,7 +181,7 @@ func isASCIIDigit(char byte) bool {
 }
 
 func normalizeOrderDirection(direction string) (string, error) {
-	normalized := strings.ToUpper(strings.TrimSpace(direction))
+	normalized := utils.NormalizeUpperKey(direction)
 	switch normalized {
 	case "ASC", "DESC":
 		return normalized, nil

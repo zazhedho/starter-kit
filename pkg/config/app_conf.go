@@ -8,7 +8,6 @@ import (
 	"os"
 	"starter-kit/pkg/logger"
 	"starter-kit/utils"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,8 +24,8 @@ func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{}
 	cacheKey := utils.RedisAppConf
 	appConf := make(map[string]string)
 	var getNewConfig bool
-	if consul := os.Getenv("CONSUL"); consul != "" {
-		cache = strings.ToLower(os.Getenv("CACHE")) == "on" && rdbCache != nil
+	if consul := utils.GetEnv("CONSUL", ""); consul != "" {
+		cache = utils.NormalizeKey(utils.GetEnv("CACHE", "")) == "on" && rdbCache != nil
 
 		if cache {
 			if jsonAppConf, err := rdbCache.Get(context.Background(), cacheKey).Result(); err == nil {
@@ -42,7 +41,7 @@ func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{}
 		}
 
 		if getNewConfig {
-			consulPath := fmt.Sprintf("%s/%s", os.Getenv("CONSUL_PATH"), os.Getenv("APP_ENV"))
+			consulPath := fmt.Sprintf("%s/%s", utils.GetEnv("CONSUL_PATH", ""), utils.GetEnv("APP_ENV", ""))
 			runtimeViper := viper.New()
 			if err = runtimeViper.AddRemoteProvider("consul", consul, consulPath); err != nil {
 				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err))
@@ -56,10 +55,10 @@ func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{}
 		}
 	} else {
 		configName := "app"
-		pathConfig := os.Getenv("APP_CONFIG")
+		pathConfig := utils.GetEnv("APP_CONFIG", "")
 		if pathConfig == "" {
 			pathConfig = "config"
-			configName = os.Getenv("APP_ENV")
+			configName = utils.GetEnv("APP_ENV", "")
 		}
 
 		viper.AddConfigPath(pathConfig)
@@ -79,9 +78,9 @@ func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{}
 			appConf["config_id"] = uuid.NewString()
 		}
 
-		if appConf["config_id"] != os.Getenv("CONFIG_ID") {
+		if appConf["config_id"] != utils.GetEnv("CONFIG_ID", "") {
 			for k, v := range appConf {
-				os.Setenv(strings.ToUpper(k), v)
+				os.Setenv(utils.NormalizeUpperKey(k), v)
 			}
 		}
 

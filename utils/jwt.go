@@ -3,7 +3,6 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"os"
 	domainuser "starter-kit/internal/domain/user"
 	"strings"
 	"time"
@@ -155,7 +154,7 @@ func JwtExpiresAt(tokenString string) (time.Time, error) {
 }
 
 func jwtSecret() ([]byte, error) {
-	secret := strings.TrimSpace(os.Getenv("JWT_KEY"))
+	secret := GetEnv("JWT_KEY", "")
 	if secret == "" {
 		return nil, ErrJWTKeyNotConfigured
 	}

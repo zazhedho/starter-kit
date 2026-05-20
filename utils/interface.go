@@ -37,6 +37,13 @@ func InterfaceBool(data interface{}) bool {
 	}
 }
 
+func Int64PtrIfPositive(value int64) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	return &value
+}
+
 func ConvertValuesToString(filters map[string]interface{}, keys ...string) map[string]interface{} {
 	if filters == nil {
 		return nil

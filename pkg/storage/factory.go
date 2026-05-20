@@ -2,12 +2,12 @@ package storage
 
 import (
 	"fmt"
-	"strings"
+	"starter-kit/utils"
 )
 
 // NewStorageProvider creates a new storage provider based on the configuration
 func NewStorageProvider(config Config) (StorageProvider, error) {
-	provider := strings.ToLower(strings.TrimSpace(config.Provider))
+	provider := utils.NormalizeKey(config.Provider)
 
 	switch provider {
 	case "minio":

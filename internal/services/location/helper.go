@@ -159,22 +159,22 @@ func mapVillages(rows []domainlocation.Village) []dto.Location {
 }
 
 func sortProvinces(items []domainlocation.Province) []domainlocation.Province {
-	sort.Slice(items, func(i, j int) bool { return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
 	return items
 }
 
 func sortCities(items []domainlocation.City) []domainlocation.City {
-	sort.Slice(items, func(i, j int) bool { return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
 	return items
 }
 
 func sortDistricts(items []domainlocation.District) []domainlocation.District {
-	sort.Slice(items, func(i, j int) bool { return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
 	return items
 }
 
 func sortVillages(items []domainlocation.Village) []domainlocation.Village {
-	sort.Slice(items, func(i, j int) bool { return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
 	return items
 }
 

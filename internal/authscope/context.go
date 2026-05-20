@@ -74,8 +74,8 @@ func FromContext(ctx context.Context) Scope {
 }
 
 func PermissionKey(resource, action string) string {
-	resourcePart := strings.ToLower(strings.TrimSpace(resource))
-	actionPart := strings.ToLower(strings.TrimSpace(action))
+	resourcePart := utils.NormalizeKey(resource)
+	actionPart := utils.NormalizeKey(action)
 	if resourcePart == "" || actionPart == "" {
 		return ""
 	}

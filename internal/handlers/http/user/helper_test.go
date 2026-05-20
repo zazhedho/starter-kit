@@ -55,22 +55,10 @@ func (m *appConfigServiceUserTestDouble) IsEnabled(ctx context.Context, configKe
 	return m.enabled, nil
 }
 
-func TestUserConfigKeyHelpers(t *testing.T) {
-	t.Setenv("CONFIG_PUBLIC_REGISTRATION", "custom.public")
-	t.Setenv("CONFIG_REGISTER_OTP", "custom.otp")
-	t.Setenv("CONFIG_PASSWORD_RESET_EMAIL", "custom.reset")
+func TestAuthEmailAppName(t *testing.T) {
 	t.Setenv("AUTH_EMAIL_APP_NAME", "")
 	t.Setenv("APP_NAME", "My App")
 
-	if publicRegistrationConfigKey() != "custom.public" {
-		t.Fatal("expected custom public registration key")
-	}
-	if registerOTPConfigKey() != "custom.otp" {
-		t.Fatal("expected custom otp key")
-	}
-	if passwordResetEmailConfigKey() != "custom.reset" {
-		t.Fatal("expected custom reset key")
-	}
 	if authEmailAppName() != "My App" {
 		t.Fatal("expected app name fallback")
 	}

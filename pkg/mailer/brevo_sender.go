@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"html"
 	"net/smtp"
-	"os"
+	"starter-kit/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -27,16 +27,16 @@ type BrevoSender struct {
 
 func NewBrevoSenderFromEnv() (*BrevoSender, error) {
 	port := defaultSMTPPort
-	if value := os.Getenv("SMTP_PORT"); value != "" {
+	if value := utils.GetEnv("SMTP_PORT", ""); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil {
 			port = parsed
 		}
 	}
 
-	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
-	user := strings.TrimSpace(os.Getenv("SMTP_USER"))
-	pass := strings.TrimSpace(os.Getenv("SMTP_PASS"))
-	from := strings.TrimSpace(os.Getenv("SMTP_FROM"))
+	host := utils.GetEnv("SMTP_HOST", "")
+	user := utils.GetEnv("SMTP_USER", "")
+	pass := utils.GetEnv("SMTP_PASS", "")
+	from := utils.GetEnv("SMTP_FROM", "")
 	if host == "" || pass == "" || from == "" {
 		return nil, fmt.Errorf("smtp credentials not configured")
 	}
@@ -44,17 +44,17 @@ func NewBrevoSenderFromEnv() (*BrevoSender, error) {
 		user = "apikey"
 	}
 
-	subject := strings.TrimSpace(os.Getenv("SMTP_SUBJECT"))
+	subject := utils.GetEnv("SMTP_SUBJECT", "")
 	if subject == "" {
 		subject = "Your Registration OTP"
 	}
 
-	resetSubject := strings.TrimSpace(os.Getenv("RESET_SUBJECT"))
+	resetSubject := utils.GetEnv("RESET_SUBJECT", "")
 	if resetSubject == "" {
 		resetSubject = "Reset Your Password"
 	}
 
-	appName := strings.TrimSpace(os.Getenv("AUTH_EMAIL_APP_NAME"))
+	appName := utils.GetEnv("AUTH_EMAIL_APP_NAME", "")
 	if appName == "" {
 		appName = "Account Verification"
 	}
@@ -67,7 +67,7 @@ func NewBrevoSenderFromEnv() (*BrevoSender, error) {
 		From:         from,
 		Subject:      subject,
 		ResetSubject: resetSubject,
-		TTL:          parseDurationEnv([]string{"OTP_TTL", "OTP_TTL_SECONDS"}, 5*time.Minute),
+		TTL:          utils.DurationFromEnv([]string{"OTP_TTL", "OTP_TTL_SECONDS"}, 5*time.Minute),
 		AppName:      appName,
 	}, nil
 }
@@ -156,20 +156,4 @@ func extractEmail(from string) string {
 		return from[start+1 : end]
 	}
 	return from
-}
-
-func parseDurationEnv(keys []string, fallback time.Duration) time.Duration {
-	for _, key := range keys {
-		value := strings.TrimSpace(os.Getenv(key))
-		if value == "" {
-			continue
-		}
-		if parsed, err := time.ParseDuration(value); err == nil {
-			return parsed
-		}
-		if seconds, err := strconv.Atoi(value); err == nil {
-			return time.Duration(seconds) * time.Second
-		}
-	}
-	return fallback
 }

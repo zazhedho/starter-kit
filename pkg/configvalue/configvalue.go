@@ -3,6 +3,7 @@ package configvalue
 import (
 	"encoding/json"
 	"fmt"
+	"starter-kit/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ func String(raw string, fallback string) string {
 }
 
 func Bool(raw string, fallback bool) (bool, error) {
-	value := strings.ToLower(strings.TrimSpace(raw))
+	value := utils.NormalizeKey(raw)
 	if value == "" {
 		return fallback, nil
 	}

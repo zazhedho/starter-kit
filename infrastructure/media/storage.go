@@ -6,14 +6,13 @@ import (
 	"starter-kit/pkg/storage"
 	"starter-kit/utils"
 	"strconv"
-	"strings"
 )
 
 // InitStorage initializes and returns a storage provider (MinIO or R2)
 func InitStorage() (storage.StorageProvider, error) {
 	logger.WriteLog(logger.LogLevelDebug, "InitStorage; Initializing storage provider...")
 
-	provider := strings.ToLower(utils.GetEnv("STORAGE_PROVIDER", "minio"))
+	provider := utils.NormalizeKey(utils.GetEnv("STORAGE_PROVIDER", "minio"))
 
 	useSSL, _ := strconv.ParseBool(utils.GetEnv("STORAGE_USE_SSL", "false"))
 

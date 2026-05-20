@@ -77,3 +77,48 @@ func MergeMetadata(base map[string]interface{}, extra map[string]interface{}) ma
 
 	return merged
 }
+
+func RedactSensitivePayload(input interface{}) interface{} {
+	normalized := NormalizePayload(input)
+	return RedactSensitiveValue(normalized)
+}
+
+func RedactSensitiveValue(input interface{}) interface{} {
+	switch v := input.(type) {
+	case map[string]interface{}:
+		return redactSensitiveMap(v)
+	case []interface{}:
+		return redactSensitiveSlice(v)
+	default:
+		return v
+	}
+}
+
+func IsSensitiveKey(key string) bool {
+	k := NormalizeKey(key)
+	return strings.Contains(k, "password") ||
+		strings.Contains(k, "token") ||
+		strings.Contains(k, "secret") ||
+		strings.Contains(k, "otp")
+}
+
+func redactSensitiveMap(in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, val := range in {
+		if IsSensitiveKey(k) {
+			out[k] = "[REDACTED]"
+			continue
+		}
+
+		out[k] = RedactSensitiveValue(val)
+	}
+	return out
+}
+
+func redactSensitiveSlice(values []interface{}) []interface{} {
+	out := make([]interface{}, 0, len(values))
+	for _, val := range values {
+		out = append(out, RedactSensitiveValue(val))
+	}
+	return out
+}
