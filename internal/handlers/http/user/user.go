@@ -259,7 +259,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, authEmailAppName()); err != nil {
+	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "user_registration_otp",
@@ -1324,7 +1324,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 
 		normalizedEmail := utils.SanitizeEmail(req.Email)
 		if data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail); err == nil && data.Id != "" {
-			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, authEmailAppName()); err != nil {
+			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {
 				h.writeAudit(ctx, domainaudit.AuditEvent{
 					Action:       domainaudit.ActionUpdate,
 					Resource:     "user_password_reset",

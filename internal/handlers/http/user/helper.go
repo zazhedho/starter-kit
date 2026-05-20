@@ -65,14 +65,6 @@ func (h *HandlerUser) isRuntimeConfigEnabled(ctx context.Context, configKey stri
 	return h.AppConfigService.IsEnabled(ctx, configKey, fallback)
 }
 
-func authEmailAppName() string {
-	appName := utils.GetEnv("AUTH_EMAIL_APP_NAME", "")
-	if appName != "" {
-		return appName
-	}
-	return utils.GetEnv("APP_NAME", "STARTER-KIT")
-}
-
 func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]interface{} {
 	data := map[string]interface{}{
 		"access_token":     accessToken,

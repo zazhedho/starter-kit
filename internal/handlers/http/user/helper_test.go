@@ -55,15 +55,6 @@ func (m *appConfigServiceUserTestDouble) IsEnabled(ctx context.Context, configKe
 	return m.enabled, nil
 }
 
-func TestAuthEmailAppName(t *testing.T) {
-	t.Setenv("AUTH_EMAIL_APP_NAME", "")
-	t.Setenv("APP_NAME", "My App")
-
-	if authEmailAppName() != "My App" {
-		t.Fatal("expected app name fallback")
-	}
-}
-
 func TestBuildAuthTokenResponse(t *testing.T) {
 	t.Setenv("JWT_EXP", "12")
 	t.Setenv("REFRESH_TOKEN_EXP_HOURS", "72")
