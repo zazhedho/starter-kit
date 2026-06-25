@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"starter-kit/pkg/filter"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -165,6 +166,13 @@ func (r *GenericRepository[T]) Update(ctx context.Context, m T) error {
 
 func (r *GenericRepository[T]) Delete(ctx context.Context, id string) error {
 	return r.DB.WithContext(ctx).Where("id = ?", id).Delete(new(T)).Error
+}
+
+func (r *GenericRepository[T]) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return r.DB.WithContext(ctx).Model(new(T)).Where("id = ?", id).Updates(map[string]interface{}{
+		"deleted_by": deletedBy,
+		"deleted_at": time.Now(),
+	}).Error
 }
 
 func BuildSearchFunc(columns ...string) SearchFunc {

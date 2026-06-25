@@ -38,6 +38,9 @@ func (m *auditRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([
 
 func (m *auditRepoMock) Update(ctx context.Context, data domainaudit.AuditTrail) error { return nil }
 func (m *auditRepoMock) Delete(ctx context.Context, id string) error                   { return nil }
+func (m *auditRepoMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 
 func TestGetAllDelegatesToRepository(t *testing.T) {
 	repo := &auditRepoMock{

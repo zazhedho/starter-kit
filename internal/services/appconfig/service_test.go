@@ -44,6 +44,9 @@ func (m *appConfigRepoMock) Update(ctx context.Context, data domainappconfig.App
 	return nil
 }
 func (m *appConfigRepoMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *appConfigRepoMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *appConfigRepoMock) GetByKey(ctx context.Context, configKey string) (domainappconfig.AppConfig, error) {
 	if m.keyErr != nil {
 		return domainappconfig.AppConfig{}, m.keyErr

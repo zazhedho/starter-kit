@@ -32,6 +32,9 @@ func (m *menuRepoTestDouble) Update(ctx context.Context, data domainmenu.MenuIte
 	return nil
 }
 func (m *menuRepoTestDouble) Delete(ctx context.Context, id string) error { return nil }
+func (m *menuRepoTestDouble) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *menuRepoTestDouble) GetByName(ctx context.Context, name string) (domainmenu.MenuItem, error) {
 	for _, menu := range m.activeMenus {
 		if menu.Name == name {
@@ -64,6 +67,9 @@ func (m *permissionRepoMenuTestDouble) Update(ctx context.Context, data domainpe
 	return nil
 }
 func (m *permissionRepoMenuTestDouble) Delete(ctx context.Context, id string) error { return nil }
+func (m *permissionRepoMenuTestDouble) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *permissionRepoMenuTestDouble) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }

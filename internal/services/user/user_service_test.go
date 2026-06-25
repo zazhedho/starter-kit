@@ -76,6 +76,10 @@ func (m *userRepoMock) Delete(ctx context.Context, id string) error {
 	m.deletedID = id
 	return m.deleteErr
 }
+func (m *userRepoMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	m.deletedID = id
+	return m.deleteErr
+}
 func (m *userRepoMock) GetByEmail(ctx context.Context, email string) (domainuser.Users, error) {
 	if m.emailErr != nil {
 		return domainuser.Users{}, m.emailErr
@@ -132,6 +136,9 @@ func (m *roleRepoUserMock) GetAll(ctx context.Context, params filter.BaseParams)
 }
 func (m *roleRepoUserMock) Update(ctx context.Context, data domainrole.Role) error { return nil }
 func (m *roleRepoUserMock) Delete(ctx context.Context, id string) error            { return nil }
+func (m *roleRepoUserMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *roleRepoUserMock) GetByName(ctx context.Context, name string) (domainrole.Role, error) {
 	role, ok := m.roles[name]
 	if !ok {
@@ -176,6 +183,9 @@ func (m *permissionRepoUserMock) Update(ctx context.Context, data domainpermissi
 	return nil
 }
 func (m *permissionRepoUserMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *permissionRepoUserMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *permissionRepoUserMock) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }

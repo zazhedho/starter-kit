@@ -46,6 +46,10 @@ func (m *roleRepoMock) Delete(ctx context.Context, id string) error {
 	m.deletedID = id
 	return nil
 }
+func (m *roleRepoMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	m.deletedID = id
+	return nil
+}
 func (m *roleRepoMock) GetByName(ctx context.Context, name string) (domainrole.Role, error) {
 	return m.existingByName, nil
 }
@@ -91,6 +95,9 @@ func (m *permissionRepoMock) Update(ctx context.Context, data domainpermission.P
 	return nil
 }
 func (m *permissionRepoMock) Delete(ctx context.Context, id string) error { return nil }
+func (m *permissionRepoMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *permissionRepoMock) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }
@@ -114,6 +121,9 @@ func (m *menuRepoMock) GetAll(ctx context.Context, params filter.BaseParams) ([]
 }
 func (m *menuRepoMock) Update(ctx context.Context, data domainmenu.MenuItem) error { return nil }
 func (m *menuRepoMock) Delete(ctx context.Context, id string) error                { return nil }
+func (m *menuRepoMock) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *menuRepoMock) GetByName(ctx context.Context, name string) (domainmenu.MenuItem, error) {
 	return domainmenu.MenuItem{}, errors.New("not implemented")
 }

@@ -60,6 +60,9 @@ func (m *permissionRepoSharedTestDouble) Update(ctx context.Context, data domain
 	return nil
 }
 func (m *permissionRepoSharedTestDouble) Delete(ctx context.Context, id string) error { return nil }
+func (m *permissionRepoSharedTestDouble) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	return nil
+}
 func (m *permissionRepoSharedTestDouble) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	return domainpermission.Permission{}, errors.New("not implemented")
 }

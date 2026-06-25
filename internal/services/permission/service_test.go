@@ -39,6 +39,10 @@ func (m *permissionRepoTestDouble) Delete(ctx context.Context, id string) error 
 	m.deletedID = id
 	return nil
 }
+func (m *permissionRepoTestDouble) SoftDelete(ctx context.Context, id, deletedBy string) error {
+	m.deletedID = id
+	return nil
+}
 func (m *permissionRepoTestDouble) GetByName(ctx context.Context, name string) (domainpermission.Permission, error) {
 	if m.permissionByKey != nil {
 		return m.permissionByKey[name], nil
