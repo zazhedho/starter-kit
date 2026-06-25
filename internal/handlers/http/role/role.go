@@ -1,11 +1,12 @@
 package handlerrole
 
 import (
+	"context"
 	"fmt"
 	"net/http"
-	"reflect"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/internal/dto"
+	handlercommon "starter-kit/internal/handlers/http/common"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfacerole "starter-kit/internal/interfaces/role"
 	"starter-kit/pkg/filter"
@@ -35,11 +36,7 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][Create]"
 	reqCtx := ctx.Request.Context()
 
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
+	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
 
@@ -128,11 +125,7 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][Update]"
 	reqCtx := ctx.Request.Context()
 
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
+	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
 
@@ -208,107 +201,91 @@ func (h *RoleHandler) Delete(ctx *gin.Context) {
 }
 
 func (h *RoleHandler) AssignPermissions(ctx *gin.Context) {
-	id := ctx.Param("id")
 	var req dto.AssignPermissions
-	logId := utils.GenerateLogId(ctx)
-	logPrefix := "[RoleHandler][AssignPermissions]"
-	reqCtx := ctx.Request.Context()
-
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
-		return
-	}
-
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
-
-	beforeIDs, _ := h.Service.GetRolePermissions(reqCtx, id)
-	if err := h.Service.AssignPermissions(reqCtx, id, req); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
-			Action:       domainaudit.ActionAssign,
-			Resource:     "role_permissions",
-			ResourceID:   id,
-			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to assign permissions to role",
-			ErrorMessage: err.Error(),
-			BeforeData: map[string]interface{}{
-				"permission_ids": beforeIDs,
-			},
-			AfterData: req,
-		})
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignPermissions; Error: %+v", logPrefix, err))
-		statusCode, res := roleMutationErrorResponse(logId, err)
-		ctx.JSON(statusCode, res)
-		return
-	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionAssign,
-		Resource:   "role_permissions",
-		ResourceID: id,
-		Status:     domainaudit.StatusSuccess,
-		Message:    "Assigned permissions to role",
-		BeforeData: map[string]interface{}{
-			"permission_ids": beforeIDs,
-		},
-		AfterData: req,
+	handleRoleRelationAssignment(h, ctx, &req, roleRelationAssignment[dto.AssignPermissions]{
+		logPrefix:      "[RoleHandler][AssignPermissions]",
+		resource:       "role_permissions",
+		beforeDataKey:  "permission_ids",
+		failedMessage:  "Failed to assign permissions to role",
+		successMessage: "Assigned permissions to role",
+		responseMsg:    "Permissions assigned successfully",
+		debugMsg:       "Permissions assigned",
+		serviceName:    "AssignPermissions",
+		getBefore:      h.Service.GetRolePermissions,
+		assign:         h.Service.AssignPermissions,
 	})
-
-	res := response.Response(http.StatusOK, "Permissions assigned successfully", logId, nil)
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Permissions assigned", logPrefix))
-	ctx.JSON(http.StatusOK, res)
 }
 
 func (h *RoleHandler) AssignMenus(ctx *gin.Context) {
-	id := ctx.Param("id")
 	var req dto.AssignMenus
+	handleRoleRelationAssignment(h, ctx, &req, roleRelationAssignment[dto.AssignMenus]{
+		logPrefix:      "[RoleHandler][AssignMenus]",
+		resource:       "role_menus",
+		beforeDataKey:  "menu_ids",
+		failedMessage:  "Failed to assign menus to role",
+		successMessage: "Assigned menus to role",
+		responseMsg:    "Menus assigned successfully",
+		debugMsg:       "Menus assigned",
+		serviceName:    "AssignMenus",
+		getBefore:      h.Service.GetRoleMenus,
+		assign:         h.Service.AssignMenus,
+	})
+}
+
+type roleRelationAssignment[T any] struct {
+	logPrefix      string
+	resource       string
+	beforeDataKey  string
+	failedMessage  string
+	successMessage string
+	responseMsg    string
+	debugMsg       string
+	serviceName    string
+	getBefore      func(context.Context, string) ([]string, error)
+	assign         func(context.Context, string, T) error
+}
+
+func handleRoleRelationAssignment[T any](h *RoleHandler, ctx *gin.Context, req *T, assignment roleRelationAssignment[T]) {
+	id := ctx.Param("id")
 	logId := utils.GenerateLogId(ctx)
-	logPrefix := "[RoleHandler][AssignMenus]"
 	reqCtx := ctx.Request.Context()
 
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
+	if !handlercommon.BindJSON(ctx, logId, assignment.logPrefix, req) {
 		return
 	}
 
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
+	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", assignment.logPrefix, utils.JsonEncode(*req)))
 
-	beforeIDs, _ := h.Service.GetRoleMenus(reqCtx, id)
-	if err := h.Service.AssignMenus(reqCtx, id, req); err != nil {
+	beforeIDs, _ := assignment.getBefore(reqCtx, id)
+	beforeData := map[string]interface{}{assignment.beforeDataKey: beforeIDs}
+	if err := assignment.assign(reqCtx, id, *req); err != nil {
 		h.writeAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
-			Resource:     "role_menus",
+			Resource:     assignment.resource,
 			ResourceID:   id,
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to assign menus to role",
+			Message:      assignment.failedMessage,
 			ErrorMessage: err.Error(),
-			BeforeData: map[string]interface{}{
-				"menu_ids": beforeIDs,
-			},
-			AfterData: req,
+			BeforeData:   beforeData,
+			AfterData:    *req,
 		})
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.AssignMenus; Error: %+v", logPrefix, err))
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.%s; Error: %+v", assignment.logPrefix, assignment.serviceName, err))
 		statusCode, res := roleMutationErrorResponse(logId, err)
 		ctx.JSON(statusCode, res)
 		return
 	}
+
 	h.writeAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionAssign,
-		Resource:   "role_menus",
+		Resource:   assignment.resource,
 		ResourceID: id,
 		Status:     domainaudit.StatusSuccess,
-		Message:    "Assigned menus to role",
-		BeforeData: map[string]interface{}{
-			"menu_ids": beforeIDs,
-		},
-		AfterData: req,
+		Message:    assignment.successMessage,
+		BeforeData: beforeData,
+		AfterData:  *req,
 	})
 
-	res := response.Response(http.StatusOK, "Menus assigned successfully", logId, nil)
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Menus assigned", logPrefix))
+	res := response.Response(http.StatusOK, assignment.responseMsg, logId, nil)
+	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; %s", assignment.logPrefix, assignment.debugMsg))
 	ctx.JSON(http.StatusOK, res)
 }

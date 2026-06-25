@@ -3,10 +3,10 @@ package handlermenu
 import (
 	"fmt"
 	"net/http"
-	"reflect"
 	"starter-kit/internal/authscope"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/internal/dto"
+	handlercommon "starter-kit/internal/handlers/http/common"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfacemenu "starter-kit/internal/interfaces/menu"
 	"starter-kit/pkg/filter"
@@ -128,11 +128,7 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 	logPrefix := "[MenuHandler][Update]"
 	reqCtx := ctx.Request.Context()
 
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
+	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
 

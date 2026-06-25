@@ -20,6 +20,7 @@ linters:
   disable-all: true
   enable:
     - bodyclose
+    - dupl
     - errorlint
     - errcheck
     - gofmt
@@ -39,5 +40,7 @@ linters:
     - unused
 
 linters-settings:
+  dupl:
+    threshold: 200
   misspell:
     locale: US

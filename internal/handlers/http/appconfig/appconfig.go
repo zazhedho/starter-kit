@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 	domainaudit "starter-kit/internal/domain/audit"
 	"starter-kit/internal/dto"
+	handlercommon "starter-kit/internal/handlers/http/common"
 	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	"starter-kit/pkg/filter"
@@ -92,11 +92,7 @@ func (h *AppConfigHandler) Update(ctx *gin.Context) {
 	}
 
 	var req dto.UpdateAppConfig
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
+	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
 

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 	"starter-kit/internal/dto"
+	handlercommon "starter-kit/internal/handlers/http/common"
 	interfacelocation "starter-kit/internal/interfaces/location"
 	servicelocation "starter-kit/internal/services/location"
 	"starter-kit/pkg/logger"
@@ -123,11 +123,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 	reqCtx := ctx.Request.Context()
 
 	var req dto.SyncLocationRequest
-	if err := ctx.BindJSON(&req); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; BindJSON ERROR: %s;", logPrefix, err.Error()))
-		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
-		res.Error = utils.ValidateError(err, reflect.TypeOf(req), "json")
-		ctx.JSON(http.StatusBadRequest, res)
+	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
 
