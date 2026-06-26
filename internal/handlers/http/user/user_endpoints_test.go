@@ -2,6 +2,7 @@ package handleruser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -379,6 +380,30 @@ func TestUserHandlerPublicAndAdminFlows(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodGet, "/users?page=1&limit=10&role=user", "", nil)
 	handler.GetAllUsers(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusOK)
+}
+
+func TestUserHandlerGetRegisterStatusIncludesOTPConfig(t *testing.T) {
+	t.Setenv("OTP_COOLDOWN_SECONDS", "45")
+	handler := newUserHandlerForTest()
+	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: true}
+
+	ctx, rec := newUserHandlerTestContext(t, http.MethodGet, "/register/status", "", nil)
+	handler.GetRegisterStatus(ctx)
+	assertUserHandlerStatus(t, rec, http.StatusOK)
+
+	var body struct {
+		Data struct {
+			Enabled     bool `json:"enabled"`
+			OTPEnabled  bool `json:"otp_enabled"`
+			OTPCooldown int  `json:"otp_cooldown"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !body.Data.Enabled || !body.Data.OTPEnabled || body.Data.OTPCooldown != 45 {
+		t.Fatalf("unexpected register status payload: %+v", body.Data)
+	}
 }
 
 func TestUserHandlerAuthTokenFlows(t *testing.T) {
