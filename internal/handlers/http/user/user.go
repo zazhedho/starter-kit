@@ -250,11 +250,35 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	}
 
 	normalizedEmail := utils.SanitizeEmail(req.Email)
-	if data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail); err == nil && data.Id != "" {
+	data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail)
+	if err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByEmail; Error: %+v", logPrefix, err))
+		res := response.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
+		return
+	}
+	if data.Id != "" {
 		res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
 		res.Error = response.Errors{Code: http.StatusBadRequest, Message: "email already exists"}
 		ctx.JSON(http.StatusBadRequest, res)
 		return
+	}
+
+	if req.Phone != "" {
+		normalizedPhone := utils.NormalizePhoneTo62(req.Phone)
+		data, err := h.Service.GetUserByPhone(reqCtx, normalizedPhone)
+		if err != nil {
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByPhone; Error: %+v", logPrefix, err))
+			res := response.InternalServerError(logId)
+			ctx.JSON(http.StatusInternalServerError, res)
+			return
+		}
+		if data.Id != "" {
+			res := response.Response(http.StatusBadRequest, messages.MsgExists, logId, nil)
+			res.Error = response.Errors{Code: http.StatusBadRequest, Message: "phone number already exists"}
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
 	}
 
 	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {

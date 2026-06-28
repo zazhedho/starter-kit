@@ -59,4 +59,5 @@ type RefreshTokenRequest struct {
 
 type SendRegisterOTPRequest struct {
 	Email string `json:"email" binding:"required,email"`
+	Phone string `json:"phone" binding:"omitempty,min=9,max=15"`
 }

@@ -18,6 +18,13 @@ func NewUserRepo(db *gorm.DB) interfaceuser.RepoUserInterface {
 	return &repo{GenericRepository: repositorygeneric.New[domainuser.Users](db)}
 }
 
+func (r *repo) Store(ctx context.Context, user domainuser.Users) error {
+	if user.Phone == "" {
+		return r.DB.WithContext(ctx).Omit("phone").Create(&user).Error
+	}
+	return r.GenericRepository.Store(ctx, user)
+}
+
 func (r *repo) GetByEmail(ctx context.Context, email string) (ret domainuser.Users, err error) {
 	return r.GetOneByField(ctx, "email", email)
 }
