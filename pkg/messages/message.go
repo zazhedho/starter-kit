@@ -3,7 +3,7 @@ package messages
 const (
 	InvalidRequest    = "Invalid request format. Please ensure the structure is correct and matches the expected data format."
 	MsgSomethingWrong = "Something went wrong"
-	MsgInternal       = "Something went wrong. Please contact support with the log ID."
+	MsgInternal       = "Something went wrong. Please contact support with the log ID: %s."
 	MsgCredential     = "Invalid Credentials. Please input the correct email or phone and password, then try again."
 	MsgExists         = "Already exists."
 	MsgNotFound       = "Data Not Found"

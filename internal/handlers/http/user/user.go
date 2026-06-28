@@ -251,7 +251,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 
 	normalizedEmail := utils.SanitizeEmail(req.Email)
 	data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail)
-	if err != nil {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByEmail; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
@@ -267,7 +267,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	if req.Phone != "" {
 		normalizedPhone := utils.NormalizePhoneTo62(req.Phone)
 		data, err := h.Service.GetUserByPhone(reqCtx, normalizedPhone)
-		if err != nil {
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetUserByPhone; Error: %+v", logPrefix, err))
 			res := response.InternalServerError(logId)
 			ctx.JSON(http.StatusInternalServerError, res)

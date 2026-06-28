@@ -1,6 +1,7 @@
 package response
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"starter-kit/pkg/messages"
@@ -67,7 +68,7 @@ func ErrorResponse(code int, msg string, logId uuid.UUID, publicError string) *A
 }
 
 func InternalServerError(logId uuid.UUID) *ApiResponse {
-	res := ErrorResponse(http.StatusInternalServerError, messages.MsgSomethingWrong, logId, messages.MsgInternal)
+	res := ErrorResponse(http.StatusInternalServerError, messages.MsgSomethingWrong, logId, fmt.Sprintf(messages.MsgInternal, logId.String()))
 	res.Message = messages.MsgSomethingWrong
 	return res
 }
