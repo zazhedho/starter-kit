@@ -35,13 +35,13 @@ func TestWriteAuditPreservesExplicitActorWhenContextIsPublic(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/audit-test", nil)
 
-	WriteAudit(ctx, auditService, domainaudit.AuditEvent{
+	NewAuditWriter(auditService, "AuditServiceTest").WriteAudit(ctx, domainaudit.AuditEvent{
 		ActorUserID: "00000000-0000-0000-0000-000000000001",
 		ActorRole:   "viewer",
 		Action:      domainaudit.ActionLogin,
 		Resource:    "auth",
 		Status:      domainaudit.StatusSuccess,
-	}, "AuditServiceTest")
+	})
 
 	if auditService.stored.ActorUserID != "00000000-0000-0000-0000-000000000001" {
 		t.Fatalf("expected explicit actor user to be preserved, got %q", auditService.stored.ActorUserID)

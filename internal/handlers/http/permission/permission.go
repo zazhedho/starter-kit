@@ -19,14 +19,14 @@ import (
 )
 
 type PermissionHandler struct {
-	Service      interfacepermission.ServicePermissionInterface
-	AuditService interfaceaudit.ServiceAuditInterface
+	Service interfacepermission.ServicePermissionInterface
+	handlercommon.AuditWriter
 }
 
 func NewPermissionHandler(s interfacepermission.ServicePermissionInterface, auditService interfaceaudit.ServiceAuditInterface) *PermissionHandler {
 	return &PermissionHandler{
-		Service:      s,
-		AuditService: auditService,
+		Service:     s,
+		AuditWriter: handlercommon.NewAuditWriter(auditService, "PermissionHandler"),
 	}
 }
 
@@ -44,7 +44,7 @@ func (h *PermissionHandler) Create(ctx *gin.Context) {
 
 	data, err := h.Service.Create(reqCtx, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "permission",
 			Status:       domainaudit.StatusFailed,
@@ -57,7 +57,7 @@ func (h *PermissionHandler) Create(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionCreate,
 		Resource:   "permission",
 		ResourceID: data.Id,
@@ -134,7 +134,7 @@ func (h *PermissionHandler) Update(ctx *gin.Context) {
 	before, _ := h.Service.GetByID(reqCtx, id)
 	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "permission",
 			ResourceID:   id,
@@ -149,7 +149,7 @@ func (h *PermissionHandler) Update(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "permission",
 		ResourceID: data.Id,
@@ -172,7 +172,7 @@ func (h *PermissionHandler) Delete(ctx *gin.Context) {
 	before, _ := h.Service.GetByID(reqCtx, id)
 
 	if err := h.Service.Delete(reqCtx, id); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "permission",
 			ResourceID:   id,
@@ -186,7 +186,7 @@ func (h *PermissionHandler) Delete(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "permission",
 		ResourceID: id,

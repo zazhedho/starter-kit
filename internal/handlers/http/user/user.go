@@ -35,11 +35,11 @@ import (
 )
 
 type HandlerUser struct {
-	Service          interfaceuser.ServiceUserInterface
-	BlacklistRepo    interfaceauth.RepoAuthInterface
-	SessionSvc       interfacesession.ServiceSessionInterface
-	LoginLimiter     security.LoginLimiter
-	AuditService     interfaceaudit.ServiceAuditInterface
+	Service       interfaceuser.ServiceUserInterface
+	BlacklistRepo interfaceauth.RepoAuthInterface
+	SessionSvc    interfacesession.ServiceSessionInterface
+	LoginLimiter  security.LoginLimiter
+	handlercommon.AuditWriter
 	AppConfigService interfaceappconfig.ServiceAppConfigInterface
 	OTPService       interfaceotp.ServiceOTPInterface
 	ResetService     interfacereset.ServicePasswordResetInterface
@@ -60,7 +60,7 @@ func NewUserHandler(
 		BlacklistRepo:    blacklistRepo,
 		SessionSvc:       sessionSvc,
 		LoginLimiter:     limiter,
-		AuditService:     auditService,
+		AuditWriter:      handlercommon.NewAuditWriter(auditService, "UserHandler"),
 		AppConfigService: appConfigService,
 		OTPService:       otpService,
 		ResetService:     resetService,
@@ -111,7 +111,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 			return
 		}
 		if err := h.OTPService.VerifyRegisterOTP(ctx.Request.Context(), req.Email, req.OTPCode); err != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionCreate,
 				Resource:     "user",
 				Status:       domainaudit.StatusFailed,
@@ -140,7 +140,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 
 	data, err := h.Service.RegisterUser(reqCtx, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "user",
 			Status:       domainaudit.StatusFailed,
@@ -157,7 +157,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		ActorUserID: data.Id,
 		ActorRole:   data.Role,
 		Action:      domainaudit.ActionCreate,
@@ -282,7 +282,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 	}
 
 	if err := h.OTPService.SendRegisterOTP(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "user_registration_otp",
 			Status:       domainaudit.StatusFailed,
@@ -308,7 +308,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:   domainaudit.ActionCreate,
 		Resource: "user_registration_otp",
 		Status:   domainaudit.StatusSuccess,
@@ -334,7 +334,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 
 	data, err := h.Service.AdminCreateUser(reqCtx, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "user",
 			Status:       domainaudit.StatusFailed,
@@ -352,7 +352,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionCreate,
 		Resource:   "user",
 		ResourceID: data.Id,
@@ -396,7 +396,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		if limiterErr != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.IsBlocked error: %v", logPrefix, limiterErr))
 		} else if blocked {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:   domainaudit.ActionLogin,
 				Resource: "auth",
 				Status:   domainaudit.StatusFailed,
@@ -424,7 +424,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 					logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; LoginLimiter.RegisterFailure error: %v", logPrefix, limiterErr))
 				}
 				if blocked {
-					h.writeAudit(ctx, domainaudit.AuditEvent{
+					h.WriteAudit(ctx, domainaudit.AuditEvent{
 						Action:   domainaudit.ActionLogin,
 						Resource: "auth",
 						Status:   domainaudit.StatusFailed,
@@ -439,7 +439,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 				}
 			}
 
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:   domainaudit.ActionLogin,
 				Resource: "auth",
 				Status:   domainaudit.StatusFailed,
@@ -454,7 +454,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 			return
 		}
 
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,
 			Resource:     "auth",
 			Status:       domainaudit.StatusFailed,
@@ -513,7 +513,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		}
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		ActorUserID: loginUserID,
 		ActorRole:   loggedInUser.Role,
 		Action:      domainaudit.ActionLogin,
@@ -553,7 +553,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		UserAgent: ctx.Request.UserAgent(),
 	}, registerEnabled)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,
 			Resource:     "auth",
 			Status:       domainaudit.StatusFailed,
@@ -622,7 +622,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		successMessage = "Google registration success"
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		ActorUserID: user.Id,
 		ActorRole:   user.Role,
 		Action:      domainaudit.ActionLogin,
@@ -657,7 +657,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 	tokenClaims, err := utils.JwtClaim(req.RefreshToken)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionRefresh,
 			Resource:     "auth_token",
 			Status:       domainaudit.StatusFailed,
@@ -671,7 +671,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	}
 
 	if !strings.EqualFold(utils.InterfaceString(tokenClaims["token_type"]), "refresh") {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
 			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
 			Action:       domainaudit.ActionRefresh,
@@ -688,7 +688,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 	isBlacklisted, err := h.BlacklistRepo.ExistsByToken(ctx.Request.Context(), req.RefreshToken)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
 			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
 			Action:       domainaudit.ActionRefresh,
@@ -703,7 +703,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		return
 	}
 	if isBlacklisted {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  utils.InterfaceString(tokenClaims["user_id"]),
 			ActorRole:    utils.InterfaceString(tokenClaims["role"]),
 			Action:       domainaudit.ActionRefresh,
@@ -722,7 +722,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	userRole := utils.InterfaceString(tokenClaims["role"])
 	user, err := h.Service.GetUserById(reqCtx, userID)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  userID,
 			ActorRole:    userRole,
 			Action:       domainaudit.ActionRefresh,
@@ -745,7 +745,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	claimsOverride := buildImpersonationClaimsOverrideFromClaims(tokenClaims)
 	accessToken, err := utils.GenerateJwtWithClaims(&user, logId.String(), claimsOverride)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  userID,
 			ActorRole:    user.Role,
 			Action:       domainaudit.ActionRefresh,
@@ -763,7 +763,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 	refreshToken, err := utils.GenerateRefreshJwt(&user, logId.String(), claimsOverride)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  userID,
 			ActorRole:    user.Role,
 			Action:       domainaudit.ActionRefresh,
@@ -782,7 +782,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	if h.SessionSvc != nil {
 		session, sessionErr := h.SessionSvc.GetSessionByRefreshToken(reqCtx, req.RefreshToken)
 		if sessionErr != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				ActorUserID:  userID,
 				ActorRole:    user.Role,
 				Action:       domainaudit.ActionRefresh,
@@ -801,7 +801,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 
 		refreshExpAt := time.Now().Add(time.Hour * time.Duration(utils.GetEnv("REFRESH_TOKEN_EXP_HOURS", 168)))
 		if sessionErr = h.SessionSvc.RotateSessionTokens(reqCtx, session.SessionID, accessToken, refreshToken, refreshExpAt); sessionErr != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				ActorUserID:  userID,
 				ActorRole:    user.Role,
 				Action:       domainaudit.ActionRefresh,
@@ -822,7 +822,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 	}
 
 	if err = h.Service.LogoutUser(reqCtx, req.RefreshToken); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			ActorUserID:  userID,
 			ActorRole:    user.Role,
 			Action:       domainaudit.ActionRefresh,
@@ -838,7 +838,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		ActorUserID: userID,
 		ActorRole:   user.Role,
 		Action:      domainaudit.ActionRefresh,
@@ -859,7 +859,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 
 	token, ok := ctx.Get("token")
 	if !ok {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogout,
 			Resource:     "auth",
 			Status:       domainaudit.StatusFailed,
@@ -882,7 +882,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 	}
 
 	if err := h.Service.LogoutUser(reqCtx, token.(string)); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogout,
 			Resource:     "auth",
 			Status:       domainaudit.StatusFailed,
@@ -894,7 +894,7 @@ func (h *HandlerUser) Logout(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:   domainaudit.ActionLogout,
 		Resource: "auth",
 		Status:   domainaudit.StatusSuccess,
@@ -991,7 +991,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 
 	token, err := h.Service.ImpersonateUser(reqCtx, id, logId.String())
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogin,
 			Resource:     "user_impersonation",
 			ResourceID:   id,
@@ -1009,7 +1009,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionLogin,
 		Resource:   "user_impersonation",
 		ResourceID: id,
@@ -1044,7 +1044,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 
 	token, err := h.Service.StopImpersonation(reqCtx, logId.String())
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionLogout,
 			Resource:     "user_impersonation",
 			ResourceID:   originalUserID,
@@ -1063,7 +1063,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 		_ = h.Service.LogoutUser(reqCtx, tokenString.(string))
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionLogout,
 		Resource:   "user_impersonation",
 		ResourceID: originalUserID,
@@ -1119,7 +1119,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 	before, _ := h.Service.GetUserById(reqCtx, scope.UserID)
 	data, err := h.Service.Update(reqCtx, scope.UserID, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user",
 			ResourceID:   scope.UserID,
@@ -1141,7 +1141,7 @@ func (h *HandlerUser) Update(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "user",
 		ResourceID: data.Id,
@@ -1174,7 +1174,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 	before, _ := h.Service.GetUserById(reqCtx, id)
 	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user",
 			ResourceID:   id,
@@ -1196,7 +1196,7 @@ func (h *HandlerUser) UpdateUserById(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "user",
 		ResourceID: data.Id,
@@ -1230,7 +1230,7 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 	before, _ := h.Service.GetUserById(reqCtx, scope.UserID)
 	data, err := h.Service.ChangePassword(reqCtx, scope.UserID, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user_password",
 			ResourceID:   scope.UserID,
@@ -1259,7 +1259,7 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "user_password",
 		ResourceID: data.Id,
@@ -1303,7 +1303,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		normalizedEmail := utils.SanitizeEmail(req.Email)
 		if data, err := h.Service.GetUserByEmail(reqCtx, normalizedEmail); err == nil && data.Id != "" {
 			if err := h.ResetService.RequestReset(ctx.Request.Context(), normalizedEmail, utils.FirstNonEmptyString(utils.GetEnv("AUTH_EMAIL_APP_NAME", ""), utils.GetEnv("APP_NAME", "STARTER-KIT"))); err != nil {
-				h.writeAudit(ctx, domainaudit.AuditEvent{
+				h.WriteAudit(ctx, domainaudit.AuditEvent{
 					Action:       domainaudit.ActionUpdate,
 					Resource:     "user_password_reset",
 					Status:       domainaudit.StatusFailed,
@@ -1330,7 +1330,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 			}
 		}
 
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:   domainaudit.ActionUpdate,
 			Resource: "user_password_reset",
 			Status:   domainaudit.StatusSuccess,
@@ -1347,7 +1347,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 
 	token, err := h.Service.ForgotPassword(reqCtx, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user_password_reset",
 			Status:       domainaudit.StatusFailed,
@@ -1362,7 +1362,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:   domainaudit.ActionUpdate,
 		Resource: "user_password_reset",
 		Status:   domainaudit.StatusSuccess,
@@ -1404,7 +1404,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 
 		email, err := h.ResetService.VerifyReset(ctx.Request.Context(), req.Token)
 		if err != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionUpdate,
 				Resource:     "user_password_reset",
 				Status:       domainaudit.StatusFailed,
@@ -1426,7 +1426,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 		if h.SessionSvc != nil {
 			user, err := h.Service.GetUserByEmail(reqCtx, email)
 			if err != nil {
-				h.writeAudit(ctx, domainaudit.AuditEvent{
+				h.WriteAudit(ctx, domainaudit.AuditEvent{
 					Action:       domainaudit.ActionUpdate,
 					Resource:     "user_password_reset",
 					Status:       domainaudit.StatusFailed,
@@ -1443,7 +1443,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			userID = user.Id
 		}
 		if err := h.Service.ResetPasswordByEmail(reqCtx, email, req.NewPassword); err != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionUpdate,
 				Resource:     "user_password_reset",
 				Status:       domainaudit.StatusFailed,
@@ -1458,7 +1458,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			return
 		}
 		if err := h.revokePasswordResetSessions(reqCtx, userID); err != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionUpdate,
 				Resource:     "user_password_reset",
 				Status:       domainaudit.StatusFailed,
@@ -1474,7 +1474,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			return
 		}
 
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:   domainaudit.ActionUpdate,
 			Resource: "user_password_reset",
 			Status:   domainaudit.StatusSuccess,
@@ -1489,7 +1489,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 	}
 
 	if err := h.Service.ResetPassword(reqCtx, req); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "user_password_reset",
 			Status:       domainaudit.StatusFailed,
@@ -1511,7 +1511,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			return
 		}
 		if err := h.revokePasswordResetSessions(reqCtx, utils.InterfaceString(claims["user_id"])); err != nil {
-			h.writeAudit(ctx, domainaudit.AuditEvent{
+			h.WriteAudit(ctx, domainaudit.AuditEvent{
 				Action:       domainaudit.ActionUpdate,
 				Resource:     "user_password_reset",
 				Status:       domainaudit.StatusFailed,
@@ -1525,7 +1525,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			return
 		}
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:   domainaudit.ActionUpdate,
 		Resource: "user_password_reset",
 		Status:   domainaudit.StatusSuccess,
@@ -1562,7 +1562,7 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 	before, _ := h.Service.GetUserById(reqCtx, scope.UserID)
 
 	if err := h.Service.Delete(reqCtx, scope.UserID); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "user",
 			ResourceID:   scope.UserID,
@@ -1583,7 +1583,7 @@ func (h *HandlerUser) Delete(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "user",
 		ResourceID: scope.UserID,
@@ -1609,7 +1609,7 @@ func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 	before, _ := h.Service.GetUserById(reqCtx, id)
 
 	if err := h.Service.Delete(reqCtx, id); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "user",
 			ResourceID:   id,
@@ -1630,7 +1630,7 @@ func (h *HandlerUser) DeleteUserById(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "user",
 		ResourceID: id,

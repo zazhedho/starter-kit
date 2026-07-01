@@ -20,14 +20,14 @@ import (
 )
 
 type AppConfigHandler struct {
-	Service      interfaceappconfig.ServiceAppConfigInterface
-	AuditService interfaceaudit.ServiceAuditInterface
+	Service interfaceappconfig.ServiceAppConfigInterface
+	handlercommon.AuditWriter
 }
 
 func NewAppConfigHandler(s interfaceappconfig.ServiceAppConfigInterface, auditService interfaceaudit.ServiceAuditInterface) *AppConfigHandler {
 	return &AppConfigHandler{
-		Service:      s,
-		AuditService: auditService,
+		Service:     s,
+		AuditWriter: handlercommon.NewAuditWriter(auditService, "AppConfigHandler"),
 	}
 }
 
@@ -99,7 +99,7 @@ func (h *AppConfigHandler) Update(ctx *gin.Context) {
 	before, _ := h.Service.GetByID(reqCtx, id)
 	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "config",
 			ResourceID:   id,
@@ -123,7 +123,7 @@ func (h *AppConfigHandler) Update(ctx *gin.Context) {
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "config",
 		ResourceID: data.Id,

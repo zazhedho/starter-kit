@@ -17,16 +17,15 @@ import (
 )
 
 type HandlerSession struct {
-	Service      interfacesession.ServiceSessionInterface
-	AuditService interfaceaudit.ServiceAuditInterface
+	Service interfacesession.ServiceSessionInterface
+	handlercommon.AuditWriter
 }
 
 func NewSessionHandler(s interfacesession.ServiceSessionInterface, auditService interfaceaudit.ServiceAuditInterface) *HandlerSession {
-	return &HandlerSession{Service: s, AuditService: auditService}
-}
-
-func (h *HandlerSession) writeAudit(ctx *gin.Context, event domainaudit.AuditEvent) {
-	handlercommon.WriteAudit(ctx, h.AuditService, event, "SessionHandler")
+	return &HandlerSession{
+		Service:     s,
+		AuditWriter: handlercommon.NewAuditWriter(auditService, "SessionHandler"),
+	}
 }
 
 func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
@@ -71,7 +70,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 
 	sessionID := ctx.Param("session_id")
 	if sessionID == "" {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			Status:       domainaudit.StatusFailed,
@@ -94,7 +93,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 
 	session, err := h.Service.GetSessionBySessionID(reqCtx, sessionID)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			ResourceID:   sessionID,
@@ -110,7 +109,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 	}
 
 	if session.UserID != scope.UserID {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			ResourceID:   sessionID,
@@ -128,7 +127,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 	}
 
 	if err := h.Service.DestroySession(reqCtx, sessionID); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			ResourceID:   sessionID,
@@ -142,7 +141,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "session",
 		ResourceID: sessionID,
@@ -170,7 +169,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	token, _ := ctx.Get("token")
 	currentSession, err := h.Service.GetSessionByToken(reqCtx, token.(string))
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			Status:       domainaudit.StatusFailed,
@@ -184,7 +183,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	}
 
 	if err := h.Service.DestroyOtherSessions(reqCtx, scope.UserID, currentSession.SessionID); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			ResourceID:   currentSession.SessionID,
@@ -198,7 +197,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "session",
 		ResourceID: currentSession.SessionID,

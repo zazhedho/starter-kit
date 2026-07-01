@@ -3,20 +3,13 @@ package handlerpermission
 import (
 	"errors"
 	"net/http"
-	domainaudit "starter-kit/internal/domain/audit"
-	handlercommon "starter-kit/internal/handlers/http/common"
 	"starter-kit/pkg/messages"
 	"starter-kit/pkg/response"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
-
-func (h *PermissionHandler) writeAudit(ctx *gin.Context, event domainaudit.AuditEvent) {
-	handlercommon.WriteAudit(ctx, h.AuditService, event, "PermissionHandler")
-}
 
 func permissionMutationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiResponse) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {

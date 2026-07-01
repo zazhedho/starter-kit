@@ -12,8 +12,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func WriteAudit(ctx *gin.Context, auditService interfaceaudit.ServiceAuditInterface, event domainaudit.AuditEvent, scope string) {
-	if auditService == nil {
+type AuditWriter struct {
+	Service interfaceaudit.ServiceAuditInterface
+	Scope   string
+}
+
+func NewAuditWriter(service interfaceaudit.ServiceAuditInterface, scope string) AuditWriter {
+	return AuditWriter{Service: service, Scope: scope}
+}
+
+func (w AuditWriter) WriteAudit(ctx *gin.Context, event domainaudit.AuditEvent) {
+	if w.Service == nil {
 		return
 	}
 
@@ -29,7 +38,7 @@ func WriteAudit(ctx *gin.Context, auditService interfaceaudit.ServiceAuditInterf
 	event.UserAgent = ctx.GetHeader("User-Agent")
 	event.Metadata = utils.MergeMetadata(event.Metadata, utils.GetImpersonationMetadata(ctx))
 
-	if err := auditService.Store(ctx.Request.Context(), event); err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("[%s][Audit]; failed to store audit trail: %v", scope, err))
+	if err := w.Service.Store(ctx.Request.Context(), event); err != nil {
+		logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("[%s][Audit]; failed to store audit trail: %v", w.Scope, err))
 	}
 }

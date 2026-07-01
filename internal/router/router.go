@@ -17,6 +17,8 @@ import (
 	roleHandler "starter-kit/internal/handlers/http/role"
 	sessionHandler "starter-kit/internal/handlers/http/session"
 	userHandler "starter-kit/internal/handlers/http/user"
+	interfaceaudit "starter-kit/internal/interfaces/audit"
+	interfacepermission "starter-kit/internal/interfaces/permission"
 	interfacesession "starter-kit/internal/interfaces/session"
 	appConfigRepo "starter-kit/internal/repositories/appconfig"
 	auditRepo "starter-kit/internal/repositories/audit"
@@ -72,17 +74,27 @@ func NewRoutes() *Routes {
 	}
 }
 
+func (r *Routes) auditService() interfaceaudit.ServiceAuditInterface {
+	return auditSvc.NewAuditService(auditRepo.NewAuditRepo(r.DB))
+}
+
+func (r *Routes) permissionRepo() interfacepermission.RepoPermissionInterface {
+	return permissionRepo.NewPermissionRepo(r.DB)
+}
+
+func (r *Routes) middleware(permissionRepo interfacepermission.RepoPermissionInterface) *middlewares.Middleware {
+	return middlewares.NewMiddleware(authRepo.NewBlacklistRepo(r.DB), permissionRepo)
+}
+
 func (r *Routes) UserRoutes() {
 	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
 	repo := userRepo.NewUserRepo(r.DB)
 	rRepo := roleRepo.NewRoleRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	pRepo := r.permissionRepo()
 	redisClient := database.GetRedisClient()
 	permissionInvalidator := permissioncache.NewInvalidator(redisClient)
 	uc := userSvc.NewUserService(repo, blacklistRepo, rRepo, pRepo, permissionInvalidator)
 	var userSessionSvc interfacesession.ServiceSessionInterface
-	repoAudit := auditRepo.NewAuditRepo(r.DB)
-	svcAudit := auditSvc.NewAuditService(repoAudit)
 	repoAppConfig := appConfigRepo.NewAppConfigRepo(r.DB)
 	svcAppConfig := appConfigSvc.NewAppConfigService(repoAppConfig)
 
@@ -110,7 +122,7 @@ func (r *Routes) UserRoutes() {
 		}
 	}
 
-	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, svcAudit, svcAppConfig, registerOTPService, passwordResetService)
+	h := userHandler.NewUserHandler(uc, blacklistRepo, userSessionSvc, loginLimiter, r.auditService(), svcAppConfig, registerOTPService, passwordResetService)
 	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
 
 	// Setup register rate limiter
@@ -160,15 +172,12 @@ func (r *Routes) UserRoutes() {
 
 func (r *Routes) RoleRoutes() {
 	repoRole := roleRepo.NewRoleRepo(r.DB)
-	repoPermission := permissionRepo.NewPermissionRepo(r.DB)
+	repoPermission := r.permissionRepo()
 	repoMenu := menuRepo.NewMenuRepo(r.DB)
 	permissionInvalidator := permissioncache.NewInvalidator(database.GetRedisClient())
 	svc := roleSvc.NewRoleService(repoRole, repoPermission, repoMenu, permissionInvalidator)
-	repoAudit := auditRepo.NewAuditRepo(r.DB)
-	svcAudit := auditSvc.NewAuditService(repoAudit)
-	h := roleHandler.NewRoleHandler(svc, svcAudit)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, repoPermission)
+	h := roleHandler.NewRoleHandler(svc, r.auditService())
+	mdw := r.middleware(repoPermission)
 
 	// List endpoints
 	r.App.GET("/api/roles", mdw.AuthMiddleware(), mdw.PermissionMiddleware("roles", "list"), h.GetAll)
@@ -187,14 +196,11 @@ func (r *Routes) RoleRoutes() {
 }
 
 func (r *Routes) PermissionRoutes() {
-	repo := permissionRepo.NewPermissionRepo(r.DB)
+	repo := r.permissionRepo()
 	permissionInvalidator := permissioncache.NewInvalidator(database.GetRedisClient())
 	svc := permissionSvc.NewPermissionService(repo, permissionInvalidator)
-	repoAudit := auditRepo.NewAuditRepo(r.DB)
-	svcAudit := auditSvc.NewAuditService(repoAudit)
-	h := permissionHandler.NewPermissionHandler(svc, svcAudit)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, repo)
+	h := permissionHandler.NewPermissionHandler(svc, r.auditService())
+	mdw := r.middleware(repo)
 
 	// List endpoints
 	r.App.GET("/api/permissions", mdw.AuthMiddleware(), mdw.PermissionMiddleware("permissions", "list"), h.GetAll)
@@ -214,13 +220,10 @@ func (r *Routes) PermissionRoutes() {
 
 func (r *Routes) MenuRoutes() {
 	repo := menuRepo.NewMenuRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
+	pRepo := r.permissionRepo()
 	svc := menuSvc.NewMenuService(repo, pRepo)
-	repoAudit := auditRepo.NewAuditRepo(r.DB)
-	svcAudit := auditSvc.NewAuditService(repoAudit)
-	h := menuHandler.NewMenuHandler(svc, svcAudit)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+	h := menuHandler.NewMenuHandler(svc, r.auditService())
+	mdw := r.middleware(pRepo)
 
 	// Public endpoints for authenticated users
 	r.App.GET("/api/menus/active", mdw.AuthMiddleware(), h.GetActiveMenus)
@@ -240,12 +243,9 @@ func (r *Routes) MenuRoutes() {
 func (r *Routes) AppConfigRoutes() {
 	repo := appConfigRepo.NewAppConfigRepo(r.DB)
 	svc := appConfigSvc.NewAppConfigService(repo)
-	repoAudit := auditRepo.NewAuditRepo(r.DB)
-	svcAudit := auditSvc.NewAuditService(repoAudit)
-	h := appConfigHandler.NewAppConfigHandler(svc, svcAudit)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+	h := appConfigHandler.NewAppConfigHandler(svc, r.auditService())
+	pRepo := r.permissionRepo()
+	mdw := r.middleware(pRepo)
 
 	r.App.GET("/api/configs", mdw.AuthMiddleware(), mdw.PermissionMiddleware("configs", "list"), h.GetAll)
 
@@ -260,9 +260,8 @@ func (r *Routes) AuditRoutes() {
 	repo := auditRepo.NewAuditRepo(r.DB)
 	svc := auditSvc.NewAuditService(repo)
 	h := auditHandler.NewAuditHandler(svc)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+	pRepo := r.permissionRepo()
+	mdw := r.middleware(pRepo)
 
 	r.App.GET("/api/audits", mdw.AuthMiddleware(), mdw.PermissionMiddleware("audits", "list"), h.GetAll)
 
@@ -281,12 +280,9 @@ func (r *Routes) SessionRoutes() {
 
 	repo := sessionRepo.NewSessionRepository(redisClient)
 	svc := sessionSvc.NewSessionService(repo)
-	repoAudit := auditRepo.NewAuditRepo(r.DB)
-	svcAudit := auditSvc.NewAuditService(repoAudit)
-	h := sessionHandler.NewSessionHandler(svc, svcAudit)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+	h := sessionHandler.NewSessionHandler(svc, r.auditService())
+	pRepo := r.permissionRepo()
+	mdw := r.middleware(pRepo)
 
 	// Session management endpoints (authenticated users only)
 	sessionGroup := r.App.Group("/api/user").Use(mdw.AuthMiddleware())
@@ -303,9 +299,8 @@ func (r *Routes) LocationRoutes() {
 	repo := locationRepo.NewLocationRepo(r.DB)
 	svc := locationSvc.NewLocationService(repo, database.GetRedisClient())
 	h := locationHandler.NewLocationHandler(svc)
-	blacklistRepo := authRepo.NewBlacklistRepo(r.DB)
-	pRepo := permissionRepo.NewPermissionRepo(r.DB)
-	mdw := middlewares.NewMiddleware(blacklistRepo, pRepo)
+	pRepo := r.permissionRepo()
+	mdw := r.middleware(pRepo)
 
 	location := r.App.Group("/api/location")
 	{

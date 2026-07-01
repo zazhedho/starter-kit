@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	domainaudit "starter-kit/internal/domain/audit"
-	handlercommon "starter-kit/internal/handlers/http/common"
 	"starter-kit/pkg/messages"
 	"starter-kit/pkg/response"
 	"starter-kit/utils"
@@ -52,10 +50,6 @@ func (h *HandlerUser) respondThrottle(ctx *gin.Context, logId uuid.UUID, ttl tim
 	res := response.Response(http.StatusTooManyRequests, messages.MsgSomethingWrong, logId, nil)
 	res.Error = response.Errors{Code: http.StatusTooManyRequests, Message: message}
 	ctx.AbortWithStatusJSON(http.StatusTooManyRequests, res)
-}
-
-func (h *HandlerUser) writeAudit(ctx *gin.Context, event domainaudit.AuditEvent) {
-	handlercommon.WriteAudit(ctx, h.AuditService, event, "UserHandler")
 }
 
 func (h *HandlerUser) isRuntimeConfigEnabled(ctx context.Context, configKey string, fallback bool) (bool, error) {

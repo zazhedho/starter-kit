@@ -19,14 +19,14 @@ import (
 )
 
 type MenuHandler struct {
-	Service      interfacemenu.ServiceMenuInterface
-	AuditService interfaceaudit.ServiceAuditInterface
+	Service interfacemenu.ServiceMenuInterface
+	handlercommon.AuditWriter
 }
 
 func NewMenuHandler(s interfacemenu.ServiceMenuInterface, auditService interfaceaudit.ServiceAuditInterface) *MenuHandler {
 	return &MenuHandler{
-		Service:      s,
-		AuditService: auditService,
+		Service:     s,
+		AuditWriter: handlercommon.NewAuditWriter(auditService, "MenuHandler"),
 	}
 }
 
@@ -137,7 +137,7 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 	before, _ := h.Service.GetByID(reqCtx, id)
 	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "menu",
 			ResourceID:   id,
@@ -152,7 +152,7 @@ func (h *MenuHandler) Update(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "menu",
 		ResourceID: data.Id,

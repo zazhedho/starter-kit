@@ -19,14 +19,14 @@ import (
 )
 
 type RoleHandler struct {
-	Service      interfacerole.ServiceRoleInterface
-	AuditService interfaceaudit.ServiceAuditInterface
+	Service interfacerole.ServiceRoleInterface
+	handlercommon.AuditWriter
 }
 
 func NewRoleHandler(s interfacerole.ServiceRoleInterface, auditService interfaceaudit.ServiceAuditInterface) *RoleHandler {
 	return &RoleHandler{
-		Service:      s,
-		AuditService: auditService,
+		Service:     s,
+		AuditWriter: handlercommon.NewAuditWriter(auditService, "RoleHandler"),
 	}
 }
 
@@ -44,7 +44,7 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 
 	data, err := h.Service.Create(reqCtx, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionCreate,
 			Resource:     "role",
 			Status:       domainaudit.StatusFailed,
@@ -57,7 +57,7 @@ func (h *RoleHandler) Create(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionCreate,
 		Resource:   "role",
 		ResourceID: data.Id,
@@ -134,7 +134,7 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 	before, _ := h.Service.GetByID(reqCtx, id)
 	data, err := h.Service.Update(reqCtx, id, req)
 	if err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionUpdate,
 			Resource:     "role",
 			ResourceID:   id,
@@ -149,7 +149,7 @@ func (h *RoleHandler) Update(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionUpdate,
 		Resource:   "role",
 		ResourceID: data.Id,
@@ -172,7 +172,7 @@ func (h *RoleHandler) Delete(ctx *gin.Context) {
 	before, _ := h.Service.GetByID(reqCtx, id)
 
 	if err := h.Service.Delete(reqCtx, id); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionDelete,
 			Resource:     "role",
 			ResourceID:   id,
@@ -186,7 +186,7 @@ func (h *RoleHandler) Delete(ctx *gin.Context) {
 		ctx.JSON(statusCode, res)
 		return
 	}
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionDelete,
 		Resource:   "role",
 		ResourceID: id,
@@ -259,7 +259,7 @@ func handleRoleRelationAssignment[T any](h *RoleHandler, ctx *gin.Context, req *
 	beforeIDs, _ := assignment.getBefore(reqCtx, id)
 	beforeData := map[string]interface{}{assignment.beforeDataKey: beforeIDs}
 	if err := assignment.assign(reqCtx, id, *req); err != nil {
-		h.writeAudit(ctx, domainaudit.AuditEvent{
+		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,
 			Resource:     assignment.resource,
 			ResourceID:   id,
@@ -275,7 +275,7 @@ func handleRoleRelationAssignment[T any](h *RoleHandler, ctx *gin.Context, req *
 		return
 	}
 
-	h.writeAudit(ctx, domainaudit.AuditEvent{
+	h.WriteAudit(ctx, domainaudit.AuditEvent{
 		Action:     domainaudit.ActionAssign,
 		Resource:   assignment.resource,
 		ResourceID: id,
