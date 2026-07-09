@@ -48,9 +48,9 @@ func (s *RoleService) Create(ctx context.Context, req dto.RoleCreate) (domainrol
 
 	data := domainrole.Role{
 		Id:          utils.CreateUUID(),
-		Name:        req.Name,
-		DisplayName: req.DisplayName,
-		Description: req.Description,
+		Name:        utils.StripHTML(req.Name),
+		DisplayName: utils.StripHTML(req.DisplayName),
+		Description: utils.StripHTML(req.Description),
 		IsSystem:    false,
 		CreatedAt:   time.Now(),
 	}
@@ -132,9 +132,9 @@ func (s *RoleService) Update(ctx context.Context, id string, req dto.RoleUpdate)
 	}
 
 	if req.DisplayName != "" {
-		role.DisplayName = req.DisplayName
+		role.DisplayName = utils.StripHTML(req.DisplayName)
 	}
-	role.Description = req.Description
+	role.Description = utils.StripHTML(req.Description)
 	role.UpdatedAt = new(time.Now())
 
 	if err := s.RoleRepo.Update(ctx, role); err != nil {

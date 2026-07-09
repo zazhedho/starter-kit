@@ -8,6 +8,7 @@ import (
 	interfaceappconfig "starter-kit/internal/interfaces/appconfig"
 	"starter-kit/pkg/configvalue"
 	"starter-kit/pkg/filter"
+	"starter-kit/utils"
 	"time"
 
 	"gorm.io/gorm"
@@ -39,7 +40,7 @@ func (s *AppConfigService) Update(ctx context.Context, id string, req dto.Update
 		return domainappconfig.AppConfig{}, err
 	}
 
-	config.Value = req.Value
+	config.Value = utils.StripHTML(req.Value)
 	if req.IsActive != nil {
 		config.IsActive = *req.IsActive
 	}

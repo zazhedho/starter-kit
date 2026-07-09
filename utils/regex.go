@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"net/mail"
 	"regexp"
 	"strings"
 )
@@ -32,5 +33,14 @@ func NormalizePhoneTo62(phoneInput string) string {
 }
 
 func SanitizeEmail(email string) string {
-	return NormalizeKey(email)
+	email = NormalizeKey(email)
+	if email == "" {
+		return ""
+	}
+
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email {
+		return ""
+	}
+	return parsed.Address
 }

@@ -111,6 +111,11 @@ Repository layer convention:
 - use the generic repository in `internal/repositories/generic` for common CRUD and list query behavior
 - keep module repository files focused on custom query cases only, such as joins, aggregates, or transactional assignment logic
 
+Router and audit convention:
+- keep route wiring in `internal/router/router.go`
+- reuse the router helpers for common dependencies such as permission repository, middleware, and audit service
+- for mutation handlers, embed `handlercommon.AuditWriter` instead of creating per-handler audit wrapper methods
+
 ## Environment
 
 Copy `.env.example` to `.env` and adjust the values as needed.
@@ -264,6 +269,15 @@ Create these parts:
 - `internal/services/<module>`
 - `internal/handlers/http/<module>`
 - route registration in `internal/router/router.go`
+
+For route registration:
+- use the existing router helpers for shared dependencies instead of recreating the same wiring in every route group
+- protect endpoints with `PermissionMiddleware(resource, action)`
+- pass `r.auditService()` to handlers that write audit trails
+
+For handler audit trails:
+- embed `handlercommon.AuditWriter` in handlers that write audit events
+- call `h.WriteAudit(ctx, event)` for mutation success and failure paths
 
 For repository implementation:
 - reuse `internal/repositories/generic.GenericRepository[T]` for `Store`, `GetByID`, `GetAll`, `Update`, and `Delete`

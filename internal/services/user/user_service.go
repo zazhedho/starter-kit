@@ -77,7 +77,7 @@ func (s *ServiceUser) RegisterUser(ctx context.Context, req dto.UserRegister) (d
 
 	data = domainuser.Users{
 		Id:                utils.CreateUUID(),
-		Name:              utils.TitleCase(req.Name),
+		Name:              utils.TitleCase(utils.StripHTML(req.Name)),
 		Phone:             phone,
 		Email:             email,
 		Password:          string(hashedPwd),
@@ -144,7 +144,7 @@ func (s *ServiceUser) AdminCreateUser(ctx context.Context, req dto.AdminCreateUs
 
 	data = domainuser.Users{
 		Id:                utils.CreateUUID(),
-		Name:              utils.TitleCase(req.Name),
+		Name:              utils.TitleCase(utils.StripHTML(req.Name)),
 		Phone:             phone,
 		Email:             email,
 		Password:          string(hashedPwd),
@@ -339,7 +339,7 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 	}
 
 	if req.Name != "" {
-		data.Name = utils.TitleCase(req.Name)
+		data.Name = utils.TitleCase(utils.StripHTML(req.Name))
 	}
 
 	if req.Phone != "" {
