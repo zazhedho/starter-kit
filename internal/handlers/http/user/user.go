@@ -88,7 +88,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
+	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(utils.RedactSensitivePayload(req))))
 
 	otpEnabled, err := h.isRuntimeConfigEnabled(reqCtx, utils.GetEnv("CONFIG_REGISTER_OTP", defaultConfigRegisterOTPEnabled), false)
 	if err != nil {
@@ -330,7 +330,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
+	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(utils.RedactSensitivePayload(req))))
 
 	data, err := h.Service.AdminCreateUser(reqCtx, req)
 	if err != nil {
@@ -380,7 +380,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 	if !handlercommon.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(req)))
+	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", logPrefix, utils.JsonEncode(utils.RedactSensitivePayload(req))))
 
 	normalizedIdentifier, err := serviceuser.ResolveLoginIdentifier(req)
 	if err != nil {
@@ -526,8 +526,9 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		},
 	})
 
-	res := response.Response(http.StatusOK, "success", logId, buildAuthTokenResponse(token, refreshToken))
-	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(token)))
+	data := buildAuthTokenResponse(token, refreshToken)
+	res := response.Response(http.StatusOK, "success", logId, data)
+	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Response: %+v;", logPrefix, utils.JsonEncode(utils.RedactSensitivePayload(data))))
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -642,7 +643,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 	data["provider"] = "google"
 
 	res := response.Response(http.StatusOK, successMessage, logId, data)
-	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; %s; Data: %+v", logPrefix, successMessage, data))
+	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; %s; Data: %+v", logPrefix, successMessage, utils.JsonEncode(utils.RedactSensitivePayload(data))))
 	ctx.JSON(http.StatusOK, res)
 }
 

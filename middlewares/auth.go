@@ -50,7 +50,7 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 
 		tokenString, dataJWT, err := utils.JwtClaims(ctx)
 		if err != nil {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid Token: %s; Error: %s;", logPrefix, tokenString, err.Error()))
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid token; Error: %s;", logPrefix, err.Error()))
 			res := response.Unauthorized(logId, "Invalid or expired token. Please login again.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
 			return
@@ -74,7 +74,7 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		}
 
 		if isBlacklisted {
-			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid Token: %s; Error: token is blacklisted;", logPrefix, tokenString))
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid token; Error: token is blacklisted;", logPrefix))
 			res := response.Unauthorized(logId, "Your session is no longer valid. Please login again.")
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, res)
 			return
