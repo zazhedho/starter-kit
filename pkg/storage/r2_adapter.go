@@ -51,7 +51,7 @@ func NewR2Adapter(config Config) (StorageProvider, error) {
 	}, nil
 }
 
-func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (string, error) {
+func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (FileInfo, error) {
 	objectName := buildObjectName(fileHeader.Filename, folder)
 
 	fileSize := fileHeader.Size
@@ -65,14 +65,13 @@ func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHea
 		ContentType: contentType,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to upload file to R2: %w", err)
+		return FileInfo{}, fmt.Errorf("failed to upload file to R2: %w", err)
 	}
 
-	fileURL := fmt.Sprintf("%s/%s", strings.TrimRight(r.baseURL, "/"), objectName)
-	return fileURL, nil
+	return FileInfo{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
 }
 
-func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (string, error) {
+func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (FileInfo, error) {
 	objectName := buildObjectName(filename, folder)
 
 	if contentType == "" {
@@ -84,11 +83,10 @@ func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filena
 		ContentType: contentType,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to upload file to R2: %w", err)
+		return FileInfo{}, fmt.Errorf("failed to upload file to R2: %w", err)
 	}
 
-	fileURL := fmt.Sprintf("%s/%s", strings.TrimRight(r.baseURL, "/"), objectName)
-	return fileURL, nil
+	return FileInfo{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
 }
 
 func (r *R2Adapter) DeleteFile(ctx context.Context, fileURL string) error {

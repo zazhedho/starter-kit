@@ -111,6 +111,31 @@ func TestValidateStartupConfigValidatesConfiguredRedisAndStorageOnly(t *testing.
 	}
 }
 
+func TestValidateStartupConfigRequiresStorageWhenMediaEnabled(t *testing.T) {
+	clearStartupEnv(t)
+	setRequiredStartupEnv(t)
+	t.Setenv("MEDIA_ENABLED", "true")
+	t.Setenv("MEDIA_MAX_FILE_SIZE_MB", "0")
+	t.Setenv("STORAGE_PROVIDER", "r2")
+
+	err := ValidateStartupConfig("8080")
+	if err == nil {
+		t.Fatal("expected media storage config error")
+	}
+
+	message := err.Error()
+	for _, want := range []string{
+		"STORAGE_ENDPOINT is required when storage is configured",
+		"STORAGE_ACCESS_KEY is required when storage is configured",
+		"STORAGE_BASE_URL is required when media is enabled",
+		"MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("expected %q in error %q", want, message)
+		}
+	}
+}
+
 func setRequiredStartupEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
@@ -143,6 +168,11 @@ func clearStartupEnv(t *testing.T) {
 		"SMTP_FROM",
 		"SMTP_SUBJECT",
 		"RESET_SUBJECT",
+		"MEDIA_ENABLED",
+		"MEDIA_MAX_FILE_SIZE_MB",
+		"MEDIA_ALLOWED_CONTENT_TYPES",
+		"MEDIA_UPLOAD_RATE_LIMIT",
+		"MEDIA_UPLOAD_RATE_WINDOW_SECONDS",
 		"STORAGE_PROVIDER",
 		"STORAGE_ENDPOINT",
 		"STORAGE_ACCESS_KEY",

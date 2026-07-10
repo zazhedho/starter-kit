@@ -103,7 +103,8 @@ func validateOptionalSMTPConfig() []string {
 }
 
 func validateOptionalStorageConfig() []string {
-	if !hasAnyEnv("STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME", "STORAGE_BASE_URL", "R2_ACCOUNT_ID") {
+	mediaEnabled := utils.GetEnv("MEDIA_ENABLED", false)
+	if !mediaEnabled && !hasAnyEnv("STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME", "STORAGE_BASE_URL", "R2_ACCOUNT_ID") {
 		return nil
 	}
 
@@ -123,10 +124,16 @@ func validateOptionalStorageConfig() []string {
 			problems = append(problems, key+" is required when storage is configured")
 		}
 	}
+	if mediaEnabled && utils.GetEnv("STORAGE_BASE_URL", "") == "" {
+		problems = append(problems, "STORAGE_BASE_URL is required when media is enabled")
+	}
 	if baseURL := utils.GetEnv("STORAGE_BASE_URL", ""); baseURL != "" {
 		if _, err := url.ParseRequestURI(baseURL); err != nil {
 			problems = append(problems, "STORAGE_BASE_URL must be a valid URL")
 		}
+	}
+	if maxSize := utils.GetEnv("MEDIA_MAX_FILE_SIZE_MB", 5); maxSize <= 0 || maxSize > 1024 {
+		problems = append(problems, "MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024")
 	}
 	return problems
 }

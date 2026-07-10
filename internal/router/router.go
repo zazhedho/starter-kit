@@ -2,16 +2,19 @@ package router
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"starter-kit/infrastructure/database"
+	mediaInfrastructure "starter-kit/infrastructure/media"
 	permissioncache "starter-kit/internal/cache/permission"
 	appConfigHandler "starter-kit/internal/handlers/http/appconfig"
 	auditHandler "starter-kit/internal/handlers/http/audit"
 	locationHandler "starter-kit/internal/handlers/http/location"
+	mediaHandler "starter-kit/internal/handlers/http/media"
 	menuHandler "starter-kit/internal/handlers/http/menu"
 	permissionHandler "starter-kit/internal/handlers/http/permission"
 	roleHandler "starter-kit/internal/handlers/http/role"
@@ -24,6 +27,7 @@ import (
 	auditRepo "starter-kit/internal/repositories/audit"
 	authRepo "starter-kit/internal/repositories/auth"
 	locationRepo "starter-kit/internal/repositories/location"
+	mediaRepo "starter-kit/internal/repositories/media"
 	menuRepo "starter-kit/internal/repositories/menu"
 	otpRepo "starter-kit/internal/repositories/otp"
 	permissionRepo "starter-kit/internal/repositories/permission"
@@ -34,6 +38,7 @@ import (
 	appConfigSvc "starter-kit/internal/services/appconfig"
 	auditSvc "starter-kit/internal/services/audit"
 	locationSvc "starter-kit/internal/services/location"
+	mediaSvc "starter-kit/internal/services/media"
 	menuSvc "starter-kit/internal/services/menu"
 	otpSvc "starter-kit/internal/services/otp"
 	permissionSvc "starter-kit/internal/services/permission"
@@ -315,4 +320,38 @@ func (r *Routes) LocationRoutes() {
 		locationPriv.POST("/sync", mdw.PermissionMiddleware("locations", "sync"), h.Sync)
 		locationPriv.GET("/sync/:id", mdw.PermissionMiddleware("locations", "sync"), h.GetSyncJob)
 	}
+}
+
+func (r *Routes) MediaRoutes() error {
+	if !utils.GetEnv("MEDIA_ENABLED", false) {
+		logger.WriteLog(logger.LogLevelDebug, "Media routes disabled")
+		return nil
+	}
+
+	storageProvider, err := mediaInfrastructure.InitStorage()
+	if err != nil {
+		return err
+	}
+
+	maxFileSize := int64(utils.GetEnv("MEDIA_MAX_FILE_SIZE_MB", 5)) << 20
+	allowedContentTypes := strings.Split(utils.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", "image/jpeg,image/png,image/webp,image/gif,application/pdf"), ",")
+	repo := mediaRepo.NewMediaRepo(r.DB)
+	svc := mediaSvc.NewMediaService(repo, storageProvider, maxFileSize, allowedContentTypes)
+	h := mediaHandler.NewMediaHandler(svc, r.auditService())
+	mdw := r.middleware(r.permissionRepo())
+
+	media := r.App.Group("/api/media").Use(mdw.AuthMiddleware())
+	{
+		uploadLimiter := middlewares.IPRateLimitMiddleware(
+			database.GetRedisClient(),
+			"media_upload",
+			utils.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
+			time.Duration(utils.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60))*time.Second,
+		)
+		media.POST("", uploadLimiter, h.Upload)
+		media.DELETE("/:id", h.Delete)
+	}
+
+	logger.WriteLog(logger.LogLevelInfo, "Media routes registered")
+	return nil
 }

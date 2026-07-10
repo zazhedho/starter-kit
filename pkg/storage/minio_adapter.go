@@ -63,7 +63,7 @@ func NewMinIOAdapter(config Config) (StorageProvider, error) {
 	}, nil
 }
 
-func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (string, error) {
+func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (FileInfo, error) {
 	objectName := buildObjectName(fileHeader.Filename, folder)
 
 	fileSize := fileHeader.Size
@@ -77,14 +77,13 @@ func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, file
 		ContentType: contentType,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to upload file: %w", err)
+		return FileInfo{}, fmt.Errorf("failed to upload file: %w", err)
 	}
 
-	fileURL := fmt.Sprintf("%s/%s/%s", m.baseURL, m.bucketName, objectName)
-	return fileURL, nil
+	return FileInfo{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
 }
 
-func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (string, error) {
+func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (FileInfo, error) {
 	objectName := buildObjectName(filename, folder)
 
 	if contentType == "" {
@@ -96,11 +95,10 @@ func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, fil
 		ContentType: contentType,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to upload file: %w", err)
+		return FileInfo{}, fmt.Errorf("failed to upload file: %w", err)
 	}
 
-	fileURL := fmt.Sprintf("%s/%s/%s", m.baseURL, m.bucketName, objectName)
-	return fileURL, nil
+	return FileInfo{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
 }
 
 func (m *MinIOAdapter) DeleteFile(ctx context.Context, fileURL string) error {

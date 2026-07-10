@@ -54,6 +54,7 @@ func newRouterDryRunDB(t *testing.T) *gorm.DB {
 }
 
 func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
+	t.Setenv("MEDIA_ENABLED", "false")
 	routes := NewRoutes()
 	routes.DB = newRouterDryRunDB(t)
 
@@ -64,6 +65,9 @@ func TestRouteGroupsRegisterWithDryRunDB(t *testing.T) {
 	routes.AppConfigRoutes()
 	routes.AuditRoutes()
 	routes.LocationRoutes()
+	if err := routes.MediaRoutes(); err != nil {
+		t.Fatalf("register media routes: %v", err)
+	}
 
 	registered := map[string]bool{}
 	for _, route := range routes.App.Routes() {

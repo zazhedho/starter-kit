@@ -99,6 +99,7 @@ func main() {
 	routes.AppConfigRoutes()
 	routes.AuditRoutes()
 	routes.LocationRoutes()
+	FailOnError(routes.MediaRoutes(), "Failed to initialize media routes")
 
 	// Register session routes if Redis is available
 	if redisClient != nil {
