@@ -510,6 +510,7 @@ func TestUserHandlerReadUpdateAndDeleteFlows(t *testing.T) {
 }
 
 func TestUserHandlerPasswordAndSessionFlows(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
 	handler := newUserHandlerForTest()
 	userID := uuid.NewString()
 
@@ -640,6 +641,7 @@ func TestUserHandlerRegistrationConfigBranches(t *testing.T) {
 }
 
 func TestUserHandlerServiceErrorBranches(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
 	userID := uuid.NewString()
 	scope := authscope.New(userID, "Jane Doe", "user", nil)
 	service := &userServiceTestDouble{

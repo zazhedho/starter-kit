@@ -1345,6 +1345,15 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		return
 	}
 
+	appEnv := utils.NormalizeKey(utils.GetEnv("APP_ENV", ""))
+	if appEnv != "development" && appEnv != "local" && appEnv != "test" {
+		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Development password reset fallback is disabled in APP_ENV=%s", logPrefix, appEnv))
+		res := response.Response(http.StatusServiceUnavailable, messages.MsgSomethingWrong, logId, nil)
+		res.Error = response.Errors{Code: http.StatusServiceUnavailable, Message: "Password reset service is temporarily unavailable."}
+		ctx.JSON(http.StatusServiceUnavailable, res)
+		return
+	}
+
 	token, err := h.Service.ForgotPassword(reqCtx, req)
 	if err != nil {
 		h.WriteAudit(ctx, domainaudit.AuditEvent{
@@ -1372,7 +1381,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		},
 	})
 
-	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("MOCK EMAIL SENT: Reset Token for %s: %s", req.Email, token))
+	logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Development password reset token generated for %s", logPrefix, utils.SanitizeEmail(req.Email)))
 
 	res := response.Response(http.StatusOK, "Password reset instructions sent to your email", logId, token)
 	ctx.JSON(http.StatusOK, res)

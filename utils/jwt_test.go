@@ -54,6 +54,24 @@ func TestGenerateRefreshJwtIncludesRefreshTokenType(t *testing.T) {
 	}
 }
 
+func TestGeneratePasswordResetJwtIncludesDedicatedTokenType(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+	t.Setenv("RESET_TTL_SECONDS", "900")
+
+	token, err := GeneratePasswordResetJwt(&domainuser.Users{Id: "user-1"}, "reset-1")
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	claims, err := JwtClaim(token)
+	if err != nil {
+		t.Fatalf("expected valid token, got %v", err)
+	}
+	if claims["token_type"] != TokenTypePasswordReset {
+		t.Fatalf("expected password reset token type, got %+v", claims)
+	}
+}
+
 func TestJwtExpiresAt(t *testing.T) {
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 

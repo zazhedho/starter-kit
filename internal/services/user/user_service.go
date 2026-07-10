@@ -421,7 +421,7 @@ func (s *ServiceUser) ForgotPassword(ctx context.Context, req dto.ForgotPassword
 		return "", nil
 	}
 
-	token, err := utils.GenerateJwt(&data, "reset_password")
+	token, err := utils.GeneratePasswordResetJwt(&data, "reset_password")
 	if err != nil {
 		return "", err
 	}
@@ -438,6 +438,9 @@ func (s *ServiceUser) ResetPassword(ctx context.Context, req dto.ResetPasswordRe
 	if err != nil {
 		return errors.New("invalid or expired token")
 	}
+	if utils.InterfaceString(claims["token_type"]) != utils.TokenTypePasswordReset {
+		return errors.New("invalid or expired token")
+	}
 
 	isUsed, err := s.BlacklistRepo.ExistsByToken(ctx, req.Token)
 	if err != nil {
@@ -447,7 +450,10 @@ func (s *ServiceUser) ResetPassword(ctx context.Context, req dto.ResetPasswordRe
 		return errors.New("invalid or expired token")
 	}
 
-	userId := claims["user_id"].(string)
+	userId := strings.TrimSpace(utils.InterfaceString(claims["user_id"]))
+	if userId == "" {
+		return errors.New("invalid or expired token")
+	}
 
 	data, err := s.UserRepo.GetByID(ctx, userId)
 	if err != nil {

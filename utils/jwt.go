@@ -13,6 +13,12 @@ import (
 
 const minJWTKeyLength = 32
 
+const (
+	TokenTypeAccess        = "access"
+	TokenTypeRefresh       = "refresh"
+	TokenTypePasswordReset = "password_reset"
+)
+
 var (
 	ErrJWTKeyNotConfigured = errors.New("jwt key is not configured")
 	ErrJWTKeyTooShort      = fmt.Errorf("jwt key must be at least %d characters", minJWTKeyLength)
@@ -34,6 +40,16 @@ func GenerateJwt(user *domainuser.Users, logId string) (string, error) {
 	return GenerateJwtWithClaims(user, logId, nil)
 }
 
+func GeneratePasswordResetJwt(user *domainuser.Users, logId string) (string, error) {
+	resetExp := time.Now().Add(time.Duration(GetEnv("RESET_TTL_SECONDS", 900)) * time.Second)
+	return GenerateJwtWithClaims(user, logId, &AppClaims{
+		TokenType: TokenTypePasswordReset,
+		RegisteredClaims: &jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(resetExp),
+		},
+	})
+}
+
 func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride *AppClaims) (string, error) {
 	secret, err := jwtSecret()
 	if err != nil {
@@ -45,7 +61,7 @@ func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride 
 		UserId:    user.Id,
 		Username:  user.Name,
 		Role:      user.Role,
-		TokenType: "access",
+		TokenType: TokenTypeAccess,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ID:        logId,
 			ExpiresAt: jwt.NewNumericDate(accessExp),
@@ -60,6 +76,9 @@ func GenerateJwtWithClaims(user *domainuser.Users, logId string, claimsOverride 
 		claims.OriginalUserId = claimsOverride.OriginalUserId
 		claims.OriginalUsername = claimsOverride.OriginalUsername
 		claims.OriginalRole = claimsOverride.OriginalRole
+		if claimsOverride.RegisteredClaims != nil && claimsOverride.ExpiresAt != nil {
+			claims.ExpiresAt = claimsOverride.ExpiresAt
+		}
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
@@ -83,7 +102,7 @@ func GenerateRefreshJwt(user *domainuser.Users, logId string, claimsOverride *Ap
 		UserId:    user.Id,
 		Username:  user.Name,
 		Role:      user.Role,
-		TokenType: "refresh",
+		TokenType: TokenTypeRefresh,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ID:        logId,
 			ExpiresAt: jwt.NewNumericDate(refreshExp),

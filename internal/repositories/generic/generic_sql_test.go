@@ -191,6 +191,7 @@ func TestBuildSearchFuncAndFilteringBranches(t *testing.T) {
 	})
 	if query == nil {
 		t.Fatal("expected filtered query")
+		return
 	}
 	query.Find(&rows)
 	if sql := query.Statement.SQL.String(); strings.Contains(sql, "unsafe") {

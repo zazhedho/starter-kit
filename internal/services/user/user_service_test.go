@@ -1010,7 +1010,7 @@ func TestUserServiceErrorBranches(t *testing.T) {
 	}
 
 	resetUser := domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer}
-	resetToken, err := utils.GenerateJwt(&resetUser, "reset_password")
+	resetToken, err := utils.GeneratePasswordResetJwt(&resetUser, "reset_password")
 	if err != nil {
 		t.Fatalf("generate reset token: %v", err)
 	}

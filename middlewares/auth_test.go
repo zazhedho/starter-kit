@@ -136,12 +136,16 @@ func TestAuthMiddlewareAllowsValidAccessToken(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareRejectsRefreshToken(t *testing.T) {
-	mdw := NewMiddleware(&authRepoTestDouble{}, &permissionRepoTestDouble{})
-	rec := performMiddlewareRequest(testToken(t, "refresh", utils.RoleViewer), mdw.AuthMiddleware())
+func TestAuthMiddlewareRejectsNonAccessToken(t *testing.T) {
+	for _, tokenType := range []string{utils.TokenTypeRefresh, utils.TokenTypePasswordReset} {
+		t.Run(tokenType, func(t *testing.T) {
+			mdw := NewMiddleware(&authRepoTestDouble{}, &permissionRepoTestDouble{})
+			rec := performMiddlewareRequest(testToken(t, tokenType, utils.RoleViewer), mdw.AuthMiddleware())
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
