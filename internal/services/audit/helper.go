@@ -59,13 +59,13 @@ func buildAuditSummary(statusLabel, message, resourceLabel string) string {
 	return fmt.Sprintf("%s: %s", statusLabel, resourceLabel)
 }
 
-func decodeAuditJSON(value string) interface{} {
+func decodeAuditJSON(value string) any {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "null" {
 		return nil
 	}
 
-	var decoded interface{}
+	var decoded any
 	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
 		return value
 	}

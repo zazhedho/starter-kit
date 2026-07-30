@@ -17,6 +17,6 @@ type ServiceAppConfigInterface interface {
 	GetBool(ctx context.Context, configKey string, fallback bool) (bool, error)
 	GetInt(ctx context.Context, configKey string, fallback int) (int, error)
 	GetDuration(ctx context.Context, configKey string, fallback time.Duration) (time.Duration, error)
-	DecodeJSON(ctx context.Context, configKey string, target interface{}) error
+	DecodeJSON(ctx context.Context, configKey string, target any) error
 	IsEnabled(ctx context.Context, configKey string, fallback bool) (bool, error)
 }

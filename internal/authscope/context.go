@@ -40,7 +40,7 @@ func New(userID, username, role string, permissions []string) Scope {
 	}
 }
 
-func NewFromClaims(claims map[string]interface{}, permissions []string) Scope {
+func NewFromClaims(claims map[string]any, permissions []string) Scope {
 	scope := New(
 		utils.InterfaceString(claims["user_id"]),
 		utils.InterfaceString(claims["username"]),

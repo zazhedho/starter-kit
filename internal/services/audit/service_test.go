@@ -74,7 +74,7 @@ func TestGetAllDelegatesToRepository(t *testing.T) {
 	if items[0].Summary != "Success: Renewed login session" {
 		t.Fatalf("expected readable summary, got %q", items[0].Summary)
 	}
-	after, ok := items[0].AfterData.(map[string]interface{})
+	after, ok := items[0].AfterData.(map[string]any)
 	if !ok || after["email"] != "user@example.com" {
 		t.Fatalf("expected decoded after data, got %#v", items[0].AfterData)
 	}
@@ -115,15 +115,15 @@ func TestStoreSanitizesSensitivePayloadAndHumanizesValues(t *testing.T) {
 		Action:   "refresh_token",
 		Resource: "auth_token",
 		Status:   "failed",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"email":        "user@example.com",
 			"password":     "SecretPassword1!",
 			"refreshToken": "sensitive-refresh-token",
-			"nested": map[string]interface{}{
+			"nested": map[string]any{
 				"otp_code": "123456",
 			},
-			"events": []interface{}{
-				map[string]interface{}{"access_token": "sensitive-access-token"},
+			"events": []any{
+				map[string]any{"access_token": "sensitive-access-token"},
 			},
 		},
 	})

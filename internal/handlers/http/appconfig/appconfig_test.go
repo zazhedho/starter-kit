@@ -68,7 +68,7 @@ func (m *appConfigServiceTestDouble) GetInt(ctx context.Context, configKey strin
 func (m *appConfigServiceTestDouble) GetDuration(ctx context.Context, configKey string, fallback time.Duration) (time.Duration, error) {
 	return fallback, nil
 }
-func (m *appConfigServiceTestDouble) DecodeJSON(ctx context.Context, configKey string, target interface{}) error {
+func (m *appConfigServiceTestDouble) DecodeJSON(ctx context.Context, configKey string, target any) error {
 	return nil
 }
 func (m *appConfigServiceTestDouble) IsEnabled(ctx context.Context, configKey string, fallback bool) (bool, error) {
@@ -90,7 +90,7 @@ func (m *auditServiceAppConfigTestDouble) GetByID(ctx context.Context, id string
 	return dto.AuditTrailResponse{}, nil
 }
 
-func performAppConfigRequest(method, routePath, requestPath string, body interface{}, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+func performAppConfigRequest(method, routePath, requestPath string, body any, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, routePath, handler)
@@ -122,7 +122,7 @@ func TestGetAllAppConfigsReturnsPagination(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestUpdateAppConfigRejectsBadInputAndNotFound(t *testing.T) {
 		t.Fatalf("expected invalid uuid 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	rec = performAppConfigRequest(http.MethodPut, "/configs/:id", "/configs/550e8400-e29b-41d4-a716-446655440000", map[string]interface{}{"is_active": "yes"}, handler.Update)
+	rec = performAppConfigRequest(http.MethodPut, "/configs/:id", "/configs/550e8400-e29b-41d4-a716-446655440000", map[string]any{"is_active": "yes"}, handler.Update)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid json 400, got %d: %s", rec.Code, rec.Body.String())
 	}

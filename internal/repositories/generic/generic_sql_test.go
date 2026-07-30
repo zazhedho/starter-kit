@@ -73,7 +73,7 @@ func TestGenericRepositoryDryRunCRUDMethods(t *testing.T) {
 	if exists, err := repo.ExistsByField(ctx, "status", "active"); err != nil || exists {
 		t.Fatalf("exists by field: exists=%v err=%v", exists, err)
 	}
-	if exists, err := repo.ExistsByFields(ctx, map[string]interface{}{"status": "active", "name": "Jane"}); err != nil || exists {
+	if exists, err := repo.ExistsByFields(ctx, map[string]any{"status": "active", "name": "Jane"}); err != nil || exists {
 		t.Fatalf("exists by fields: exists=%v err=%v", exists, err)
 	}
 	if err := repo.Update(ctx, record); err != nil {
@@ -117,7 +117,7 @@ func TestGenericRepositoryRejectsUnsafeColumns(t *testing.T) {
 	if _, err := repo.ExistsByField(ctx, "status)", "active"); err == nil || !strings.Contains(err.Error(), "invalid column") {
 		t.Fatalf("expected exists invalid column error, got %v", err)
 	}
-	if _, err := repo.ExistsByFields(ctx, map[string]interface{}{"status OR 1=1": "active"}); err == nil || !strings.Contains(err.Error(), "invalid column") {
+	if _, err := repo.ExistsByFields(ctx, map[string]any{"status OR 1=1": "active"}); err == nil || !strings.Contains(err.Error(), "invalid column") {
 		t.Fatalf("expected exists fields invalid column error, got %v", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestGenericRepositoryGetAllDryRunAppliesQueryOptions(t *testing.T) {
 	repo := New[sampleRecord](newDryRunDB(t))
 	params := filter.BaseParams{
 		Search:         "jane",
-		Filters:        map[string]interface{}{"status": "active", "ignored": "x"},
+		Filters:        map[string]any{"status": "active", "ignored": "x"},
 		OrderBy:        "name",
 		OrderDirection: "DESC",
 		Limit:          10,
@@ -180,7 +180,7 @@ func TestBuildSearchFuncAndFilteringBranches(t *testing.T) {
 		t.Fatalf("expected unsafe search column to be skipped, got %q", sql)
 	}
 
-	query = applyFilters(db, map[string]interface{}{
+	query = applyFilters(db, map[string]any{
 		"name":        "Jane",
 		"status":      []string{"active", "pending"},
 		"unsafe) = ?": "ignored",

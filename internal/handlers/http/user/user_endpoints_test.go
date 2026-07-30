@@ -111,11 +111,11 @@ func (s *userServiceTestDouble) GetUserByPhone(ctx context.Context, phone string
 	}
 	return s.user, nil
 }
-func (s *userServiceTestDouble) GetUserByAuth(ctx context.Context, id string) (map[string]interface{}, error) {
+func (s *userServiceTestDouble) GetUserByAuth(ctx context.Context, id string) (map[string]any, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	return map[string]interface{}{"id": id, "name": s.user.Name, "role": s.user.Role}, nil
+	return map[string]any{"id": id, "name": s.user.Name, "role": s.user.Role}, nil
 }
 func (s *userServiceTestDouble) GetAllUsers(ctx context.Context, params filter.BaseParams) ([]domainuser.Users, int64, error) {
 	if s.err != nil {
@@ -891,6 +891,7 @@ func TestUserHandlerNotFoundAndValidationErrorBranches(t *testing.T) {
 }
 
 func TestUserHandlerEmailPasswordResetBranches(t *testing.T) {
+	t.Setenv("RESET_COOLDOWN", "2m")
 	handler := newUserHandlerForTest()
 	handler.AppConfigService = &appConfigServiceUserTestDouble{enabled: true}
 
@@ -902,6 +903,9 @@ func TestUserHandlerEmailPasswordResetBranches(t *testing.T) {
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/forgot-password", `{"email":"jane@example.com"}`, nil)
 	handler.ForgotPassword(ctx)
 	assertUserHandlerStatus(t, rec, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `"cooldown":120`) {
+		t.Fatalf("expected reset cooldown in response, body=%s", rec.Body.String())
+	}
 
 	handler.ResetService = &resetServiceUserHandlerTestDouble{err: &servicereset.ThrottleError{Reason: "rate_limit", RetryAfter: time.Second}}
 	ctx, rec = newUserHandlerTestContext(t, http.MethodPost, "/forgot-password", `{"email":"jane@example.com"}`, nil)

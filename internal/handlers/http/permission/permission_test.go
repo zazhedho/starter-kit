@@ -88,7 +88,7 @@ func (m *auditServicePermissionTestDouble) GetByID(ctx context.Context, id strin
 func performPermissionRequest(
 	method string,
 	path string,
-	body interface{},
+	body any,
 	handler gin.HandlerFunc,
 	scope authscope.Scope,
 ) *httptest.ResponseRecorder {
@@ -192,7 +192,7 @@ func TestGetAllPermissionsReturnsPagination(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}

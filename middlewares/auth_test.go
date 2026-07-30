@@ -212,14 +212,14 @@ func TestRoleMiddlewareBranches(t *testing.T) {
 		{
 			name: "empty role",
 			setup: func(ctx *gin.Context) {
-				ctx.Set(utils.CtxKeyAuthData, map[string]interface{}{"role": " "})
+				ctx.Set(utils.CtxKeyAuthData, map[string]any{"role": " "})
 			},
 			code: http.StatusForbidden,
 		},
 		{
 			name: "disallowed role",
 			setup: func(ctx *gin.Context) {
-				ctx.Set(utils.CtxKeyAuthData, map[string]interface{}{"role": utils.RoleViewer})
+				ctx.Set(utils.CtxKeyAuthData, map[string]any{"role": utils.RoleViewer})
 			},
 			allowed: []string{utils.RoleAdmin},
 			code:    http.StatusForbidden,
@@ -227,7 +227,7 @@ func TestRoleMiddlewareBranches(t *testing.T) {
 		{
 			name: "allowed role",
 			setup: func(ctx *gin.Context) {
-				ctx.Set(utils.CtxKeyAuthData, map[string]interface{}{"role": utils.RoleAdmin})
+				ctx.Set(utils.CtxKeyAuthData, map[string]any{"role": utils.RoleAdmin})
 			},
 			allowed: []string{utils.RoleAdmin},
 			code:    http.StatusOK,
@@ -364,14 +364,14 @@ func TestPermissionMiddlewareRejectsInvalidAuthData(t *testing.T) {
 		{
 			name: "missing role",
 			setup: func(ctx *gin.Context) {
-				ctx.Set(utils.CtxKeyAuthData, map[string]interface{}{"user_id": "user-1"})
+				ctx.Set(utils.CtxKeyAuthData, map[string]any{"user_id": "user-1"})
 			},
 			code: http.StatusForbidden,
 		},
 		{
 			name: "missing user id",
 			setup: func(ctx *gin.Context) {
-				ctx.Set(utils.CtxKeyAuthData, map[string]interface{}{"role": utils.RoleViewer})
+				ctx.Set(utils.CtxKeyAuthData, map[string]any{"role": utils.RoleViewer})
 			},
 			code: http.StatusUnauthorized,
 		},

@@ -59,7 +59,7 @@ func Duration(raw string, fallback time.Duration) (time.Duration, error) {
 	return parsed, nil
 }
 
-func JSON(raw string, target interface{}) error {
+func JSON(raw string, target any) error {
 	value := strings.TrimSpace(raw)
 	if value == "" || target == nil {
 		return nil

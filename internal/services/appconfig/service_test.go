@@ -295,7 +295,7 @@ func TestAppConfigServiceUpdateErrorsAndFallbacks(t *testing.T) {
 	if _, err := service.GetDuration(context.Background(), "jobs.interval", time.Minute); err == nil {
 		t.Fatal("expected duration parse error")
 	}
-	var target map[string]interface{}
+	var target map[string]any
 	if err := service.DecodeJSON(context.Background(), "jobs.rules", &target); err == nil {
 		t.Fatal("expected json decode error")
 	}

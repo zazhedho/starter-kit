@@ -34,7 +34,7 @@ func TestAuditRepositoryDryRunGetAll(t *testing.T) {
 
 	if _, _, err := repo.GetAll(context.Background(), filter.BaseParams{
 		Search:         "login",
-		Filters:        map[string]interface{}{"action": "login", "status": "success"},
+		Filters:        map[string]any{"action": "login", "status": "success"},
 		OrderBy:        "occurred_at",
 		OrderDirection: "DESC",
 		Limit:          10,

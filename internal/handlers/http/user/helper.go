@@ -59,8 +59,8 @@ func (h *HandlerUser) isRuntimeConfigEnabled(ctx context.Context, configKey stri
 	return h.AppConfigService.IsEnabled(ctx, configKey, fallback)
 }
 
-func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]interface{} {
-	data := map[string]interface{}{
+func buildAuthTokenResponse(accessToken string, refreshToken string) map[string]any {
+	data := map[string]any{
 		"access_token":     accessToken,
 		"token_type":       "Bearer",
 		"expires_in_hours": utils.GetEnv("JWT_EXP", 24),
@@ -121,7 +121,7 @@ func impersonationErrorResponse(logId uuid.UUID, err error) (int, *response.ApiR
 	}
 }
 
-func buildImpersonationClaimsOverrideFromClaims(claims map[string]interface{}) *utils.AppClaims {
+func buildImpersonationClaimsOverrideFromClaims(claims map[string]any) *utils.AppClaims {
 	if claims == nil || !utils.InterfaceBool(claims["is_impersonated"]) {
 		return nil
 	}

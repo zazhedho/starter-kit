@@ -109,7 +109,7 @@ func (m *Middleware) RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 				return
 			}
 
-			dataJWT, ok := authData.(map[string]interface{})
+			dataJWT, ok := authData.(map[string]any)
 			if !ok {
 				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
 				res := response.Forbidden(logId, messages.AccessDenied)
@@ -163,7 +163,7 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 			ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 			return
 		}
-		dataJWT, ok := authData.(map[string]interface{})
+		dataJWT, ok := authData.(map[string]any)
 		if !ok {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid AuthData type", logPrefix))
 			res := response.Forbidden(logId, messages.AccessDenied)

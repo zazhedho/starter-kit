@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func GetAppConf(key string, def interface{}, rdbCache *redis.Client) interface{} {
+func GetAppConf(key string, def any, rdbCache *redis.Client) any {
 	var (
 		err   error
 		cache bool

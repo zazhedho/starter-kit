@@ -63,7 +63,7 @@ func (m *auditServiceMenuTestDouble) GetByID(ctx context.Context, id string) (dt
 	return dto.AuditTrailResponse{}, nil
 }
 
-func performMenuRequest(method, routePath, requestPath string, body interface{}, handler gin.HandlerFunc, scope authscope.Scope) *httptest.ResponseRecorder {
+func performMenuRequest(method, routePath, requestPath string, body any, handler gin.HandlerFunc, scope authscope.Scope) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, routePath, func(ctx *gin.Context) {
@@ -165,7 +165,7 @@ func TestUpdateMenuMapsSuccessAndError(t *testing.T) {
 		t.Fatalf("expected 500, got %d", rec.Code)
 	}
 
-	rec = performMenuRequest(http.MethodPut, "/menus/:id", "/menus/menu-1", map[string]interface{}{"is_active": "bad"}, handler.Update, authscope.Scope{})
+	rec = performMenuRequest(http.MethodPut, "/menus/:id", "/menus/menu-1", map[string]any{"is_active": "bad"}, handler.Update, authscope.Scope{})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid update 400, got %d", rec.Code)
 	}

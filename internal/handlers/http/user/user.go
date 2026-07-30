@@ -21,6 +21,7 @@ import (
 	serviceotp "starter-kit/internal/services/otp"
 	servicereset "starter-kit/internal/services/reset"
 	serviceuser "starter-kit/internal/services/user"
+	"starter-kit/pkg/config"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/logger"
 	"starter-kit/pkg/messages"
@@ -117,7 +118,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 				Status:       domainaudit.StatusFailed,
 				Message:      "Failed to verify registration OTP",
 				ErrorMessage: err.Error(),
-				AfterData: map[string]interface{}{
+				AfterData: map[string]any{
 					"email": req.Email,
 				},
 			})
@@ -146,7 +147,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to register user",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"name":  req.Name,
 				"email": req.Email,
 				"phone": req.Phone,
@@ -165,7 +166,7 @@ func (h *HandlerUser) Register(ctx *gin.Context) {
 		ResourceID:  data.Id,
 		Status:      domainaudit.StatusSuccess,
 		Message:     "Registered user",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"id":    data.Id,
 			"name":  data.Name,
 			"email": data.Email,
@@ -199,7 +200,7 @@ func (h *HandlerUser) GetRegisterStatus(ctx *gin.Context) {
 		return
 	}
 
-	res := response.Response(http.StatusOK, "Get register status successfully", logId, map[string]interface{}{
+	res := response.Response(http.StatusOK, "Get register status successfully", logId, map[string]any{
 		"enabled":      registerEnabled,
 		"otp_enabled":  otpEnabled,
 		"otp_cooldown": utils.GetEnv("OTP_COOLDOWN_SECONDS", 60),
@@ -288,7 +289,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to send registration OTP",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"email": normalizedEmail,
 			},
 		})
@@ -313,7 +314,7 @@ func (h *HandlerUser) SendRegisterOTP(ctx *gin.Context) {
 		Resource: "user_registration_otp",
 		Status:   domainaudit.StatusSuccess,
 		Message:  "Sent registration OTP",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"email": normalizedEmail,
 		},
 	})
@@ -340,7 +341,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to create user",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"name":  req.Name,
 				"email": req.Email,
 				"phone": req.Phone,
@@ -358,7 +359,7 @@ func (h *HandlerUser) AdminCreateUser(ctx *gin.Context) {
 		ResourceID: data.Id,
 		Status:     domainaudit.StatusSuccess,
 		Message:    "Created user by admin",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"id":    data.Id,
 			"name":  data.Name,
 			"email": data.Email,
@@ -401,7 +402,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 				Resource: "auth",
 				Status:   domainaudit.StatusFailed,
 				Message:  "Login blocked due to too many attempts",
-				AfterData: map[string]interface{}{
+				AfterData: map[string]any{
 					"identifier": normalizedIdentifier,
 				},
 			})
@@ -429,7 +430,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 						Resource: "auth",
 						Status:   domainaudit.StatusFailed,
 						Message:  "Login blocked after repeated failures",
-						AfterData: map[string]interface{}{
+						AfterData: map[string]any{
 							"identifier": normalizedIdentifier,
 						},
 					})
@@ -444,7 +445,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 				Resource: "auth",
 				Status:   domainaudit.StatusFailed,
 				Message:  "Login failed due to invalid credentials",
-				AfterData: map[string]interface{}{
+				AfterData: map[string]any{
 					"identifier": normalizedIdentifier,
 				},
 			})
@@ -460,7 +461,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Login failed due to internal error",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"identifier": normalizedIdentifier,
 			},
 		})
@@ -521,7 +522,7 @@ func (h *HandlerUser) Login(ctx *gin.Context) {
 		ResourceID:  loginUserID,
 		Status:      domainaudit.StatusSuccess,
 		Message:     "Login success",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"identifier": normalizedIdentifier,
 		},
 	})
@@ -560,7 +561,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Google login failed",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"provider": "google",
 			},
 		})
@@ -631,7 +632,7 @@ func (h *HandlerUser) GoogleLogin(ctx *gin.Context) {
 		ResourceID:  user.Id,
 		Status:      domainaudit.StatusSuccess,
 		Message:     successMessage,
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"provider":    "google",
 			"email":       user.Email,
 			"is_new_user": isNewUser,
@@ -811,7 +812,7 @@ func (h *HandlerUser) RefreshToken(ctx *gin.Context) {
 				Status:       domainaudit.StatusFailed,
 				Message:      "Failed to rotate login session tokens",
 				ErrorMessage: sessionErr.Error(),
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"session_id": session.SessionID,
 				},
 			})
@@ -966,7 +967,7 @@ func (h *HandlerUser) GetUserByAuth(ctx *gin.Context) {
 
 	if scope.IsImpersonated {
 		data["is_impersonated"] = true
-		data["impersonator"] = map[string]interface{}{
+		data["impersonator"] = map[string]any{
 			"user_id":  scope.OriginalUserID,
 			"username": scope.OriginalUsername,
 			"role":     scope.OriginalRole,
@@ -999,7 +1000,7 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to impersonate user",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"target_user_id": id,
 			},
 		})
@@ -1016,10 +1017,10 @@ func (h *HandlerUser) ImpersonateUser(ctx *gin.Context) {
 		ResourceID: id,
 		Status:     domainaudit.StatusSuccess,
 		Message:    "Started impersonation session",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"target_user_id": id,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"impersonation_action": "start",
 			"target_user_id":       id,
 		},
@@ -1070,7 +1071,7 @@ func (h *HandlerUser) StopImpersonation(ctx *gin.Context) {
 		ResourceID: originalUserID,
 		Status:     domainaudit.StatusSuccess,
 		Message:    "Stopped impersonation session",
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"impersonation_action": "stop",
 			"restored_user_id":     originalUserID,
 		},
@@ -1267,7 +1268,7 @@ func (h *HandlerUser) ChangePassword(ctx *gin.Context) {
 		Status:     domainaudit.StatusSuccess,
 		Message:    "Changed user password",
 		BeforeData: before,
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"user_id": data.Id,
 		},
 	})
@@ -1310,7 +1311,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 					Status:       domainaudit.StatusFailed,
 					Message:      "Failed to request password reset email",
 					ErrorMessage: err.Error(),
-					AfterData: map[string]interface{}{
+					AfterData: map[string]any{
 						"email": normalizedEmail,
 					},
 				})
@@ -1336,11 +1337,13 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 			Resource: "user_password_reset",
 			Status:   domainaudit.StatusSuccess,
 			Message:  "Requested password reset email",
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"email": normalizedEmail,
 			},
 		})
-		res := response.Response(http.StatusOK, "Password reset instructions sent to your email", logId, nil)
+		res := response.Response(http.StatusOK, "Password reset instructions sent to your email", logId, map[string]any{
+			"cooldown": int(config.LoadPasswordResetConfig().Cooldown.Seconds()),
+		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelInfo, fmt.Sprintf("%s; Password reset instructions sent to email: %s", logPrefix, normalizedEmail))
 		ctx.JSON(http.StatusOK, res)
 		return
@@ -1363,7 +1366,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to request password reset",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"email": req.Email,
 			},
 		})
@@ -1377,7 +1380,7 @@ func (h *HandlerUser) ForgotPassword(ctx *gin.Context) {
 		Resource: "user_password_reset",
 		Status:   domainaudit.StatusSuccess,
 		Message:  "Requested password reset",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"email": req.Email,
 		},
 	})
@@ -1442,7 +1445,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 					Status:       domainaudit.StatusFailed,
 					Message:      "Failed to load user for password reset",
 					ErrorMessage: err.Error(),
-					AfterData: map[string]interface{}{
+					AfterData: map[string]any{
 						"email": email,
 					},
 				})
@@ -1459,7 +1462,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 				Status:       domainaudit.StatusFailed,
 				Message:      "Failed to reset password",
 				ErrorMessage: err.Error(),
-				AfterData: map[string]interface{}{
+				AfterData: map[string]any{
 					"email": email,
 				},
 			})
@@ -1474,7 +1477,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 				Status:       domainaudit.StatusFailed,
 				Message:      "Failed to revoke sessions after password reset",
 				ErrorMessage: err.Error(),
-				AfterData: map[string]interface{}{
+				AfterData: map[string]any{
 					"email": email,
 				},
 			})
@@ -1489,7 +1492,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 			Resource: "user_password_reset",
 			Status:   domainaudit.StatusSuccess,
 			Message:  "Reset password success",
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"email": email,
 			},
 		})
@@ -1540,7 +1543,7 @@ func (h *HandlerUser) ResetPassword(ctx *gin.Context) {
 		Resource: "user_password_reset",
 		Status:   domainaudit.StatusSuccess,
 		Message:  "Reset password success",
-		AfterData: map[string]interface{}{
+		AfterData: map[string]any{
 			"token": req.Token,
 		},
 	})

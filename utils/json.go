@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 )
 
-func JsonEncode(data interface{}) string {
+func JsonEncode(data any) string {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return ""
@@ -12,9 +12,9 @@ func JsonEncode(data interface{}) string {
 	return string(jsonData)
 }
 
-func NormalizePayload(input interface{}) interface{} {
+func NormalizePayload(input any) any {
 	if input == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
 
 	raw, err := json.Marshal(input)
@@ -22,7 +22,7 @@ func NormalizePayload(input interface{}) interface{} {
 		return input
 	}
 
-	var normalized interface{}
+	var normalized any
 	if err := json.Unmarshal(raw, &normalized); err != nil {
 		return input
 	}
@@ -30,7 +30,7 @@ func NormalizePayload(input interface{}) interface{} {
 	return normalized
 }
 
-func MustJSON(value interface{}) json.RawMessage {
+func MustJSON(value any) json.RawMessage {
 	body, err := json.Marshal(value)
 	if err != nil {
 		return EmptyJSON()

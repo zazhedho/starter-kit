@@ -97,7 +97,7 @@ func (s *AppConfigService) GetDuration(ctx context.Context, configKey string, fa
 	return configvalue.Duration(config.Value, fallback)
 }
 
-func (s *AppConfigService) DecodeJSON(ctx context.Context, configKey string, target interface{}) error {
+func (s *AppConfigService) DecodeJSON(ctx context.Context, configKey string, target any) error {
 	config, found, err := s.getActiveConfigByKey(ctx, configKey)
 	if err != nil {
 		return err

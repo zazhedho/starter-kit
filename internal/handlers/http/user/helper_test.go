@@ -45,7 +45,7 @@ func (m *appConfigServiceUserTestDouble) GetInt(ctx context.Context, configKey s
 func (m *appConfigServiceUserTestDouble) GetDuration(ctx context.Context, configKey string, fallback time.Duration) (time.Duration, error) {
 	return fallback, nil
 }
-func (m *appConfigServiceUserTestDouble) DecodeJSON(ctx context.Context, configKey string, target interface{}) error {
+func (m *appConfigServiceUserTestDouble) DecodeJSON(ctx context.Context, configKey string, target any) error {
 	return nil
 }
 func (m *appConfigServiceUserTestDouble) IsEnabled(ctx context.Context, configKey string, fallback bool) (bool, error) {
@@ -115,7 +115,7 @@ func TestBuildImpersonationClaimsOverrideFromClaims(t *testing.T) {
 		t.Fatalf("expected nil claims override, got %+v", got)
 	}
 
-	got := buildImpersonationClaimsOverrideFromClaims(map[string]interface{}{
+	got := buildImpersonationClaimsOverrideFromClaims(map[string]any{
 		"is_impersonated":   true,
 		"original_user_id":  "admin-1",
 		"original_username": "Admin",

@@ -55,13 +55,13 @@ func TestGetEnvFallsBackForInvalidValue(t *testing.T) {
 }
 
 func TestConvertValuesToStringConvertsSelectedKeys(t *testing.T) {
-	got := ConvertValuesToString(map[string]interface{}{
+	got := ConvertValuesToString(map[string]any{
 		"id":     123,
 		"active": true,
-		"ids":    []interface{}{"1", "2"},
+		"ids":    []any{"1", "2"},
 	}, "id", "ids")
 
-	want := map[string]interface{}{
+	want := map[string]any{
 		"id":     "123",
 		"active": true,
 		"ids":    `["1","2"]`,
@@ -105,7 +105,7 @@ func TestInterfaceStringAndBoolVariants(t *testing.T) {
 }
 
 func TestConvertValuesToStringCoversAllKeysAndTypes(t *testing.T) {
-	got := ConvertValuesToString(map[string]interface{}{
+	got := ConvertValuesToString(map[string]any{
 		"nil":      nil,
 		"string":   "already",
 		"stringer": stringerValue("value"),
@@ -113,7 +113,7 @@ func TestConvertValuesToStringCoversAllKeysAndTypes(t *testing.T) {
 		"error":    fmt.Errorf("boom"),
 	})
 
-	want := map[string]interface{}{
+	want := map[string]any{
 		"nil":      "",
 		"string":   "already",
 		"stringer": "stringer:value",

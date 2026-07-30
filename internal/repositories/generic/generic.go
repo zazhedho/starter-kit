@@ -14,7 +14,7 @@ import (
 
 type SearchFunc func(query *gorm.DB, search string) *gorm.DB
 type QueryFunc func(query *gorm.DB) *gorm.DB
-type FilterSanitizer func(filters map[string]interface{}, allowed []string) map[string]interface{}
+type FilterSanitizer func(filters map[string]any, allowed []string) map[string]any
 
 type QueryOptions struct {
 	BaseQuery           QueryFunc
@@ -74,7 +74,7 @@ func (r *GenericRepository[T]) GetByID(ctx context.Context, id string) (ret T, e
 	return ret, nil
 }
 
-func (r *GenericRepository[T]) GetOneByField(ctx context.Context, field string, value interface{}) (ret T, err error) {
+func (r *GenericRepository[T]) GetOneByField(ctx context.Context, field string, value any) (ret T, err error) {
 	if err = validateColumnIdentifier(field); err != nil {
 		return zeroValue[T](), err
 	}
@@ -87,7 +87,7 @@ func (r *GenericRepository[T]) GetOneByField(ctx context.Context, field string, 
 	return ret, nil
 }
 
-func (r *GenericRepository[T]) GetManyByField(ctx context.Context, field string, value interface{}) (ret []T, err error) {
+func (r *GenericRepository[T]) GetManyByField(ctx context.Context, field string, value any) (ret []T, err error) {
 	if err = validateColumnIdentifier(field); err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (r *GenericRepository[T]) GetManyByField(ctx context.Context, field string,
 	return ret, nil
 }
 
-func (r *GenericRepository[T]) ExistsByField(ctx context.Context, field string, value interface{}) (exists bool, err error) {
+func (r *GenericRepository[T]) ExistsByField(ctx context.Context, field string, value any) (exists bool, err error) {
 	if err = validateColumnIdentifier(field); err != nil {
 		return false, err
 	}
@@ -114,7 +114,7 @@ func (r *GenericRepository[T]) ExistsByField(ctx context.Context, field string, 
 	return count > 0, nil
 }
 
-func (r *GenericRepository[T]) ExistsByFields(ctx context.Context, filters map[string]interface{}) (exists bool, err error) {
+func (r *GenericRepository[T]) ExistsByFields(ctx context.Context, filters map[string]any) (exists bool, err error) {
 	query := r.DB.WithContext(ctx).Model(new(T))
 	for key, value := range filters {
 		if err = validateColumnIdentifier(key); err != nil {
@@ -169,7 +169,7 @@ func (r *GenericRepository[T]) Delete(ctx context.Context, id string) error {
 }
 
 func (r *GenericRepository[T]) SoftDelete(ctx context.Context, id, deletedBy string) error {
-	return r.DB.WithContext(ctx).Model(new(T)).Where("id = ?", id).Updates(map[string]interface{}{
+	return r.DB.WithContext(ctx).Model(new(T)).Where("id = ?", id).Updates(map[string]any{
 		"deleted_by": deletedBy,
 		"deleted_at": time.Now(),
 	}).Error
@@ -185,7 +185,7 @@ func BuildSearchFunc(columns ...string) SearchFunc {
 
 		searchPattern := "%" + search + "%"
 		parts := make([]string, 0, len(safeColumns))
-		args := make([]interface{}, 0, len(safeColumns))
+		args := make([]any, 0, len(safeColumns))
 
 		for _, column := range safeColumns {
 			parts = append(parts, fmt.Sprintf("LOWER(%s) LIKE LOWER(?)", column))

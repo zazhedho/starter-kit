@@ -47,7 +47,7 @@ func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (
 	return m.job, m.err
 }
 
-func performLocationRequest(method, routePath, requestPath string, body interface{}, handler gin.HandlerFunc, authData map[string]interface{}) *httptest.ResponseRecorder {
+func performLocationRequest(method, routePath, requestPath string, body any, handler gin.HandlerFunc, authData map[string]any) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, routePath, func(ctx *gin.Context) {
@@ -128,7 +128,7 @@ func TestLocationListHandlersMapServiceErrors(t *testing.T) {
 func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 	service := &locationServiceTestDouble{job: dto.LocationSyncJob{ID: "job-1", Status: "queued"}}
 	handler := NewLocationHandler(service)
-	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, map[string]interface{}{
+	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, map[string]any{
 		"user_id": "user-1",
 		"role":    "admin",
 	})
@@ -151,7 +151,7 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 
-	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", map[string]interface{}{"level": 123}, handler.Sync, nil)
+	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", map[string]any{"level": 123}, handler.Sync, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid json 400, got %d", rec.Code)
 	}

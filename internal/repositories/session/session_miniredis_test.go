@@ -12,7 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func matchRedisCommandKey(expected, actual []interface{}) error {
+func matchRedisCommandKey(expected, actual []any) error {
 	if len(expected) > 1 && expected[1] != actual[1] {
 		return fmt.Errorf("key mismatch: expected %v, got %v", expected[1], actual[1])
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewFromClaimsNormalizesPermissionsAndImpersonation(t *testing.T) {
-	scope := NewFromClaims(map[string]interface{}{
+	scope := NewFromClaims(map[string]any{
 		"user_id":           " user-1 ",
 		"username":          " Jane ",
 		"role":              "admin",
@@ -64,7 +64,7 @@ func TestSuperadminHasEveryPermission(t *testing.T) {
 }
 
 func TestActorUserIDAndRolePreferOriginalImpersonator(t *testing.T) {
-	scope := NewFromClaims(map[string]interface{}{
+	scope := NewFromClaims(map[string]any{
 		"user_id":          "member-1",
 		"role":             "member",
 		"is_impersonated":  true,

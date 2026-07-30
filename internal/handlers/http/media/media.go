@@ -66,7 +66,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Failed to upload media",
 			ErrorMessage: err.Error(),
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"original_name": header.Filename,
 				"size":          header.Size,
 			},

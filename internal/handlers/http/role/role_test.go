@@ -93,7 +93,7 @@ func (m *auditServiceRoleTestDouble) GetByID(ctx context.Context, id string) (dt
 	return dto.AuditTrailResponse{}, nil
 }
 
-func performRoleRequest(method, routePath, requestPath string, body interface{}, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+func performRoleRequest(method, routePath, requestPath string, body any, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Handle(method, routePath, handler)

@@ -257,7 +257,7 @@ func handleRoleRelationAssignment[T any](h *RoleHandler, ctx *gin.Context, req *
 	logger.WriteLogWithContext(ctx, logger.LogLevelDebug, fmt.Sprintf("%s; Request: %+v;", assignment.logPrefix, utils.JsonEncode(*req)))
 
 	beforeIDs, _ := assignment.getBefore(reqCtx, id)
-	beforeData := map[string]interface{}{assignment.beforeDataKey: beforeIDs}
+	beforeData := map[string]any{assignment.beforeDataKey: beforeIDs}
 	if err := assignment.assign(reqCtx, id, *req); err != nil {
 		h.WriteAudit(ctx, domainaudit.AuditEvent{
 			Action:       domainaudit.ActionAssign,

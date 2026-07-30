@@ -40,7 +40,7 @@ func TestMenuRepositoryDryRun(t *testing.T) {
 	}
 	if _, _, err := repo.GetAll(ctx, filter.BaseParams{
 		Search:         "dash",
-		Filters:        map[string]interface{}{"name": "dashboard", "is_active": true},
+		Filters:        map[string]any{"name": "dashboard", "is_active": true},
 		OrderBy:        "order_index",
 		OrderDirection: "ASC",
 		Limit:          10,

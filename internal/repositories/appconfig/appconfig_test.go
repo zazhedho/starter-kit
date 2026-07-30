@@ -38,7 +38,7 @@ func TestAppConfigRepositoryDryRun(t *testing.T) {
 	}
 	if _, _, err := repo.GetAll(ctx, filter.BaseParams{
 		Search:         "site",
-		Filters:        map[string]interface{}{"category": "general", "is_active": true},
+		Filters:        map[string]any{"category": "general", "is_active": true},
 		OrderBy:        "display_name",
 		OrderDirection: "ASC",
 		Limit:          10,

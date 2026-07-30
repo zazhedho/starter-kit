@@ -43,7 +43,7 @@ func TestPermissionRepositoryDryRun(t *testing.T) {
 	}
 	if _, _, err := repo.GetAll(ctx, filter.BaseParams{
 		Search:         "users",
-		Filters:        map[string]interface{}{"resource": "users", "action": "read"},
+		Filters:        map[string]any{"resource": "users", "action": "read"},
 		OrderBy:        "resource",
 		OrderDirection: "ASC",
 		Limit:          10,

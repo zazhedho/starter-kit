@@ -27,7 +27,7 @@ func TestGetBaseParamsAppliesDefaultsAndParsesFilters(t *testing.T) {
 	if got.Filters["role"] != "admin" {
 		t.Fatalf("expected role filter, got %#v", got.Filters["role"])
 	}
-	ids, ok := got.Filters["ids"].([]interface{})
+	ids, ok := got.Filters["ids"].([]any)
 	if !ok || len(ids) != 2 {
 		t.Fatalf("expected parsed ids filter, got %#v", got.Filters["ids"])
 	}
@@ -52,19 +52,19 @@ func TestGetBaseParamsClampsInvalidValues(t *testing.T) {
 }
 
 func TestWhitelistFilterKeepsAllowedKeysOnly(t *testing.T) {
-	got := WhitelistFilter(map[string]interface{}{
+	got := WhitelistFilter(map[string]any{
 		"role":  "admin",
 		"email": "admin@example.com",
 	}, []string{"role"})
 
-	want := map[string]interface{}{"role": "admin"}
+	want := map[string]any{"role": "admin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
 
 func TestWhitelistStringFilterConvertsValues(t *testing.T) {
-	got := WhitelistStringFilter(map[string]interface{}{
+	got := WhitelistStringFilter(map[string]any{
 		"id":    10,
 		"roles": []string{"admin", "viewer"},
 		"skip":  true,

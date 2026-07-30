@@ -57,7 +57,7 @@ func TestAuditGetAllReturnsPagination(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}

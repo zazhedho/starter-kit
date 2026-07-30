@@ -44,7 +44,7 @@ func TestUserRepositoryDryRun(t *testing.T) {
 	}
 	if _, _, err := repo.GetAll(ctx, filter.BaseParams{
 		Search:         "jane",
-		Filters:        map[string]interface{}{"role": "admin", "email": "jane@example.com"},
+		Filters:        map[string]any{"role": "admin", "email": "jane@example.com"},
 		OrderBy:        "email",
 		OrderDirection: "ASC",
 		Limit:          10,

@@ -18,7 +18,7 @@ type ServiceUserInterface interface {
 	GetUserById(ctx context.Context, id string) (domainuser.Users, error)
 	GetUserByEmail(ctx context.Context, email string) (domainuser.Users, error)
 	GetUserByPhone(ctx context.Context, phone string) (domainuser.Users, error)
-	GetUserByAuth(ctx context.Context, id string) (map[string]interface{}, error)
+	GetUserByAuth(ctx context.Context, id string) (map[string]any, error)
 	GetAllUsers(ctx context.Context, params filter.BaseParams) ([]domainuser.Users, int64, error)
 	Update(ctx context.Context, id string, req dto.UserUpdate) (domainuser.Users, error)
 	ChangePassword(ctx context.Context, id string, req dto.ChangePassword) (domainuser.Users, error)

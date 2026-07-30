@@ -47,12 +47,12 @@ func ValidatePasswordStrength(password string) error {
 	return nil
 }
 
-func buildUserAuthResponse(user domainuser.Users, permissions []string) map[string]interface{} {
+func buildUserAuthResponse(user domainuser.Users, permissions []string) map[string]any {
 	if permissions == nil {
 		permissions = []string{}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"id":                  user.Id,
 		"name":                user.Name,
 		"email":               user.Email,

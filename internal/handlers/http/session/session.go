@@ -56,7 +56,7 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 		return
 	}
 
-	res := response.Response(http.StatusOK, "success", logId, map[string]interface{}{
+	res := response.Response(http.StatusOK, "success", logId, map[string]any{
 		"sessions": sessions,
 		"total":    len(sessions),
 	})
@@ -116,7 +116,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			Status:       domainaudit.StatusFailed,
 			Message:      "Blocked unauthorized session revocation",
 			ErrorMessage: "The session belongs to another user",
-			AfterData: map[string]interface{}{
+			AfterData: map[string]any{
 				"session_user_id": session.UserID,
 			},
 		})

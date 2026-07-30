@@ -95,7 +95,7 @@ func (r *repo) FailActiveSyncJobs(ctx context.Context, message string) error {
 	now := time.Now()
 	return r.DB.WithContext(ctx).Model(&domainlocation.SyncJob{}).
 		Where("status IN ?", []string{"queued", "running"}).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":        "failed",
 			"message":       "Location sync interrupted",
 			"error_message": message,
@@ -104,7 +104,7 @@ func (r *repo) FailActiveSyncJobs(ctx context.Context, message string) error {
 		}).Error
 }
 
-func (r *repo) upsert(ctx context.Context, conflictColumn string, values interface{}) error {
+func (r *repo) upsert(ctx context.Context, conflictColumn string, values any) error {
 	now := time.Now()
 
 	switch items := values.(type) {

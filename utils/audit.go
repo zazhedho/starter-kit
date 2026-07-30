@@ -20,7 +20,7 @@ func GetRequestID(ctx *gin.Context) string {
 	return GenerateLogId(ctx).String()
 }
 
-func GetImpersonationMetadata(ctx *gin.Context) map[string]interface{} {
+func GetImpersonationMetadata(ctx *gin.Context) map[string]any {
 	authData := GetAuthData(ctx)
 	if authData == nil {
 		return nil
@@ -31,7 +31,7 @@ func GetImpersonationMetadata(ctx *gin.Context) map[string]interface{} {
 		return nil
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"is_impersonated":      true,
 		"original_user_id":     strings.TrimSpace(InterfaceString(authData["original_user_id"])),
 		"original_username":    strings.TrimSpace(InterfaceString(authData["original_username"])),
@@ -42,12 +42,12 @@ func GetImpersonationMetadata(ctx *gin.Context) map[string]interface{} {
 	}
 }
 
-func MergeMetadata(base map[string]interface{}, extra map[string]interface{}) map[string]interface{} {
+func MergeMetadata(base map[string]any, extra map[string]any) map[string]any {
 	if len(base) == 0 && len(extra) == 0 {
 		return nil
 	}
 
-	merged := make(map[string]interface{}, len(base)+len(extra))
+	merged := make(map[string]any, len(base)+len(extra))
 	for k, v := range base {
 		merged[k] = v
 	}
@@ -58,16 +58,16 @@ func MergeMetadata(base map[string]interface{}, extra map[string]interface{}) ma
 	return merged
 }
 
-func RedactSensitivePayload(input interface{}) interface{} {
+func RedactSensitivePayload(input any) any {
 	normalized := NormalizePayload(input)
 	return RedactSensitiveValue(normalized)
 }
 
-func RedactSensitiveValue(input interface{}) interface{} {
+func RedactSensitiveValue(input any) any {
 	switch v := input.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return redactSensitiveMap(v)
-	case []interface{}:
+	case []any:
 		return redactSensitiveSlice(v)
 	default:
 		return v
@@ -82,8 +82,8 @@ func IsSensitiveKey(key string) bool {
 		strings.Contains(k, "otp")
 }
 
-func redactSensitiveMap(in map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(in))
+func redactSensitiveMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
 	for k, val := range in {
 		if IsSensitiveKey(k) {
 			out[k] = "[REDACTED]"
@@ -95,8 +95,8 @@ func redactSensitiveMap(in map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-func redactSensitiveSlice(values []interface{}) []interface{} {
-	out := make([]interface{}, 0, len(values))
+func redactSensitiveSlice(values []any) []any {
+	out := make([]any, 0, len(values))
 	for _, val := range values {
 		out = append(out, RedactSensitiveValue(val))
 	}

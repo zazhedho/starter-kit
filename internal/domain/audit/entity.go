@@ -39,9 +39,9 @@ type AuditEvent struct {
 	RequestID    string
 	IPAddress    string
 	UserAgent    string
-	BeforeData   interface{}
-	AfterData    interface{}
-	Metadata     map[string]interface{}
+	BeforeData   any
+	AfterData    any
+	Metadata     map[string]any
 }
 
 const (

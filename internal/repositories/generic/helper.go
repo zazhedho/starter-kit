@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func applyFilters(query *gorm.DB, filters map[string]interface{}, opts QueryOptions) *gorm.DB {
+func applyFilters(query *gorm.DB, filters map[string]any, opts QueryOptions) *gorm.DB {
 	if len(opts.AllowedFilters) == 0 {
 		return query
 	}
@@ -28,7 +28,7 @@ func applyFilters(query *gorm.DB, filters map[string]interface{}, opts QueryOpti
 	return query
 }
 
-func applyFilter(query *gorm.DB, key string, value interface{}) *gorm.DB {
+func applyFilter(query *gorm.DB, key string, value any) *gorm.DB {
 	if value == nil {
 		return query
 	}
@@ -87,7 +87,7 @@ func contains(values []string, target string) bool {
 	return false
 }
 
-func isSliceValue(value interface{}) bool {
+func isSliceValue(value any) bool {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() {
 		return false

@@ -286,7 +286,7 @@ func (s *ServiceUser) GetUserByPhone(ctx context.Context, phone string) (domainu
 	return s.UserRepo.GetByPhone(ctx, phone)
 }
 
-func (s *ServiceUser) GetUserByAuth(ctx context.Context, id string) (map[string]interface{}, error) {
+func (s *ServiceUser) GetUserByAuth(ctx context.Context, id string) (map[string]any, error) {
 	user, err := s.UserRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
