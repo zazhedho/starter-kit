@@ -69,12 +69,12 @@ func TestValidateErrorAndValidateUUID(t *testing.T) {
 	}
 	validate := validator.New()
 	err := validate.Struct(request{})
-	got := ValidateError(err, reflect.TypeOf(request{}), "json")
+	got := ValidateError(err, reflect.TypeFor[request](), "json")
 	if len(got) != 1 || got[0].Field != "email" || got[0].Message == "" {
 		t.Fatalf("unexpected validation mapping: %+v", got)
 	}
 
-	got = ValidateError(errors.New("plain error"), reflect.TypeOf(request{}), "json")
+	got = ValidateError(errors.New("plain error"), reflect.TypeFor[request](), "json")
 	if len(got) != 1 || got[0].Message != "plain error" {
 		t.Fatalf("unexpected plain error mapping: %+v", got)
 	}
@@ -128,7 +128,7 @@ func TestValidateErrorMapsKnownTags(t *testing.T) {
 		GTEField: 1,
 		UUID:     "bad",
 	})
-	got := ValidateError(err, reflect.TypeOf(request{}), "json")
+	got := ValidateError(err, reflect.TypeFor[request](), "json")
 	messages := map[string]string{}
 	for _, item := range got {
 		messages[item.Field] = item.Message

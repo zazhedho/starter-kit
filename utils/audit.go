@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -48,12 +49,8 @@ func MergeMetadata(base map[string]any, extra map[string]any) map[string]any {
 	}
 
 	merged := make(map[string]any, len(base)+len(extra))
-	for k, v := range base {
-		merged[k] = v
-	}
-	for k, v := range extra {
-		merged[k] = v
-	}
+	maps.Copy(merged, base)
+	maps.Copy(merged, extra)
 
 	return merged
 }

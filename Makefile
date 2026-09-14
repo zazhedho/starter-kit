@@ -1,4 +1,5 @@
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo "$$(go env GOPATH)/bin/golangci-lint")
+GOLANGCI_LINT_VERSION := v2.13.2
 
 .PHONY: lint lint-install run debug hook-install
 
@@ -12,7 +13,7 @@ lint:
 	@echo "golangci-lint passed."
 
 lint-install:
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 run:
 	@go run main.go

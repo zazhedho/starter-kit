@@ -19,7 +19,7 @@ type MenuItem struct {
 	ParentId    *string        `json:"parent_id,omitempty" gorm:"column:parent_id"`
 	OrderIndex  int            `json:"order_index" gorm:"column:order_index;default:0"`
 	IsActive    bool           `json:"is_active" gorm:"column:is_active;default:true"`
-	CreatedAt   time.Time      `json:"created_at,omitempty" gorm:"column:created_at"`
+	CreatedAt   time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt   *time.Time     `json:"updated_at,omitempty" gorm:"column:updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 }

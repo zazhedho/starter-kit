@@ -135,8 +135,8 @@ func TestRequestResetReturnsThrottleOnRateLimit(t *testing.T) {
 	svc := NewPasswordResetService(repo, &resetSenderTestDouble{}, resetTestConfig())
 
 	err := svc.RequestReset(context.Background(), "jane@example.com", "Starter")
-	var throttle *ThrottleError
-	if !errors.As(err, &throttle) {
+	throttle, ok := errors.AsType[*ThrottleError](err)
+	if !ok {
 		t.Fatalf("expected throttle error, got %v", err)
 	}
 	if throttle.Reason != "rate_limit" || throttle.RetryAfter != 45*time.Second {
@@ -209,8 +209,8 @@ func TestRequestResetRejectsInvalidEmailAndCooldown(t *testing.T) {
 	repo.cooldownTTL = 15 * time.Second
 	svc = NewPasswordResetService(repo, &resetSenderTestDouble{}, resetTestConfig())
 	err := svc.RequestReset(context.Background(), "jane@example.com", "Starter")
-	var throttle *ThrottleError
-	if !errors.As(err, &throttle) {
+	throttle, ok := errors.AsType[*ThrottleError](err)
+	if !ok {
 		t.Fatalf("expected throttle error, got %v", err)
 	}
 	if throttle.Reason != "cooldown" || throttle.RetryAfter != 15*time.Second {

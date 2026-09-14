@@ -55,7 +55,7 @@ func main() {
 	}
 
 	myAddr += strings.Repeat(" ", 15-len(myAddr))
-	os.Setenv("ServerIP", myAddr)
+	FailOnError(os.Setenv("ServerIP", myAddr), "Failed to set server IP")
 	logger.WriteLog(logger.LogLevelInfo, "Server IP: "+myAddr)
 
 	var port, appName string
@@ -90,7 +90,11 @@ func main() {
 
 	routes.DB, sqlDb, err = database.ConnDb()
 	FailOnError(err, "Failed to open db")
-	defer sqlDb.Close()
+	defer func() {
+		if closeErr := sqlDb.Close(); closeErr != nil {
+			logger.WriteLog(logger.LogLevelError, "Failed to close database connection: "+closeErr.Error())
+		}
+	}()
 
 	routes.UserRoutes()
 	routes.RoleRoutes()

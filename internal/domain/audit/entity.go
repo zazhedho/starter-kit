@@ -23,7 +23,7 @@ type AuditTrail struct {
 	BeforeData   string    `json:"before_data,omitempty" gorm:"column:before_data"`
 	AfterData    string    `json:"after_data,omitempty" gorm:"column:after_data"`
 	Metadata     string    `json:"metadata,omitempty" gorm:"column:metadata"`
-	CreatedAt    time.Time `json:"created_at,omitempty" gorm:"column:created_at"`
+	CreatedAt    time.Time `json:"created_at" gorm:"column:created_at"`
 }
 
 type AuditEvent struct {

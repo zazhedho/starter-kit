@@ -72,7 +72,7 @@ func (s *LocationService) fetchLocationMap(ctx context.Context, url, entity stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch %s: %w", entity, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code for %s: %d", entity, resp.StatusCode)

@@ -145,8 +145,8 @@ func TestSendRegisterOTPReturnsThrottleOnCooldown(t *testing.T) {
 	svc := NewOTPService(repo, &otpSenderTestDouble{}, otpTestConfig())
 
 	err := svc.SendRegisterOTP(context.Background(), "jane@example.com", "Starter")
-	var throttle *ThrottleError
-	if !errors.As(err, &throttle) {
+	throttle, ok := errors.AsType[*ThrottleError](err)
+	if !ok {
 		t.Fatalf("expected throttle error, got %v", err)
 	}
 	if throttle.Reason != "cooldown" || throttle.RetryAfter != 30*time.Second {
@@ -241,8 +241,8 @@ func TestSendRegisterOTPReturnsThrottleOnRateLimit(t *testing.T) {
 	svc := NewOTPService(repo, &otpSenderTestDouble{}, otpTestConfig())
 
 	err := svc.SendRegisterOTP(context.Background(), "jane@example.com", "Starter")
-	var throttle *ThrottleError
-	if !errors.As(err, &throttle) {
+	throttle, ok := errors.AsType[*ThrottleError](err)
+	if !ok {
 		t.Fatalf("expected throttle error, got %v", err)
 	}
 	if throttle.Reason != "rate_limit" || throttle.RetryAfter != 20*time.Second {

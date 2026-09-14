@@ -80,7 +80,9 @@ func GetAppConf(key string, def any, rdbCache *redis.Client) any {
 
 		if appConf["config_id"] != utils.GetEnv("CONFIG_ID", "") {
 			for k, v := range appConf {
-				os.Setenv(utils.NormalizeUpperKey(k), v)
+				if err := os.Setenv(utils.NormalizeUpperKey(k), v); err != nil {
+					logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to set app config %s: %v", k, err))
+				}
 			}
 		}
 

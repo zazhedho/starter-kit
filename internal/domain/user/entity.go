@@ -28,7 +28,7 @@ type Users struct {
 	LoginProvider      string         `json:"login_provider,omitempty" gorm:"column:login_provider"`
 	AvatarURL          string         `json:"avatar_url,omitempty" gorm:"column:avatar_url"`
 	Metadata           map[string]any `json:"metadata,omitempty" gorm:"column:metadata;type:jsonb;serializer:json"`
-	CreatedAt          time.Time      `json:"created_at,omitempty" gorm:"column:created_at"`
+	CreatedAt          time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt          *time.Time     `json:"updated_at,omitempty" gorm:"column:updated_at"`
 	DeletedAt          gorm.DeletedAt `json:"-" gorm:"index"`
 }

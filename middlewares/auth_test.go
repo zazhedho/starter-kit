@@ -93,12 +93,13 @@ func performMiddlewareRequest(token string, handlers ...gin.HandlerFunc) *httpte
 func performMiddlewareRequestWithSetup(handlers []gin.HandlerFunc, setup func(*gin.Context)) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	chain := []gin.HandlerFunc{func(ctx *gin.Context) {
+	chain := make([]gin.HandlerFunc, 0, len(handlers)+2)
+	chain = append(chain, func(ctx *gin.Context) {
 		if setup != nil {
 			setup(ctx)
 		}
 		ctx.Next()
-	}}
+	})
 	chain = append(chain, handlers...)
 	chain = append(chain, func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": "ok"})

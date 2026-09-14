@@ -94,7 +94,7 @@ func performPermissionRequest(
 ) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	routePath := strings.SplitN(path, "?", 2)[0]
+	routePath, _, _ := strings.Cut(path, "?")
 	router.Handle(method, routePath, func(ctx *gin.Context) {
 		if scope.UserID != "" || scope.Role != "" {
 			ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), scope))
@@ -122,7 +122,7 @@ func performPermissionRequest(
 func performPermissionRawRequest(method, path, body string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	routePath := strings.SplitN(path, "?", 2)[0]
+	routePath, _, _ := strings.Cut(path, "?")
 	router.Handle(method, routePath, handler)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

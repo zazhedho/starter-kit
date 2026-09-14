@@ -17,7 +17,7 @@ type Permission struct {
 	Description string         `json:"description,omitempty" gorm:"column:description"`
 	Resource    string         `json:"resource" gorm:"column:resource"`
 	Action      string         `json:"action" gorm:"column:action"`
-	CreatedAt   time.Time      `json:"created_at,omitempty" gorm:"column:created_at"`
+	CreatedAt   time.Time      `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt   *time.Time     `json:"updated_at,omitempty" gorm:"column:updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 }

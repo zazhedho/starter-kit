@@ -48,7 +48,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Fprintln(os.Stdout, sql)
+	if _, err := fmt.Fprintln(os.Stdout, sql); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func splitCSV(value string) []string {

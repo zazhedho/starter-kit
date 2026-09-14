@@ -3,6 +3,7 @@ package repositorygeneric
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"starter-kit/pkg/filter"
 	"starter-kit/utils"
 	"strings"
@@ -78,13 +79,7 @@ func applyOrdering(query *gorm.DB, params filter.BaseParams, opts QueryOptions) 
 }
 
 func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(values, target)
 }
 
 func isSliceValue(value any) bool {
@@ -141,8 +136,8 @@ func isSafeColumnIdentifier(column string) bool {
 		return false
 	}
 
-	parts := strings.Split(column, ".")
-	for _, part := range parts {
+	parts := strings.SplitSeq(column, ".")
+	for part := range parts {
 		if !isSafeColumnSegment(part) {
 			return false
 		}

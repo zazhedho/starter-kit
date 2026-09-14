@@ -27,5 +27,5 @@ type AuditTrailResponse struct {
 	BeforeData    any        `json:"before_data,omitempty"`
 	AfterData     any        `json:"after_data,omitempty"`
 	Metadata      any        `json:"metadata,omitempty"`
-	CreatedAt     time.Time  `json:"created_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
