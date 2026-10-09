@@ -351,24 +351,8 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 		data.Email = utils.SanitizeEmail(req.Email)
 	}
 
-	if reqRole := strings.TrimSpace(req.Role); reqRole != "" {
-		newRoleName := utils.NormalizeKey(reqRole)
-		canAssignRole, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "users", "assign_role")
-		if err != nil {
-			return domainuser.Users{}, err
-		}
-		if !canAssignRole {
-			return domainuser.Users{}, errors.New("access denied: missing permission users:assign_role")
-		}
-		if newRoleName == utils.RoleSuperAdmin && scope.Role != utils.RoleSuperAdmin {
-			return domainuser.Users{}, errors.New("cannot assign superadmin role")
-		}
-		roleID, ok := findRoleIDByName(ctx, s.RoleRepo, newRoleName)
-		if !ok {
-			return domainuser.Users{}, errors.New("invalid role: " + newRoleName)
-		}
-		data.Role = newRoleName
-		data.RoleId = roleID
+	if err := s.applyRoleUpdate(ctx, scope.Role, req.Role, &data); err != nil {
+		return domainuser.Users{}, err
 	}
 
 	if err = s.UserRepo.Update(ctx, data); err != nil {
@@ -379,6 +363,30 @@ func (s *ServiceUser) Update(ctx context.Context, id string, req dto.UserUpdate)
 	}
 
 	return data, nil
+}
+
+func (s *ServiceUser) applyRoleUpdate(ctx context.Context, actorRole, requestedRole string, user *domainuser.Users) error {
+	newRoleName := utils.NormalizeKey(strings.TrimSpace(requestedRole))
+	if newRoleName == "" {
+		return nil
+	}
+	canAssignRole, err := serviceshared.HasPermission(ctx, s.PermissionRepo, "users", "assign_role")
+	if err != nil {
+		return err
+	}
+	if !canAssignRole {
+		return errors.New("access denied: missing permission users:assign_role")
+	}
+	if newRoleName == utils.RoleSuperAdmin && actorRole != utils.RoleSuperAdmin {
+		return errors.New("cannot assign superadmin role")
+	}
+	roleID, ok := findRoleIDByName(ctx, s.RoleRepo, newRoleName)
+	if !ok {
+		return errors.New("invalid role: " + newRoleName)
+	}
+	user.Role = newRoleName
+	user.RoleId = roleID
+	return nil
 }
 
 func (s *ServiceUser) ChangePassword(ctx context.Context, id string, req dto.ChangePassword) (domainuser.Users, error) {

@@ -78,42 +78,9 @@ func (r *repo) GetUserMenus(ctx context.Context, userId string) (ret []domainmen
 		return nil, err
 	}
 
-	menuByID := make(map[string]domainmenu.MenuItem, len(ret))
-	pendingParentIDs := make([]string, 0)
-	for _, menu := range ret {
-		menuByID[menu.Id] = menu
-		if menu.ParentId != nil && *menu.ParentId != "" {
-			if _, exists := menuByID[*menu.ParentId]; !exists {
-				pendingParentIDs = append(pendingParentIDs, *menu.ParentId)
-			}
-		}
-	}
-
-	for len(pendingParentIDs) > 0 {
-		var parentMenus []domainmenu.MenuItem
-		if err = r.DB.WithContext(ctx).
-			Where("id IN ? AND is_active = ? AND deleted_at IS NULL", pendingParentIDs, true).
-			Find(&parentMenus).Error; err != nil {
-			return nil, err
-		}
-
-		nextParentIDs := make([]string, 0)
-		for _, menu := range parentMenus {
-			if _, exists := menuByID[menu.Id]; exists {
-				continue
-			}
-
-			menuByID[menu.Id] = menu
-			ret = append(ret, menu)
-
-			if menu.ParentId != nil && *menu.ParentId != "" {
-				if _, exists := menuByID[*menu.ParentId]; !exists {
-					nextParentIDs = append(nextParentIDs, *menu.ParentId)
-				}
-			}
-		}
-
-		pendingParentIDs = nextParentIDs
+	ret, err = r.includeActiveParents(ctx, ret)
+	if err != nil {
+		return nil, err
 	}
 
 	sort.SliceStable(ret, func(i, j int) bool {
@@ -124,4 +91,49 @@ func (r *repo) GetUserMenus(ctx context.Context, userId string) (ret []domainmen
 	})
 
 	return ret, nil
+}
+
+func (r *repo) includeActiveParents(ctx context.Context, menus []domainmenu.MenuItem) ([]domainmenu.MenuItem, error) {
+	menuByID := make(map[string]domainmenu.MenuItem, len(menus))
+	pendingParentIDs := collectMenuParentIDs(menus, menuByID)
+	for len(pendingParentIDs) > 0 {
+		var parents []domainmenu.MenuItem
+		if err := r.DB.WithContext(ctx).
+			Where("id IN ? AND is_active = ? AND deleted_at IS NULL", pendingParentIDs, true).
+			Find(&parents).Error; err != nil {
+			return nil, err
+		}
+		pendingParentIDs = appendActiveMenuParents(parents, menuByID, &menus)
+	}
+	return menus, nil
+}
+
+func collectMenuParentIDs(menus []domainmenu.MenuItem, menuByID map[string]domainmenu.MenuItem) []string {
+	parentIDs := make([]string, 0)
+	for _, menu := range menus {
+		menuByID[menu.Id] = menu
+		if menu.ParentId != nil && *menu.ParentId != "" {
+			if _, exists := menuByID[*menu.ParentId]; !exists {
+				parentIDs = append(parentIDs, *menu.ParentId)
+			}
+		}
+	}
+	return parentIDs
+}
+
+func appendActiveMenuParents(parents []domainmenu.MenuItem, menuByID map[string]domainmenu.MenuItem, menus *[]domainmenu.MenuItem) []string {
+	nextParentIDs := make([]string, 0)
+	for _, menu := range parents {
+		if _, exists := menuByID[menu.Id]; exists {
+			continue
+		}
+		menuByID[menu.Id] = menu
+		*menus = append(*menus, menu)
+		if menu.ParentId != nil && *menu.ParentId != "" {
+			if _, exists := menuByID[*menu.ParentId]; !exists {
+				nextParentIDs = append(nextParentIDs, *menu.ParentId)
+			}
+		}
+	}
+	return nextParentIDs
 }

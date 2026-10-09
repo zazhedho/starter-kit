@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -48,7 +49,7 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 		logId = utils.GenerateLogId(ctx)
 		logPrefix = "[AuthMiddleware]"
 
-		tokenString, dataJWT, err := utils.JwtClaims(ctx)
+		tokenString, dataJWT, err := utils.JwtClaims(ctx.Request)
 		if err != nil {
 			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Invalid token; Error: %s;", logPrefix, err.Error()))
 			res := response.Unauthorized(logId, "Invalid or expired token. Please login again.")
@@ -82,8 +83,11 @@ func (m *Middleware) AuthMiddleware() gin.HandlerFunc {
 
 		ctx.Set(utils.CtxKeyAuthData, dataJWT)
 		ctx.Set("token", tokenString)
-		ctx.Set("userId", utils.InterfaceString(dataJWT["user_id"]))
-		ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.NewFromClaims(dataJWT, nil)))
+		userID := utils.InterfaceString(dataJWT["user_id"])
+		ctx.Set("userId", userID)
+		requestContext := utils.WithAuthData(ctx.Request.Context(), dataJWT)
+		requestContext = logger.WithLogMetadata(requestContext, logId.String(), userID)
+		ctx.Request = ctx.Request.WithContext(authscope.WithContext(requestContext, authscope.NewFromClaims(dataJWT, nil)))
 
 		ctx.Next()
 	}
@@ -196,25 +200,19 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 		targetResource := strings.TrimSpace(resource)
 		targetAction := strings.TrimSpace(action)
 
-		permissionKeys, cacheHit := permissioncache.GetUserPermissionKeys(ctx.Request.Context(), m.PermissionCache, userId)
-		if !cacheHit {
-			permissions, err := m.PermissionRepo.GetUserPermissions(ctx.Request.Context(), userId)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))
-					res := response.Forbidden(logId, messages.AccessDenied)
-					ctx.AbortWithStatusJSON(http.StatusForbidden, res)
-					return
-				}
-
-				logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
-				res := response.InternalServerError(logId)
-				ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
+		permissionKeys, err := m.loadPermissionKeys(ctx.Request.Context(), userId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; User '%s' not found when loading permissions", logPrefix, userId))
+				res := response.Forbidden(logId, messages.AccessDenied)
+				ctx.AbortWithStatusJSON(http.StatusForbidden, res)
 				return
 			}
 
-			permissionKeys = permissionKeysFromPermissions(permissions)
-			permissioncache.SetUserPermissionKeys(ctx.Request.Context(), m.PermissionCache, userId, permissionKeys)
+			logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Failed to get user permissions: %s", logPrefix, err.Error()))
+			res := response.InternalServerError(logId)
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, res)
+			return
 		}
 
 		dataJWT["permissions"] = permissionKeys
@@ -233,6 +231,19 @@ func (m *Middleware) PermissionMiddleware(resource, action string) gin.HandlerFu
 
 		ctx.Next()
 	}
+}
+
+func (m *Middleware) loadPermissionKeys(ctx context.Context, userID string) ([]string, error) {
+	if keys, ok := permissioncache.GetUserPermissionKeys(ctx, m.PermissionCache, userID); ok {
+		return keys, nil
+	}
+	permissions, err := m.PermissionRepo.GetUserPermissions(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	keys := permissionKeysFromPermissions(permissions)
+	permissioncache.SetUserPermissionKeys(ctx, m.PermissionCache, userID, keys)
+	return keys, nil
 }
 
 func permissionKeysFromPermissions(permissions []domainpermission.Permission) []string {

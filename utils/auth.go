@@ -1,11 +1,11 @@
 package utils
 
-import "github.com/gin-gonic/gin"
+import "context"
 
-func GetAuthData(ctx *gin.Context) map[string]any {
-	jwtClaims, _ := ctx.Get(CtxKeyAuthData)
-	if jwtClaims != nil {
-		return jwtClaims.(map[string]any)
+func GetAuthData(ctx context.Context) map[string]any {
+	jwtClaims, _ := contextValue(ctx, CtxKeyAuthData)
+	if data, ok := jwtClaims.(map[string]any); ok {
+		return data
 	}
 	return nil
 }

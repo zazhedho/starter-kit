@@ -3,11 +3,12 @@ package utils
 import (
 	"errors"
 	"fmt"
-	domainuser "starter-kit/internal/domain/user"
+	"net/http"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	domainuser "starter-kit/internal/domain/user"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -120,13 +121,16 @@ func GenerateRefreshJwt(user *domainuser.Users, logId string, claimsOverride *Ap
 	return token.SignedString(secret)
 }
 
-func GetAuthToken(ctx *gin.Context) string {
-	bearerToken := ctx.Request.Header.Get("Authorization")
+func GetAuthToken(request *http.Request) string {
+	if request == nil {
+		return ""
+	}
+	bearerToken := request.Header.Get("Authorization")
 	return strings.ReplaceAll(bearerToken, "Bearer ", "")
 }
 
-func JwtClaims(ctx *gin.Context) (string, map[string]any, error) {
-	tokenString := GetAuthToken(ctx)
+func JwtClaims(request *http.Request) (string, map[string]any, error) {
+	tokenString := GetAuthToken(request)
 	data, err := JwtClaim(tokenString)
 	return tokenString, data, err
 }

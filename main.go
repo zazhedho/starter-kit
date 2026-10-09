@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Register the PostgreSQL migration driver.
+	_ "github.com/golang-migrate/migrate/v4/source/file"       // Register the file-based migration source.
 	"github.com/joho/godotenv"
 )
 

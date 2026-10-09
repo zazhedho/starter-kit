@@ -92,7 +92,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 func (h *MediaHandler) Delete(ctx *gin.Context) {
 	logID := utils.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Delete]"
-	id, err := utils.ValidateUUID(ctx, logID)
+	id, err := handlercommon.ValidateUUID(ctx, logID)
 	if err != nil {
 		return
 	}

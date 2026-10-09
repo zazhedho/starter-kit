@@ -16,6 +16,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	sessionAuthenticationRequiredMessage = "User is not authenticated. Please login again."
+	failedRevokeSessionMessage           = "Failed to revoke a login session"
+)
+
 type HandlerSession struct {
 	Service interfacesession.ServiceSessionInterface
 	handlercommon.AuditWriter
@@ -36,7 +41,7 @@ func (h *HandlerSession) GetActiveSessions(ctx *gin.Context) {
 	scope := authscope.FromContext(reqCtx)
 	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
-		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
+		res := response.Unauthorized(logId, sessionAuthenticationRequiredMessage)
 		ctx.JSON(http.StatusUnauthorized, res)
 		return
 	}
@@ -74,7 +79,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			Action:       domainaudit.ActionDelete,
 			Resource:     "session",
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to revoke a login session",
+			Message:      failedRevokeSessionMessage,
 			ErrorMessage: "Session ID is required",
 		})
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
@@ -86,7 +91,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 	scope := authscope.FromContext(reqCtx)
 	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
-		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
+		res := response.Unauthorized(logId, sessionAuthenticationRequiredMessage)
 		ctx.JSON(http.StatusUnauthorized, res)
 		return
 	}
@@ -98,7 +103,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			Resource:     "session",
 			ResourceID:   sessionID,
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to revoke a login session",
+			Message:      failedRevokeSessionMessage,
 			ErrorMessage: "The requested session was not found",
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetSessionBySessionID; Error: %+v", logPrefix, err))
@@ -132,7 +137,7 @@ func (h *HandlerSession) RevokeSession(ctx *gin.Context) {
 			Resource:     "session",
 			ResourceID:   sessionID,
 			Status:       domainaudit.StatusFailed,
-			Message:      "Failed to revoke a login session",
+			Message:      failedRevokeSessionMessage,
 			ErrorMessage: err.Error(),
 		})
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.DestroySession; Error: %+v", logPrefix, err))
@@ -161,7 +166,7 @@ func (h *HandlerSession) RevokeAllOtherSessions(ctx *gin.Context) {
 	scope := authscope.FromContext(reqCtx)
 	if scope.UserID == "" {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; userId not found in context", logPrefix))
-		res := response.Unauthorized(logId, "User is not authenticated. Please login again.")
+		res := response.Unauthorized(logId, sessionAuthenticationRequiredMessage)
 		ctx.JSON(http.StatusUnauthorized, res)
 		return
 	}

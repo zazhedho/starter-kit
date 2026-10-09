@@ -48,7 +48,7 @@ func Int64PtrFromString(value string) *int64 {
 	return &parsed
 }
 
-func StringOrDefault(value string, fallback string) string {
+func StringOrDefault(value, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return fallback

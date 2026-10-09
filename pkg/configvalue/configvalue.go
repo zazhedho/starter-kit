@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func String(raw string, fallback string) string {
+func String(raw, fallback string) string {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return fallback

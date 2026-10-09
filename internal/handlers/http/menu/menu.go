@@ -55,7 +55,7 @@ func (h *MenuHandler) GetAll(ctx *gin.Context) {
 	logPrefix := "[MenuHandler][GetAll]"
 	reqCtx := ctx.Request.Context()
 
-	params, err := filter.GetBaseParams(ctx, "order_index", "asc", 100)
+	params, err := filter.GetBaseParams(ctx.Request.URL.Query(), "order_index", "asc", 100)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)

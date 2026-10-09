@@ -1,9 +1,9 @@
 package utils
 
 import (
+	"context"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
@@ -18,9 +18,9 @@ func CreateUUID() string {
 	return id
 }
 
-func GenerateLogId(ctx *gin.Context) uuid.UUID {
+func GenerateLogId(ctx context.Context) uuid.UUID {
 	if ctx != nil {
-		if storedID, ok := ctx.Get(CtxKeyId); ok {
+		if storedID, ok := contextValue(ctx, CtxKeyId); ok {
 			switch v := storedID.(type) {
 			case uuid.UUID:
 				return v
@@ -38,7 +38,7 @@ func GenerateLogId(ctx *gin.Context) uuid.UUID {
 	}
 
 	if ctx != nil {
-		ctx.Set(CtxKeyId, logId)
+		setContextValue(ctx, CtxKeyId, logId)
 	}
 
 	return logId

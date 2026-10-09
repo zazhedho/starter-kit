@@ -1,15 +1,15 @@
 package utils
 
 import (
+	"context"
 	"maps"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-func GetRequestID(ctx *gin.Context) string {
-	if raw, ok := ctx.Get(CtxKeyId); ok && raw != nil {
+func GetRequestID(ctx context.Context) string {
+	if raw, ok := contextValue(ctx, CtxKeyId); ok && raw != nil {
 		switch v := raw.(type) {
 		case uuid.UUID:
 			return v.String()
@@ -21,7 +21,7 @@ func GetRequestID(ctx *gin.Context) string {
 	return GenerateLogId(ctx).String()
 }
 
-func GetImpersonationMetadata(ctx *gin.Context) map[string]any {
+func GetImpersonationMetadata(ctx context.Context) map[string]any {
 	authData := GetAuthData(ctx)
 	if authData == nil {
 		return nil
@@ -43,7 +43,7 @@ func GetImpersonationMetadata(ctx *gin.Context) map[string]any {
 	}
 }
 
-func MergeMetadata(base map[string]any, extra map[string]any) map[string]any {
+func MergeMetadata(base, extra map[string]any) map[string]any {
 	if len(base) == 0 && len(extra) == 0 {
 		return nil
 	}

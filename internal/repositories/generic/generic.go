@@ -16,6 +16,8 @@ type SearchFunc func(query *gorm.DB, search string) *gorm.DB
 type QueryFunc func(query *gorm.DB) *gorm.DB
 type FilterSanitizer func(filters map[string]any, allowed []string) map[string]any
 
+const idEqualsQuery = "id = ?"
+
 type QueryOptions struct {
 	BaseQuery           QueryFunc
 	Search              SearchFunc
@@ -66,7 +68,7 @@ func (r *GenericRepository[T]) Upsert(ctx context.Context, values []T, conflictC
 }
 
 func (r *GenericRepository[T]) GetByID(ctx context.Context, id string) (ret T, err error) {
-	err = r.DB.WithContext(ctx).Where("id = ?", id).First(&ret).Error
+	err = r.DB.WithContext(ctx).Where(idEqualsQuery, id).First(&ret).Error
 	if err != nil {
 		return zeroValue[T](), err
 	}
@@ -165,11 +167,11 @@ func (r *GenericRepository[T]) Update(ctx context.Context, m T) error {
 }
 
 func (r *GenericRepository[T]) Delete(ctx context.Context, id string) error {
-	return r.DB.WithContext(ctx).Where("id = ?", id).Delete(new(T)).Error
+	return r.DB.WithContext(ctx).Where(idEqualsQuery, id).Delete(new(T)).Error
 }
 
 func (r *GenericRepository[T]) SoftDelete(ctx context.Context, id, deletedBy string) error {
-	return r.DB.WithContext(ctx).Model(new(T)).Where("id = ?", id).Updates(map[string]any{
+	return r.DB.WithContext(ctx).Model(new(T)).Where(idEqualsQuery, id).Updates(map[string]any{
 		"deleted_by": deletedBy,
 		"deleted_at": time.Now(),
 	}).Error

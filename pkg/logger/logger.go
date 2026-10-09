@@ -15,8 +15,6 @@ import (
 	"starter-kit/utils"
 
 	"log/slog"
-
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -44,43 +42,36 @@ var (
 	appLogger  *slog.Logger
 )
 
+type logIDContextKey struct{}
+type userIDContextKey struct{}
+
 func WriteLog(level int, msg ...any) {
-	if _, ok := logLevelMap[level]; !ok {
-		return
-	}
-
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "5")); logLevel < level {
-		return
-	}
-
-	logger := getLogger()
-	attrs := []slog.Attr{
-		slog.String("server_ip", utils.GetEnv("ServerIP", "")),
-	}
-	attrs = append(attrs, callerAttrs(2)...)
-	if node := utils.GetEnv("NODE", ""); node != "" {
-		attrs = append(attrs, slog.String("node", node))
-	}
-
-	fields := make([]any, 0, len(attrs))
-	for _, attr := range attrs {
-		fields = append(fields, attr)
-	}
-
-	logger.Log(
-		context.Background(),
-		mapLevelToSlog(level),
-		fmt.Sprint(msg...),
-		fields...,
-	)
+	writeLog(context.Background(), 5, level, msg...)
 }
 
-func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
+func WriteLogWithContext(ctx context.Context, level int, msg ...any) {
+	writeLog(ctx, 6, level, msg...)
+}
+
+func WithLogMetadata(ctx context.Context, logID, userID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if logID != "" {
+		ctx = context.WithValue(ctx, logIDContextKey{}, logID)
+	}
+	if userID != "" {
+		ctx = context.WithValue(ctx, userIDContextKey{}, userID)
+	}
+	return ctx
+}
+
+func writeLog(ctx context.Context, defaultLogLevel, level int, msg ...any) {
 	if _, ok := logLevelMap[level]; !ok {
 		return
 	}
 
-	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", "6")); logLevel < level {
+	if logLevel, _ := strconv.Atoi(utils.GetEnv("LOG_LEVEL", strconv.Itoa(defaultLogLevel))); logLevel < level {
 		return
 	}
 
@@ -88,38 +79,41 @@ func WriteLogWithContext(ctx *gin.Context, level int, msg ...any) {
 	attrs := []slog.Attr{
 		slog.String("server_ip", utils.GetEnv("ServerIP", "")),
 	}
-	attrs = append(attrs, callerAttrs(2)...)
+	attrs = append(attrs, callerAttrs(3)...)
 	if node := utils.GetEnv("NODE", ""); node != "" {
 		attrs = append(attrs, slog.String("node", node))
 	}
 
 	if ctx != nil {
-		logID := utils.GenerateLogId(ctx)
-		attrs = append(attrs, slog.String("log_id", logID.String()))
+		logID := utils.InterfaceString(ctx.Value(logIDContextKey{}))
+		if logID == "" {
+			logID = utils.GenerateLogId(ctx).String()
+		}
+		attrs = append(attrs, slog.String("log_id", logID))
 
-		if val, ok := ctx.Get("userId"); ok {
-			if userID := utils.InterfaceString(val); userID != "" {
-				attrs = append(attrs, slog.String("user_id", userID))
+		userID := utils.InterfaceString(ctx.Value(userIDContextKey{}))
+		if userID == "" {
+			if getter, ok := ctx.(interface{ Get(string) (any, bool) }); ok {
+				if value, exists := getter.Get("userId"); exists {
+					userID = utils.InterfaceString(value)
+				}
 			}
+		}
+		if userID != "" {
+			attrs = append(attrs, slog.String("user_id", userID))
 		}
 	}
 
-	logCtx := context.Background()
-	if ctx != nil && ctx.Request != nil {
-		logCtx = ctx.Request.Context()
+	logCtx := ctx
+	if logCtx == nil {
+		logCtx = context.Background()
 	}
-
 	fields := make([]any, 0, len(attrs))
 	for _, attr := range attrs {
 		fields = append(fields, attr)
 	}
 
-	logger.Log(
-		logCtx,
-		mapLevelToSlog(level),
-		fmt.Sprint(msg...),
-		fields...,
-	)
+	logger.Log(logCtx, mapLevelToSlog(level), fmt.Sprint(msg...), fields...)
 }
 
 func getLogger() *slog.Logger {
@@ -210,33 +204,11 @@ func (h *stringHandler) Enabled(_ context.Context, level slog.Level) bool {
 
 func (h *stringHandler) Handle(_ context.Context, record slog.Record) error {
 	fields := map[string]string{}
-	addAttr := func(attr slog.Attr) {
-		if attr.Key == "" {
-			return
-		}
-		key := attr.Key
-		val := attr.Value
-		if val.Kind() == slog.KindAny {
-			if lv, ok := val.Any().(slog.LogValuer); ok {
-				val = lv.LogValue()
-			}
-		}
-		if len(h.groups) > 0 {
-			key = strings.Join(h.groups, ".") + "." + key
-		}
-		switch val.Kind() {
-		case slog.KindString:
-			fields[key] = val.String()
-		default:
-			fields[key] = fmt.Sprint(val.Any())
-		}
-	}
-
 	for _, attr := range h.attrs {
-		addAttr(attr)
+		h.addStringAttr(fields, attr)
 	}
 	record.Attrs(func(attr slog.Attr) bool {
-		addAttr(attr)
+		h.addStringAttr(fields, attr)
 		return true
 	})
 
@@ -262,6 +234,27 @@ func (h *stringHandler) Handle(_ context.Context, record slog.Record) error {
 	_, err := io.WriteString(h.writer, line)
 	h.mu.Unlock()
 	return err
+}
+
+func (h *stringHandler) addStringAttr(fields map[string]string, attr slog.Attr) {
+	if attr.Key == "" {
+		return
+	}
+	key := attr.Key
+	value := attr.Value
+	if value.Kind() == slog.KindAny {
+		if logValue, ok := value.Any().(slog.LogValuer); ok {
+			value = logValue.LogValue()
+		}
+	}
+	if len(h.groups) > 0 {
+		key = strings.Join(h.groups, ".") + "." + key
+	}
+	if value.Kind() == slog.KindString {
+		fields[key] = value.String()
+		return
+	}
+	fields[key] = fmt.Sprint(value.Any())
 }
 
 func (h *stringHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

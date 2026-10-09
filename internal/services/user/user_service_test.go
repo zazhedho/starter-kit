@@ -951,7 +951,7 @@ func TestAdminCreateUserValidationBranches(t *testing.T) {
 	}
 }
 
-func TestUserServiceErrorBranches(t *testing.T) {
+func TestUserServiceLoginAndChangePasswordErrors(t *testing.T) {
 	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	oldPassword, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
 	if err != nil {
@@ -967,10 +967,16 @@ func TestUserServiceErrorBranches(t *testing.T) {
 		t.Fatalf("expected login update error, got %v", err)
 	}
 
-	service = NewUserService(&userRepoMock{
-		user: domainuser.Users{Id: "root", Role: utils.RoleSuperAdmin},
-	}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
-	_, err = service.Update(authContext("admin-1", "Admin", utils.RoleAdmin), "root", dto.UserUpdate{Name: "Root"})
+	service = NewUserService(&userRepoMock{user: domainuser.Users{Id: "user-1", Password: string(oldPassword)}, updateErr: errors.New("update failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err = service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "OldPassword1!", NewPassword: "NewPassword1!"})
+	if err == nil || err.Error() != "update failed" {
+		t.Fatalf("expected password update error, got %v", err)
+	}
+}
+
+func TestUserServiceUpdateErrorBranches(t *testing.T) {
+	service := NewUserService(&userRepoMock{user: domainuser.Users{Id: "root", Role: utils.RoleSuperAdmin}}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err := service.Update(authContext("admin-1", "Admin", utils.RoleAdmin), "root", dto.UserUpdate{Name: "Root"})
 	if err == nil || err.Error() != "cannot modify superadmin users" {
 		t.Fatalf("expected superadmin modify guard, got %v", err)
 	}
@@ -986,30 +992,36 @@ func TestUserServiceErrorBranches(t *testing.T) {
 	if err == nil || err.Error() != "update failed" {
 		t.Fatalf("expected update error, got %v", err)
 	}
+}
 
-	service = NewUserService(&userRepoMock{user: domainuser.Users{Id: "user-1", Password: string(oldPassword)}, updateErr: errors.New("update failed")}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
-	_, err = service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "OldPassword1!", NewPassword: "NewPassword1!"})
-	if err == nil || err.Error() != "update failed" {
-		t.Fatalf("expected change password update error, got %v", err)
-	}
-
-	_, err = service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "SamePassword1!", NewPassword: "SamePassword1!"})
+func TestUserServiceChangePasswordRejectsSamePassword(t *testing.T) {
+	service := NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	_, err := service.ChangePassword(context.Background(), "user-1", dto.ChangePassword{CurrentPassword: "SamePassword1!", NewPassword: "SamePassword1!"})
 	if err == nil || err.Error() != "new password must be different from current password" {
 		t.Fatalf("expected same password error, got %v", err)
 	}
+}
 
-	service = NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+func TestUserServiceForgotPasswordMissingUserSucceeds(t *testing.T) {
+	service := NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
 	token, err := service.ForgotPassword(context.Background(), dto.ForgotPasswordRequest{Email: "missing@example.com"})
 	if err != nil || token != "" {
 		t.Fatalf("expected missing forgot password to return empty success, token=%q err=%v", token, err)
 	}
+}
 
-	service = NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+func TestUserServiceResetPasswordErrorBranches(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+	service := NewUserService(&userRepoMock{}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
 	if err := service.ResetPassword(context.Background(), dto.ResetPasswordRequest{Token: "bad-token", NewPassword: "Password1!"}); err == nil || err.Error() != "invalid or expired token" {
 		t.Fatalf("expected invalid token error, got %v", err)
 	}
 
-	resetUser := domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(oldPassword), Role: utils.RoleViewer}
+	password, err := bcrypt.GenerateFromPassword([]byte("OldPassword1!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	resetUser := domainuser.Users{Id: "user-1", Email: "jane@example.com", Password: string(password), Role: utils.RoleViewer}
 	resetToken, err := utils.GeneratePasswordResetJwt(&resetUser, "reset_password")
 	if err != nil {
 		t.Fatalf("generate reset token: %v", err)
@@ -1020,19 +1032,25 @@ func TestUserServiceErrorBranches(t *testing.T) {
 		t.Fatalf("expected reset token blacklist error, got %v", err)
 	}
 	if userRepo.updated.Id != "" {
-		t.Fatalf("expected password update to be skipped when reset token blacklist fails")
+		t.Fatal("expected password update to be skipped when reset token blacklist fails")
 	}
+}
 
-	service = NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+func TestUserServiceResetPasswordByEmailReturnsNotFound(t *testing.T) {
+	service := NewUserService(&userRepoMock{emailErr: gorm.ErrRecordNotFound}, &authRepoMock{}, &roleRepoUserMock{}, &permissionRepoUserMock{})
 	if err := service.ResetPasswordByEmail(context.Background(), "missing@example.com", "Password1!"); err == nil || err.Error() != "user not found" {
 		t.Fatalf("expected reset by email missing user, got %v", err)
 	}
+}
 
-	logoutToken, err := utils.GenerateJwt(&resetUser, "logout-test")
+func TestUserServiceLogoutAndListErrors(t *testing.T) {
+	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
+	user := domainuser.Users{Id: "user-1", Email: "jane@example.com", Role: utils.RoleViewer}
+	logoutToken, err := utils.GenerateJwt(&user, "logout-test")
 	if err != nil {
 		t.Fatalf("generate logout token: %v", err)
 	}
-	service = NewUserService(&userRepoMock{}, &authRepoMock{err: errors.New("blacklist failed")}, &roleRepoUserMock{}, &permissionRepoUserMock{})
+	service := NewUserService(&userRepoMock{}, &authRepoMock{err: errors.New("blacklist failed")}, &roleRepoUserMock{}, &permissionRepoUserMock{})
 	if err := service.LogoutUser(context.Background(), logoutToken); err == nil || err.Error() != "blacklist failed" {
 		t.Fatalf("expected logout store error, got %v", err)
 	}

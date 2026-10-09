@@ -3,6 +3,7 @@ package handleraudit
 import (
 	"fmt"
 	"net/http"
+	handlercommon "starter-kit/internal/handlers/http/common"
 	interfaceaudit "starter-kit/internal/interfaces/audit"
 	"starter-kit/pkg/filter"
 	"starter-kit/pkg/logger"
@@ -26,7 +27,7 @@ func (h *AuditHandler) GetAll(ctx *gin.Context) {
 	logPrefix := "[AuditHandler][GetAll]"
 	reqCtx := ctx.Request.Context()
 
-	params, err := filter.GetBaseParams(ctx, "occurred_at", "desc", 20)
+	params, err := filter.GetBaseParams(ctx.Request.URL.Query(), "occurred_at", "desc", 20)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
@@ -53,7 +54,7 @@ func (h *AuditHandler) GetByID(ctx *gin.Context) {
 	logPrefix := "[AuditHandler][GetByID]"
 	reqCtx := ctx.Request.Context()
 
-	id, err := utils.ValidateUUID(ctx, logId)
+	id, err := handlercommon.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}

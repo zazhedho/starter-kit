@@ -409,71 +409,15 @@ func (s *LocationService) syncAll(ctx context.Context, year string, progress fun
 	}
 	locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.ProvinceKey())
 
-	var (
-		cityCount     int
-		districtCount int
-		villageCount  int
-	)
+	totals := syncProgress{ProvinceCount: len(provinces)}
 	progress(syncProgress{
 		Message:       "Provinces synced",
 		ProvinceCount: len(provinces),
 	})
 
 	for provinceIndex, province := range provinces {
-		cities, err := s.fetchCities(ctx, year, province.Code)
-		if err != nil {
+		if err := s.syncProvince(ctx, year, provinces, provinceIndex, province, &totals, progress); err != nil {
 			return syncProgress{}, err
-		}
-		if len(cities) > 0 {
-			if err := s.Repo.UpsertCities(ctx, cities); err != nil {
-				return syncProgress{}, err
-			}
-			cityCount += len(cities)
-			locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.CityKey(province.Code))
-		}
-
-		progress(syncProgress{
-			Message:       fmt.Sprintf("Processed province %d/%d: %s", provinceIndex+1, len(provinces), province.Name),
-			ProvinceCount: len(provinces),
-			CityCount:     cityCount,
-			DistrictCount: districtCount,
-			VillageCount:  villageCount,
-		})
-
-		for cityIndex, city := range cities {
-			districts, err := s.fetchDistricts(ctx, year, province.Code, city.Code)
-			if err != nil {
-				return syncProgress{}, err
-			}
-			if len(districts) > 0 {
-				if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
-					return syncProgress{}, err
-				}
-				districtCount += len(districts)
-				locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.DistrictKey(city.Code))
-			}
-
-			for _, district := range districts {
-				villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
-				if err != nil {
-					return syncProgress{}, err
-				}
-				if len(villages) > 0 {
-					if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
-						return syncProgress{}, err
-					}
-					villageCount += len(villages)
-					locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.VillageKey(district.Code))
-				}
-			}
-
-			progress(syncProgress{
-				Message:       fmt.Sprintf("Processed city %d/%d in province %s", cityIndex+1, len(cities), province.Name),
-				ProvinceCount: len(provinces),
-				CityCount:     cityCount,
-				DistrictCount: districtCount,
-				VillageCount:  villageCount,
-			})
 		}
 	}
 
@@ -481,10 +425,74 @@ func (s *LocationService) syncAll(ctx context.Context, year string, progress fun
 	return syncProgress{
 		Message:       "Full location sync completed",
 		ProvinceCount: len(provinces),
-		CityCount:     cityCount,
-		DistrictCount: districtCount,
-		VillageCount:  villageCount,
+		CityCount:     totals.CityCount,
+		DistrictCount: totals.DistrictCount,
+		VillageCount:  totals.VillageCount,
 	}, nil
+}
+
+func (s *LocationService) syncProvince(ctx context.Context, year string, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
+	cities, err := s.fetchCities(ctx, year, province.Code)
+	if err != nil {
+		return err
+	}
+	if len(cities) > 0 {
+		if err := s.Repo.UpsertCities(ctx, cities); err != nil {
+			return err
+		}
+		totals.CityCount += len(cities)
+		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.CityKey(province.Code))
+	}
+	progress(syncProgress{
+		Message:       fmt.Sprintf("Processed province %d/%d: %s", index+1, len(provinces), province.Name),
+		ProvinceCount: totals.ProvinceCount,
+		CityCount:     totals.CityCount,
+		DistrictCount: totals.DistrictCount,
+		VillageCount:  totals.VillageCount,
+	})
+
+	for cityIndex, city := range cities {
+		if err := s.syncCity(ctx, year, province, city, totals); err != nil {
+			return err
+		}
+		progress(syncProgress{
+			Message:       fmt.Sprintf("Processed city %d/%d in province %s", cityIndex+1, len(cities), province.Name),
+			ProvinceCount: totals.ProvinceCount,
+			CityCount:     totals.CityCount,
+			DistrictCount: totals.DistrictCount,
+			VillageCount:  totals.VillageCount,
+		})
+	}
+	return nil
+}
+
+func (s *LocationService) syncCity(ctx context.Context, year string, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
+	districts, err := s.fetchDistricts(ctx, year, province.Code, city.Code)
+	if err != nil {
+		return err
+	}
+	if len(districts) > 0 {
+		if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
+			return err
+		}
+		totals.DistrictCount += len(districts)
+		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.DistrictKey(city.Code))
+	}
+	for _, district := range districts {
+		villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
+		if err != nil {
+			return err
+		}
+		if len(villages) == 0 {
+			continue
+		}
+		if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
+			return err
+		}
+		totals.VillageCount += len(villages)
+		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.VillageKey(district.Code))
+	}
+	return nil
 }
 
 func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {

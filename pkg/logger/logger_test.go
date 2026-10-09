@@ -77,13 +77,23 @@ func TestLoggerPublicWritePaths(t *testing.T) {
 	ctx.Set("userId", "user-1")
 	WriteLogWithContext(ctx, LogLevelInfo, "context message")
 
-	if attrs := callerAttrs(0); len(attrs) == 0 {
+	if len(callerAttrs(0)) == 0 {
 		t.Fatal("expected caller attrs")
 	}
-	if got := normalizeSourceFile("pkg/logger/logger.go"); got == "" {
+	if normalizeSourceFile("pkg/logger/logger.go") == "" {
 		t.Fatal("expected normalized source file")
 	}
-	if logger := getLogger(); logger == nil {
+	if getLogger() == nil {
 		t.Fatal("expected logger singleton")
+	}
+}
+
+func TestWithLogMetadataStoresValuesInStandardContext(t *testing.T) {
+	ctx := WithLogMetadata(context.Background(), "log-1", "user-1")
+	if got := ctx.Value(logIDContextKey{}); got != "log-1" {
+		t.Fatalf("expected log id in context, got %v", got)
+	}
+	if got := ctx.Value(userIDContextKey{}); got != "user-1" {
+		t.Fatalf("expected user id in context, got %v", got)
 	}
 }

@@ -15,6 +15,8 @@ type repo struct {
 	*repositorygeneric.GenericRepository[domainrole.Role]
 }
 
+const roleIDFilter = "role_id = ?"
+
 func NewRoleRepo(db *gorm.DB) interfacerole.RepoRoleInterface {
 	return &repo{GenericRepository: repositorygeneric.New[domainrole.Role](db)}
 }
@@ -40,12 +42,12 @@ func (r *repo) GetAll(ctx context.Context, params filter.BaseParams) (ret []doma
 func (r *repo) AssignPermissions(ctx context.Context, roleId string, permissionIds []string) error {
 	tx := r.DB.WithContext(ctx).Begin()
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()
 
-	if err := tx.Where("role_id = ?", roleId).Delete(&domainrole.RolePermission{}).Error; err != nil {
+	if err := tx.Where(roleIDFilter, roleId).Delete(&domainrole.RolePermission{}).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -71,7 +73,7 @@ func (r *repo) RemovePermissions(ctx context.Context, roleId string, permissionI
 
 func (r *repo) GetRolePermissions(ctx context.Context, roleId string) ([]string, error) {
 	var rolePermissions []domainrole.RolePermission
-	if err := r.DB.WithContext(ctx).Where("role_id = ?", roleId).Find(&rolePermissions).Error; err != nil {
+	if err := r.DB.WithContext(ctx).Where(roleIDFilter, roleId).Find(&rolePermissions).Error; err != nil {
 		return nil, err
 	}
 
@@ -86,12 +88,12 @@ func (r *repo) GetRolePermissions(ctx context.Context, roleId string) ([]string,
 func (r *repo) AssignMenus(ctx context.Context, roleId string, menuIds []string) error {
 	tx := r.DB.WithContext(ctx).Begin()
 	defer func() {
-		if r := recover(); r != nil {
+		if recover() != nil {
 			tx.Rollback()
 		}
 	}()
 
-	if err := tx.Where("role_id = ?", roleId).Delete(&domainrole.RoleMenu{}).Error; err != nil {
+	if err := tx.Where(roleIDFilter, roleId).Delete(&domainrole.RoleMenu{}).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -117,7 +119,7 @@ func (r *repo) RemoveMenus(ctx context.Context, roleId string, menuIds []string)
 
 func (r *repo) GetRoleMenus(ctx context.Context, roleId string) ([]string, error) {
 	var roleMenus []domainrole.RoleMenu
-	if err := r.DB.WithContext(ctx).Where("role_id = ?", roleId).Find(&roleMenus).Error; err != nil {
+	if err := r.DB.WithContext(ctx).Where(roleIDFilter, roleId).Find(&roleMenus).Error; err != nil {
 		return nil, err
 	}
 

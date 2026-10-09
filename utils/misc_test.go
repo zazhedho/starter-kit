@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -19,22 +20,22 @@ func TestJSONAndStringHelpers(t *testing.T) {
 	if got := JsonEncode(map[string]string{"name": "Jane"}); !strings.Contains(got, "Jane") {
 		t.Fatalf("unexpected JSON encoding: %q", got)
 	}
-	if got := NormalizePayload(struct {
+	if NormalizePayload(struct {
 		Name string `json:"name"`
-	}{Name: "Jane"}); got == nil {
+	}{Name: "Jane"}) == nil {
 		t.Fatal("expected normalized payload")
 	}
 	if got := TitleCase("jane doe"); got != "Jane Doe" {
 		t.Fatalf("unexpected title case: %q", got)
 	}
-	if got := CreateUUID(); got == "" {
+	if CreateUUID() == "" {
 		t.Fatal("expected uuid")
 	}
 	if got := JsonEncode(make(chan int)); got != "" {
 		t.Fatalf("expected empty string for unsupported JSON value, got %q", got)
 	}
 	ch := make(chan int)
-	if got := NormalizePayload(ch); got != ch {
+	if NormalizePayload(ch) != ch {
 		t.Fatal("expected unsupported payload to be returned unchanged")
 	}
 }
@@ -53,13 +54,21 @@ func TestGenerateLogIdAndRequestID(t *testing.T) {
 	}
 
 	ctx.Set(CtxKeyId, "not-a-uuid")
-	if got := GenerateLogId(ctx); got == uuid.Nil {
+	if GenerateLogId(ctx) == uuid.Nil {
 		t.Fatal("expected generated uuid for invalid string")
 	}
 
 	ctx.Set(CtxKeyId, " request-id ")
 	if got := GetRequestID(ctx); got != "request-id" {
 		t.Fatalf("expected trimmed request id, got %q", got)
+	}
+
+	requestContext := WithRequestID(context.Background(), id)
+	if got := GenerateLogId(requestContext); got != id {
+		t.Fatalf("expected context request id, got %s", got)
+	}
+	if got := GetRequestID(requestContext); got != id.String() {
+		t.Fatalf("expected context request id string, got %q", got)
 	}
 }
 
@@ -79,25 +88,16 @@ func TestValidateErrorAndValidateUUID(t *testing.T) {
 		t.Fatalf("unexpected plain error mapping: %+v", got)
 	}
 
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(rec)
-	ctx.Params = gin.Params{{Key: "id", Value: "not-a-uuid"}}
-	if _, err := ValidateUUID(ctx, uuid.New()); err == nil || rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected invalid uuid response, code=%d err=%v", rec.Code, err)
+	if _, err := ValidateUUID("not-a-uuid"); !errors.Is(err, ErrInvalidUUID) {
+		t.Fatalf("expected invalid uuid error, got %v", err)
 	}
 
-	rec = httptest.NewRecorder()
-	ctx, _ = gin.CreateTestContext(rec)
-	if _, err := ValidateUUID(ctx, uuid.New()); err == nil || rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected missing uuid response, code=%d err=%v", rec.Code, err)
+	if _, err := ValidateUUID(""); !errors.Is(err, ErrMissingID) {
+		t.Fatalf("expected missing id error, got %v", err)
 	}
 
 	id := uuid.NewString()
-	rec = httptest.NewRecorder()
-	ctx, _ = gin.CreateTestContext(rec)
-	ctx.Params = gin.Params{{Key: "id", Value: id}}
-	gotID, err := ValidateUUID(ctx, uuid.New())
+	gotID, err := ValidateUUID(id)
 	if err != nil || gotID != id {
 		t.Fatalf("expected valid uuid, id=%q err=%v", gotID, err)
 	}
@@ -169,7 +169,7 @@ func TestJwtClaimsReadsAuthorizationHeader(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 	ctx.Request.Header.Set("Authorization", "Bearer "+token)
 
-	tokenString, claims, err := JwtClaims(ctx)
+	tokenString, claims, err := JwtClaims(ctx.Request)
 	if err != nil || tokenString != token || claims["user_id"] == "" {
 		t.Fatalf("jwt claims: token=%q claims=%+v err=%v", tokenString, claims, err)
 	}

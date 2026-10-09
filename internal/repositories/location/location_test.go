@@ -28,7 +28,7 @@ func newDryRunDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestLocationRepositoryDryRunReadsAndWrites(t *testing.T) {
+func TestLocationRepositoryDryRunReads(t *testing.T) {
 	repo := NewLocationRepo(newDryRunDB(t))
 	ctx := context.Background()
 
@@ -53,7 +53,11 @@ func TestLocationRepositoryDryRunReadsAndWrites(t *testing.T) {
 	if _, err := repo.GetDistrictByCode(ctx, "317101"); err != nil {
 		t.Fatalf("get district: %v", err)
 	}
+}
 
+func TestLocationRepositoryDryRunUpserts(t *testing.T) {
+	repo := NewLocationRepo(newDryRunDB(t))
+	ctx := context.Background()
 	if err := repo.UpsertProvinces(ctx, []domainlocation.Province{{Code: "31", Name: "DKI Jakarta"}}); err != nil {
 		t.Fatalf("upsert provinces: %v", err)
 	}
@@ -66,7 +70,11 @@ func TestLocationRepositoryDryRunReadsAndWrites(t *testing.T) {
 	if err := repo.UpsertVillages(ctx, []domainlocation.Village{{Code: "31710101", DistrictCode: "317101", Name: "Tebet Barat"}}); err != nil {
 		t.Fatalf("upsert villages: %v", err)
 	}
+}
 
+func TestLocationRepositoryDryRunSyncJobs(t *testing.T) {
+	repo := NewLocationRepo(newDryRunDB(t))
+	ctx := context.Background()
 	job := &domainlocation.SyncJob{ID: "job-1", Status: "queued"}
 	if err := repo.CreateSyncJob(ctx, job); err != nil {
 		t.Fatalf("create sync job: %v", err)

@@ -25,6 +25,7 @@ func SetContextId() gin.HandlerFunc {
 		}
 
 		ctx.Set(utils.CtxKeyId, ctxId)
+		ctx.Request = ctx.Request.WithContext(utils.WithRequestID(ctx.Request.Context(), ctxId))
 		ctx.Writer.Header().Set("X-Request-ID", ctxId.String())
 		ctx.Next()
 	}

@@ -1,14 +1,14 @@
 package utils
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 )
 
 func TestGetImpersonationMetadataReturnsNilForRegularSession(t *testing.T) {
-	ctx := &gin.Context{}
-	ctx.Set(CtxKeyAuthData, map[string]any{
+	ctx := WithAuthData(context.Background(), map[string]any{
 		"user_id": "user-1",
 		"role":    "staff",
 	})

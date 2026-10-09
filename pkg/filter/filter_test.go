@@ -1,19 +1,18 @@
 package filter
 
 import (
-	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestGetBaseParamsAppliesDefaultsAndParsesFilters(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest("GET", "/items?page=2&limit=25&order_by=name&order_direction=DESC&filters[role]=\"admin\"&filters[ids]=[\"1\",\"2\"]", nil)
+	query, err := url.ParseQuery("page=2&limit=25&order_by=name&order_direction=DESC&filters[role]=\"admin\"&filters[ids]=[\"1\",\"2\"]")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	got, err := GetBaseParams(ctx, "created_at", "desc", 10)
+	got, err := GetBaseParams(query, "created_at", "desc", 10)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -34,11 +33,12 @@ func TestGetBaseParamsAppliesDefaultsAndParsesFilters(t *testing.T) {
 }
 
 func TestGetBaseParamsClampsInvalidValues(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest("GET", "/items?page=0&limit=20000&order_direction=sideways", nil)
+	query, err := url.ParseQuery("page=0&limit=20000&order_direction=sideways")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	got, err := GetBaseParams(ctx, "created_at", "desc", 50)
+	got, err := GetBaseParams(query, "created_at", "desc", 50)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -48,6 +48,13 @@ func TestGetBaseParamsClampsInvalidValues(t *testing.T) {
 	}
 	if got.OrderBy != "created_at" || got.OrderDirection != "desc" {
 		t.Fatalf("unexpected order defaults: %+v", got)
+	}
+}
+
+func TestGetBaseParamsRejectsInvalidInteger(t *testing.T) {
+	query := url.Values{"page": {"invalid"}}
+	if _, err := GetBaseParams(query, "created_at", "desc", 10); err == nil {
+		t.Fatal("expected invalid page to return an error")
 	}
 }
 

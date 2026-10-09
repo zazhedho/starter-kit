@@ -231,7 +231,8 @@ func TestLocationServiceReadMethodsReturnRepositoryErrors(t *testing.T) {
 	}
 }
 
-func TestLocationServiceReadMethodsFallbackToLocationServiceWhenRepositoryEmpty(t *testing.T) {
+func newLocationFallbackService(t *testing.T) *LocationService {
+	t.Helper()
 	repo := &locationRepoTestDouble{
 		city:     domainlocation.City{Code: "1671", ProvinceCode: "16", Name: "Palembang"},
 		district: domainlocation.District{Code: "167101", CityCode: "1671", Name: "Ilir Timur I"},
@@ -262,21 +263,32 @@ func TestLocationServiceReadMethodsFallbackToLocationServiceWhenRepositoryEmpty(
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 		})},
 	}
-	ctx := context.Background()
+	return svc
+}
 
-	provinces, err := svc.GetProvince(ctx)
+func TestLocationServiceGetProvinceFallsBackToLocationService(t *testing.T) {
+	provinces, err := newLocationFallbackService(t).GetProvince(context.Background())
 	if err != nil || len(provinces) != 1 || provinces[0].Code != "16" {
 		t.Fatalf("province fallback failed: rows=%+v err=%v", provinces, err)
 	}
-	cities, err := svc.GetCity(ctx, "16")
+}
+
+func TestLocationServiceGetCityFallsBackToLocationService(t *testing.T) {
+	cities, err := newLocationFallbackService(t).GetCity(context.Background(), "16")
 	if err != nil || len(cities) != 1 || cities[0].Code != "1671" {
 		t.Fatalf("city fallback failed: rows=%+v err=%v", cities, err)
 	}
-	districts, err := svc.GetDistrict(ctx, "1671")
+}
+
+func TestLocationServiceGetDistrictFallsBackToLocationService(t *testing.T) {
+	districts, err := newLocationFallbackService(t).GetDistrict(context.Background(), "1671")
 	if err != nil || len(districts) != 1 || districts[0].Code != "167101" {
 		t.Fatalf("district fallback failed: rows=%+v err=%v", districts, err)
 	}
-	villages, err := svc.GetVillage(ctx, "167101")
+}
+
+func TestLocationServiceGetVillageFallsBackToLocationService(t *testing.T) {
+	villages, err := newLocationFallbackService(t).GetVillage(context.Background(), "167101")
 	if err != nil || len(villages) != 1 || villages[0].Code != "1671011001" {
 		t.Fatalf("village fallback failed: rows=%+v err=%v", villages, err)
 	}
@@ -453,9 +465,9 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 	}
 }
 
-func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
-	repo := &locationRepoTestDouble{}
-	svc := &LocationService{
+func newScopedLocationSyncService(t *testing.T, repo *locationRepoTestDouble) *LocationService {
+	t.Helper()
+	return &LocationService{
 		Repo: repo,
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			body := `{}`
@@ -488,8 +500,11 @@ func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
 			}, nil
 		})},
 	}
-	ctx := context.Background()
+}
 
+func TestLocationFetchScopedLevelsNormalizeCodes(t *testing.T) {
+	svc := newScopedLocationSyncService(t, &locationRepoTestDouble{})
+	ctx := context.Background()
 	cities, err := svc.fetchCities(ctx, "2026", "31")
 	if err != nil || len(cities) != 1 || cities[0].Code != "3171" {
 		t.Fatalf("fetch cities: cities=%+v err=%v", cities, err)
@@ -502,9 +517,13 @@ func TestLocationFetchScopedLevelsAndSyncAll(t *testing.T) {
 	if err != nil || len(villages) != 1 || villages[0].Code != "31710101" {
 		t.Fatalf("fetch villages: villages=%+v err=%v", villages, err)
 	}
+}
 
+func TestLocationSyncAll(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	svc := newScopedLocationSyncService(t, repo)
 	var progressCalls int
-	result, err := svc.sync(ctx, dto.SyncLocationRequest{Level: "all", Year: "2026"}, func(progress syncProgress) {
+	result, err := svc.sync(context.Background(), dto.SyncLocationRequest{Level: "all", Year: "2026"}, func(progress syncProgress) {
 		progressCalls++
 	})
 	if err != nil {

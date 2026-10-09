@@ -184,7 +184,7 @@ func TestGetAuthTokenStripsBearerPrefix(t *testing.T) {
 	ctx.Request = httptest.NewRequest("GET", "/", nil)
 	ctx.Request.Header.Set("Authorization", "Bearer abc.def.ghi")
 
-	if got := GetAuthToken(ctx); got != "abc.def.ghi" {
+	if got := GetAuthToken(ctx.Request); got != "abc.def.ghi" {
 		t.Fatalf("expected stripped bearer token, got %q", got)
 	}
 }

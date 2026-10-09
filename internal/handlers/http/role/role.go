@@ -96,7 +96,7 @@ func (h *RoleHandler) GetAll(ctx *gin.Context) {
 	logPrefix := "[RoleHandler][GetAll]"
 	reqCtx := ctx.Request.Context()
 
-	params, err := filter.GetBaseParams(ctx, "name", "asc", 10)
+	params, err := filter.GetBaseParams(ctx.Request.URL.Query(), "name", "asc", 10)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)

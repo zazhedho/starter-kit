@@ -27,7 +27,7 @@ func TestGetEnvParsesCommonTypes(t *testing.T) {
 	if got := GetEnv("TEST_INT64", int64(0)); got != 64 {
 		t.Fatalf("expected int64 64, got %d", got)
 	}
-	if got := GetEnv("TEST_BOOL", false); !got {
+	if !GetEnv("TEST_BOOL", false) {
 		t.Fatalf("expected bool true")
 	}
 	if got := GetEnv("TEST_DURATION", time.Second); got != 90*time.Second {

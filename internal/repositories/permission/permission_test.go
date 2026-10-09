@@ -72,76 +72,62 @@ func newPermissionMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	return db, mock
 }
 
-func TestPermissionRepositoryGetUserPermissions(t *testing.T) {
-	t.Run("superadmin returns all permissions", func(t *testing.T) {
-		db, mock := newPermissionMockDB(t)
-		repo := NewPermissionRepo(db)
-		now := time.Now()
+func expectPermissionUserRole(mock sqlmock.Sqlmock, roleID any, role string) {
+	mock.ExpectQuery(`SELECT role_id, role FROM "users" WHERE id = \$1 ORDER BY .* LIMIT \$2`).
+		WithArgs("user-1", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"role_id", "role"}).AddRow(roleID, role))
+}
 
-		mock.ExpectQuery(`SELECT role_id, role FROM "users" WHERE id = \$1 ORDER BY .* LIMIT \$2`).
-			WithArgs("user-1", 1).
-			WillReturnRows(sqlmock.NewRows([]string{"role_id", "role"}).AddRow(nil, utils.RoleSuperAdmin))
-		mock.ExpectQuery(`SELECT \* FROM "permissions" WHERE deleted_at IS NULL AND "permissions"\."deleted_at" IS NULL ORDER BY resource, action`).
-			WillReturnRows(sqlmock.NewRows([]string{
-				"id", "name", "display_name", "description", "resource", "action", "created_at", "updated_at", "deleted_at",
-			}).AddRow("perm-1", "users.read", "Read users", "", "users", "read", now, nil, nil))
+func TestPermissionRepositoryGetUserPermissionsSuperadmin(t *testing.T) {
+	db, mock := newPermissionMockDB(t)
+	repo := NewPermissionRepo(db)
+	now := time.Now()
+	expectPermissionUserRole(mock, nil, utils.RoleSuperAdmin)
+	mock.ExpectQuery(`SELECT \* FROM "permissions" WHERE deleted_at IS NULL AND "permissions"\."deleted_at" IS NULL ORDER BY resource, action`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "display_name", "description", "resource", "action", "created_at", "updated_at", "deleted_at",
+		}).AddRow("perm-1", "users.read", "Read users", "", "users", "read", now, nil, nil))
 
-		permissions, err := repo.GetUserPermissions(context.Background(), "user-1")
-		if err != nil {
-			t.Fatalf("get user permissions: %v", err)
-		}
-		if len(permissions) != 1 || permissions[0].Id != "perm-1" {
-			t.Fatalf("unexpected permissions: %#v", permissions)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatalf("sql expectations: %v", err)
-		}
-	})
+	permissions, err := repo.GetUserPermissions(context.Background(), "user-1")
+	if err != nil || len(permissions) != 1 || permissions[0].Id != "perm-1" {
+		t.Fatalf("unexpected permissions=%#v err=%v", permissions, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
 
-	t.Run("empty role id returns empty permissions", func(t *testing.T) {
-		db, mock := newPermissionMockDB(t)
-		repo := NewPermissionRepo(db)
+func TestPermissionRepositoryGetUserPermissionsEmptyRole(t *testing.T) {
+	db, mock := newPermissionMockDB(t)
+	repo := NewPermissionRepo(db)
+	expectPermissionUserRole(mock, nil, utils.RoleViewer)
 
-		mock.ExpectQuery(`SELECT role_id, role FROM "users" WHERE id = \$1 ORDER BY .* LIMIT \$2`).
-			WithArgs("user-1", 1).
-			WillReturnRows(sqlmock.NewRows([]string{"role_id", "role"}).AddRow(nil, utils.RoleViewer))
+	permissions, err := repo.GetUserPermissions(context.Background(), "user-1")
+	if err != nil || len(permissions) != 0 {
+		t.Fatalf("expected no permissions, got %#v err=%v", permissions, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
 
-		permissions, err := repo.GetUserPermissions(context.Background(), "user-1")
-		if err != nil {
-			t.Fatalf("get user permissions: %v", err)
-		}
-		if len(permissions) != 0 {
-			t.Fatalf("expected empty permissions, got %#v", permissions)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatalf("sql expectations: %v", err)
-		}
-	})
+func TestPermissionRepositoryGetUserPermissionsByRole(t *testing.T) {
+	db, mock := newPermissionMockDB(t)
+	repo := NewPermissionRepo(db)
+	roleID := "role-1"
+	now := time.Now()
+	expectPermissionUserRole(mock, roleID, utils.RoleViewer)
+	mock.ExpectQuery(`SELECT DISTINCT p\.\*[\s\S]+FROM permissions p[\s\S]+INNER JOIN role_permissions rp[\s\S]+WHERE rp\.role_id = \$1 AND p\.deleted_at IS NULL[\s\S]+ORDER BY p\.resource, p\.action`).
+		WithArgs(roleID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "display_name", "description", "resource", "action", "created_at", "updated_at", "deleted_at",
+		}).AddRow("perm-1", "users.read", "Read users", "", "users", "read", now, nil, nil))
 
-	t.Run("role permissions are loaded by role id", func(t *testing.T) {
-		db, mock := newPermissionMockDB(t)
-		repo := NewPermissionRepo(db)
-		roleID := "role-1"
-		now := time.Now()
-
-		mock.ExpectQuery(`SELECT role_id, role FROM "users" WHERE id = \$1 ORDER BY .* LIMIT \$2`).
-			WithArgs("user-1", 1).
-			WillReturnRows(sqlmock.NewRows([]string{"role_id", "role"}).AddRow(roleID, utils.RoleViewer))
-		mock.ExpectQuery(`SELECT DISTINCT p\.\*[\s\S]+FROM permissions p[\s\S]+INNER JOIN role_permissions rp[\s\S]+WHERE rp\.role_id = \$1 AND p\.deleted_at IS NULL[\s\S]+ORDER BY p\.resource, p\.action`).
-			WithArgs(roleID).
-			WillReturnRows(sqlmock.NewRows([]string{
-				"id", "name", "display_name", "description", "resource", "action", "created_at", "updated_at", "deleted_at",
-			}).AddRow("perm-1", "users.read", "Read users", "", "users", "read", now, nil, nil))
-
-		permissions, err := repo.GetUserPermissions(context.Background(), "user-1")
-		if err != nil {
-			t.Fatalf("get user permissions: %v", err)
-		}
-		if len(permissions) != 1 || permissions[0].Resource != "users" || permissions[0].Action != "read" {
-			t.Fatalf("unexpected permissions: %#v", permissions)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatalf("sql expectations: %v", err)
-		}
-	})
+	permissions, err := repo.GetUserPermissions(context.Background(), "user-1")
+	if err != nil || len(permissions) != 1 || permissions[0].Resource != "users" || permissions[0].Action != "read" {
+		t.Fatalf("unexpected permissions=%#v err=%v", permissions, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
 }

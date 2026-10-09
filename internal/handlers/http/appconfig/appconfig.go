@@ -36,7 +36,7 @@ func (h *AppConfigHandler) GetAll(ctx *gin.Context) {
 	logPrefix := "[AppConfigHandler][GetAll]"
 	reqCtx := ctx.Request.Context()
 
-	params, err := filter.GetBaseParams(ctx, "category", "asc", 50)
+	params, err := filter.GetBaseParams(ctx.Request.URL.Query(), "category", "asc", 50)
 	if err != nil {
 		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; GetBaseParams; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.InvalidRequest, logId, nil)
@@ -63,7 +63,7 @@ func (h *AppConfigHandler) GetByID(ctx *gin.Context) {
 	logPrefix := "[AppConfigHandler][GetByID]"
 	reqCtx := ctx.Request.Context()
 
-	id, err := utils.ValidateUUID(ctx, logId)
+	id, err := handlercommon.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}
@@ -86,7 +86,7 @@ func (h *AppConfigHandler) Update(ctx *gin.Context) {
 	logPrefix := "[AppConfigHandler][Update]"
 	reqCtx := ctx.Request.Context()
 
-	id, err := utils.ValidateUUID(ctx, logId)
+	id, err := handlercommon.ValidateUUID(ctx, logId)
 	if err != nil {
 		return
 	}
