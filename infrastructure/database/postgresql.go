@@ -47,9 +47,5 @@ func ConnDb() (db *gorm.DB, sqlDB *sql.DB, err error) {
 	sqlDB.SetMaxOpenConns(maxConn)
 	sqlDB.SetConnMaxLifetime(maxLifeTime)
 
-	if utils.GetEnv("DB_DEBUG", false) {
-		db = db.Debug()
-	}
-
 	return
 }

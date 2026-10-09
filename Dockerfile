@@ -24,11 +24,11 @@ RUN apk add --no-cache tzdata \
     && adduser -S -G app app
 
 # Copy the built binary from the builder stage
-COPY --from=builder --chown=app:app /app/main .
-COPY --chown=app:app entrypoint.sh ./entrypoint.sh
+COPY --from=builder /app/main ./main
+COPY entrypoint.sh ./entrypoint.sh
 
 # Copy migrations
-COPY --chown=app:app migrations ./migrations
+COPY migrations ./migrations
 
 # Ensure entrypoint is executable
 RUN chmod +x ./entrypoint.sh
