@@ -3,8 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -33,11 +33,11 @@ func InitRedis() (*redis.Client, error) {
 
 	_, err := client.Ping(ctx).Result()
 	if err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("Failed to connect to Redis: %v", err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("Failed to connect to Redis: %v", err))
 		return nil, err
 	}
 
-	logger.WriteLog(logger.LogLevelInfo, fmt.Sprintf("Connected to Redis at %s:%s", utils.GetEnv("REDIS_HOST", "localhost"), utils.GetEnv("REDIS_PORT", "6379")))
+	logus.WriteLog(logus.LogLevelInfo, fmt.Sprintf("Connected to Redis at %s:%s", utils.GetEnv("REDIS_HOST", "localhost"), utils.GetEnv("REDIS_PORT", "6379")))
 	RedisClient = client
 	return client, nil
 }

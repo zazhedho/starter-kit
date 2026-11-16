@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"reflect"
 
-	"starter-kit/internal/authscope"
+	"github.com/zazhedho/authkit/authscope"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	"strings"

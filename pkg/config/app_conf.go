@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zazhedho/authkit/authutil"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	"os"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,7 +17,7 @@ import (
 )
 
 func GetAppConf(key string, def any, rdbCache *redis.Client) any {
-	cacheKey := utils.RedisAppConf
+	cacheKey := authutil.RedisAppConf
 	var appConf map[string]string
 	var cache, getNewConfig bool
 
@@ -39,7 +40,7 @@ func loadConsulConfig(consul string, client *redis.Client, cacheKey string) (map
 		cachedConfig, err := client.Get(context.Background(), cacheKey).Result()
 		if err == nil {
 			if err := json.Unmarshal([]byte(cachedConfig), &appConf); err != nil {
-				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; Unmarshal conf from cache; %s; error: %+v;", cachedConfig, err))
+				logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Unmarshal conf from cache; %s; error: %+v;", cachedConfig, err))
 				getNewConfig = true
 			}
 		} else if errors.Is(err, redis.Nil) {
@@ -57,13 +58,13 @@ func loadConsulRemoteConfig(consul string, appConf map[string]string) {
 	consulPath := fmt.Sprintf("%s/%s", utils.GetEnv("CONSUL_PATH", ""), utils.GetEnv("APP_ENV", ""))
 	runtimeViper := viper.New()
 	if err := runtimeViper.AddRemoteProvider("consul", consul, consulPath); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err))
 	}
 	runtimeViper.SetConfigType("json")
 	if err := runtimeViper.ReadRemoteConfig(); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s/%s; error: %+v;", consul, consulPath, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s/%s; error: %+v;", consul, consulPath, err))
 	} else if err := runtimeViper.Unmarshal(&appConf); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading congif: %s/%s; error: unable to decode into map, %+v;", consul, consulPath, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading congif: %s/%s; error: unable to decode into map, %+v;", consul, consulPath, err))
 	}
 }
 
@@ -80,7 +81,7 @@ func loadFileConfig() map[string]string {
 	viper.SetConfigType("env")
 	viper.SetConfigName(configName)
 	if err := viper.ReadInConfig(); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s - %s.env; error:  %+v;", pathConfig, configName, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s - %s.env; error:  %+v;", pathConfig, configName, err))
 	} else {
 		_ = viper.Unmarshal(&appConf)
 	}
@@ -97,7 +98,7 @@ func applyAppConfig(appConf map[string]string, cache, getNewConfig bool, client 
 	if appConf["config_id"] != utils.GetEnv("CONFIG_ID", "") {
 		for key, value := range appConf {
 			if err := os.Setenv(utils.NormalizeUpperKey(key), value); err != nil {
-				logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to set app config %s: %v", key, err))
+				logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to set app config %s: %v", key, err))
 			}
 		}
 	}

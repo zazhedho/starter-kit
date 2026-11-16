@@ -69,16 +69,21 @@ Default auth config rows are seeded by the existing app config migration:
 
 ## Current Modules
 
-System modules currently included:
+Provided by [`authkit`](https://github.com/zazhedho/authkit) (mounted with `routes.MountAuthKit()`, tables created by `kit.Migrate`):
 - Authentication and user profile
 - Users
 - Roles
 - Permissions
 - Menus
 - Configurations
-- Locations
+- Audit trails
 - Sessions when Redis is enabled
+
+Implemented in this project:
+- Locations
 - Media upload and owner-controlled deletion when `MEDIA_ENABLED=true`
+
+Shared plumbing comes from [`gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils) and [`logus`](https://github.com/zazhedho/logus) (logging). Until these modules are published, `go.mod` points to them with local `replace` directives.
 
 ## Project Structure
 
@@ -95,10 +100,8 @@ starter-kit/
 │   ├── repositories/
 │   ├── router/
 │   └── services/
-├── middlewares/
 ├── migrations/
 ├── pkg/
-├── utils/
 └── main.go
 ```
 
@@ -109,20 +112,20 @@ route -> handler -> service -> repository -> database
 ```
 
 Repository layer convention:
-- use the generic repository in `internal/repositories/generic` for common CRUD and list query behavior
+- use the generic repository from `github.com/zazhedho/gokit/repository/generic` for common CRUD and list query behavior
 - keep module repository files focused on custom query cases only, such as joins, aggregates, or transactional assignment logic
 
 Router and audit convention:
 - keep route wiring in `internal/router/router.go`
-- reuse the router helpers for common dependencies such as permission repository, middleware, and audit service
-- for mutation handlers, embed `handlercommon.AuditWriter` instead of creating per-handler audit wrapper methods
+- protect project routes with `r.Kit.Auth()` and `r.Kit.Can(resource, action)`; get the audit service from `r.Kit.Audit()`
+- for mutation handlers, embed `auditwriter.AuditWriter` (`github.com/zazhedho/authkit/handlers/auditwriter`) instead of creating per-handler audit wrapper methods
 
 ## Environment
 
 Copy `.env.example` to `.env` and adjust the values as needed.
 
 Minimum required variables:
-- `APP_NAME`
+- `APP_NAME` (unique per application; authkit binds tokens to it)
 - `APP_ENV`
 - `PORT`
 - `DATABASE_URL`, or these database parts when `DATABASE_URL` is empty:
@@ -134,6 +137,7 @@ Minimum required variables:
   - `DB_SSLMODE`
 - `JWT_KEY` (minimum 32 characters; use a random secret for production)
 - `JWT_EXP`
+- `OTP_SECRET` and `RESET_SECRET`, only when both Redis and SMTP are configured (no defaults)
 - `PATH_MIGRATE`
 
 Optional but recommended:
@@ -236,10 +240,10 @@ Location architecture:
 
 ## Module Seed Helper
 
-To avoid writing menu and permission seed SQL manually for every new module, the starter kit includes a helper command:
+To avoid writing menu and permission seed SQL manually for every new module, the `authkit` module includes a helper command:
 
 ```bash
-go run ./cmd/module-seed \
+go run github.com/zazhedho/authkit/cmd/module-seed \
   --name projects \
   --display-name "Projects" \
   --path /projects \
@@ -311,18 +315,18 @@ Important:
 This is what allows menus to be derived automatically from permissions.
 
 Tip:
-- use `go run ./cmd/module-seed ...` to generate the menu and permission seed block before pasting it into the migration
+- use `go run github.com/zazhedho/authkit/cmd/module-seed ...` to generate the menu and permission seed block before pasting it into the migration
 
 ### 3. Protect routes with permissions
 
-Use:
+Use (after `r.Kit.Auth()`):
 
 ```go
-mdw.PermissionMiddleware("projects", "list")
-mdw.PermissionMiddleware("projects", "view")
-mdw.PermissionMiddleware("projects", "create")
-mdw.PermissionMiddleware("projects", "update")
-mdw.PermissionMiddleware("projects", "delete")
+r.Kit.Can("projects", "list")
+r.Kit.Can("projects", "view")
+r.Kit.Can("projects", "create")
+r.Kit.Can("projects", "update")
+r.Kit.Can("projects", "delete")
 ```
 
 Avoid using role-name checks for module access unless the case is explicitly special like `superadmin`.

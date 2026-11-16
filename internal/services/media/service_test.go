@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/zazhedho/authkit/authutil"
 	"io"
 	"mime/multipart"
 	"net/textproto"
@@ -11,10 +12,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"starter-kit/internal/authscope"
+	"github.com/zazhedho/authkit/authscope"
 	domainmedia "starter-kit/internal/domain/media"
 	"starter-kit/pkg/storage"
-	"starter-kit/utils"
 )
 
 type mediaTestFile struct {
@@ -181,7 +181,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 		storageMock := &mediaStorageMock{}
 		service := NewMediaService(repo, storageMock, 1024, nil)
 
-		if _, err := service.Delete(context.Background(), authscope.New(uuid.NewString(), "root", utils.RoleSuperAdmin, nil), media.ID); err != nil {
+		if _, err := service.Delete(context.Background(), authscope.New(uuid.NewString(), "root", authutil.RoleSuperAdmin, nil), media.ID); err != nil {
 			t.Fatalf("delete as superadmin: %v", err)
 		}
 	})

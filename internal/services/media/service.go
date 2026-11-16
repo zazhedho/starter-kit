@@ -3,6 +3,7 @@ package servicemedia
 import (
 	"context"
 	"errors"
+	"github.com/zazhedho/authkit/authutil"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"starter-kit/internal/authscope"
+	"github.com/zazhedho/authkit/authscope"
+	"github.com/zazhedho/gokit/utils"
 	domainmedia "starter-kit/internal/domain/media"
 	interfacemedia "starter-kit/internal/interfaces/media"
 	"starter-kit/pkg/storage"
-	"starter-kit/utils"
 )
 
 const (
@@ -120,7 +121,7 @@ func (s *MediaService) Delete(ctx context.Context, scope authscope.Scope, id str
 	if err != nil {
 		return domainmedia.Media{}, err
 	}
-	if media.OwnerUserID != strings.TrimSpace(scope.UserID) && strings.TrimSpace(scope.Role) != utils.RoleSuperAdmin {
+	if media.OwnerUserID != strings.TrimSpace(scope.UserID) && strings.TrimSpace(scope.Role) != authutil.RoleSuperAdmin {
 		return domainmedia.Media{}, domainmedia.ErrMediaForbidden
 	}
 

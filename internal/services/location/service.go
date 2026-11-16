@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"starter-kit/internal/authscope"
+	"github.com/zazhedho/authkit/authscope"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	locationcache "starter-kit/internal/cache/location"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	interfacelocation "starter-kit/internal/interfaces/location"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"sync/atomic"
 	"time"
 
@@ -52,7 +52,7 @@ func NewLocationService(repo interfacelocation.RepoLocationInterface, redisClien
 	}
 
 	if err := service.Repo.FailActiveSyncJobs(context.Background(), "Service restarted before the previous location sync completed."); err != nil {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("failed to mark interrupted location sync jobs: %v", err))
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("failed to mark interrupted location sync jobs: %v", err))
 	}
 
 	return service
@@ -269,7 +269,7 @@ func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) 
 
 	job, err := s.Repo.GetSyncJobByID(jobCtx, jobID)
 	if err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to load location sync job %s: %v", jobID, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s: %v", jobID, err))
 		return
 	}
 
@@ -279,14 +279,14 @@ func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) 
 	job.StartedAt = &startedAt
 	job.UpdatedAt = &startedAt
 	if err := s.Repo.UpdateSyncJob(jobCtx, &job); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as running: %v", jobID, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as running: %v", jobID, err))
 		return
 	}
 
 	result, err := s.sync(jobCtx, req, func(progress syncProgress) {
 		s.applySyncProgress(&job, progress)
 		if updateErr := s.Repo.UpdateSyncJob(jobCtx, &job); updateErr != nil {
-			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("failed to update location sync job progress %s: %v", job.ID, updateErr))
+			logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("failed to update location sync job progress %s: %v", job.ID, updateErr))
 		}
 	})
 	if err != nil {
@@ -302,14 +302,14 @@ func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) 
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
 	if err := s.Repo.UpdateSyncJob(jobCtx, &job); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as completed: %v", job.ID, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as completed: %v", job.ID, err))
 	}
 }
 
 func (s *LocationService) markSyncJobFailed(ctx context.Context, jobID, errorMessage string) {
 	job, err := s.Repo.GetSyncJobByID(ctx, jobID)
 	if err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
 		return
 	}
 
@@ -320,7 +320,7 @@ func (s *LocationService) markSyncJobFailed(ctx context.Context, jobID, errorMes
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
 	if err := s.Repo.UpdateSyncJob(ctx, &job); err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as failed: %v", job.ID, err))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as failed: %v", job.ID, err))
 	}
 }
 

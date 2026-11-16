@@ -8,29 +8,30 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"starter-kit/internal/authscope"
-	domainaudit "starter-kit/internal/domain/audit"
+	"github.com/zazhedho/authkit/authscope"
+	domainaudit "github.com/zazhedho/authkit/domain/audit"
+	"github.com/zazhedho/authkit/handlers/auditwriter"
+	interfaceaudit "github.com/zazhedho/authkit/interfaces/audit"
+	"github.com/zazhedho/gokit/handlercommon"
+	"github.com/zazhedho/gokit/messages"
+	"github.com/zazhedho/gokit/response"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	domainmedia "starter-kit/internal/domain/media"
-	handlercommon "starter-kit/internal/handlers/http/common"
-	interfaceaudit "starter-kit/internal/interfaces/audit"
 	interfacemedia "starter-kit/internal/interfaces/media"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 )
 
 const multipartOverhead = int64(1 << 20)
 
 type MediaHandler struct {
 	Service interfacemedia.ServiceMediaInterface
-	handlercommon.AuditWriter
+	auditwriter.AuditWriter
 }
 
 func NewMediaHandler(service interfacemedia.ServiceMediaInterface, auditService interfaceaudit.ServiceAuditInterface) *MediaHandler {
 	return &MediaHandler{
 		Service:     service,
-		AuditWriter: handlercommon.NewAuditWriter(auditService, "MediaHandler"),
+		AuditWriter: auditwriter.NewAuditWriter(auditService, "MediaHandler"),
 	}
 }
 
@@ -47,13 +48,13 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 			statusCode = http.StatusRequestEntityTooLarge
 			message = domainmedia.ErrFileTooLarge.Error()
 		}
-		logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; FormFile; Error: %v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; FormFile; Error: %v", logPrefix, err))
 		ctx.JSON(statusCode, response.ErrorResponse(statusCode, messages.InvalidRequest, logID, message))
 		return
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			logger.WriteLogWithContext(ctx, logger.LogLevelWarn, fmt.Sprintf("%s; CloseFile; Error: %v", logPrefix, closeErr))
+			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; CloseFile; Error: %v", logPrefix, closeErr))
 		}
 	}()
 
@@ -73,7 +74,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Upload; Error: %v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Upload; Error: %v", logPrefix, err))
 		ctx.JSON(statusCode, response.ErrorResponse(statusCode, messages.InvalidRequest, logID, publicError))
 		return
 	}
@@ -109,7 +110,7 @@ func (h *MediaHandler) Delete(ctx *gin.Context) {
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %v", logPrefix, err))
 		ctx.JSON(statusCode, response.ErrorResponse(statusCode, messages.MsgSomethingWrong, logID, publicError))
 		return
 	}

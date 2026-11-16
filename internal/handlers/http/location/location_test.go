@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/zazhedho/authkit/authutil"
 	"net/http"
 	"net/http/httptest"
 
-	"starter-kit/internal/authscope"
+	"github.com/zazhedho/authkit/authscope"
 	"starter-kit/internal/dto"
 	servicelocation "starter-kit/internal/services/location"
-	"starter-kit/utils"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -52,7 +52,7 @@ func performLocationRequest(method, routePath, requestPath string, body any, han
 	router := gin.New()
 	router.Handle(method, routePath, func(ctx *gin.Context) {
 		if authData != nil {
-			ctx.Set(utils.CtxKeyAuthData, authData)
+			ctx.Set(authutil.CtxKeyAuthData, authData)
 			ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.NewFromClaims(authData, nil)))
 		}
 		handler(ctx)

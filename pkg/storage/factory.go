@@ -2,7 +2,7 @@ package storage
 
 import (
 	"fmt"
-	"starter-kit/utils"
+	"github.com/zazhedho/gokit/utils"
 )
 
 // NewStorageProvider creates a new storage provider based on the configuration
