@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net"
+	"net/url"
 	"strings"
 	"syscall"
 
@@ -31,11 +32,7 @@ func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
 	if err != nil {
 		return nil, nil, failed("connect to database: "+classify(err), "database.Open; ")
 	}
-	// A time zone written in DATABASE_URL is the operator's choice; otherwise
-	// the session uses the configured one.
-	if !hasTimeZone(connCfg.RuntimeParams) {
-		connCfg.RuntimeParams["TimeZone"] = timezone
-	}
+	connCfg.RuntimeParams = sessionParams(connCfg.RuntimeParams, timezone, cfg.URL != "" && urlNamesTimeZone(cfg.URL))
 
 	return attach(stdlib.OpenDB(*connCfg), cfg)
 }
@@ -45,7 +42,8 @@ func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
 func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
 		TranslateError: true,
-		// gorm would print the raw driver error, DSN included, before we see it.
+		// Silent during the connection check: gorm would print the raw driver
+		// error, DSN included, before we see it. The real logger is set below.
 		Logger: gormlogger.Discard,
 	})
 	if err != nil {
@@ -55,6 +53,8 @@ func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 		return nil, nil, failed("connect to database: "+classify(err), "database.Open; ")
 	}
 
+	db.Logger = newQueryLogger()
+
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
@@ -63,15 +63,45 @@ func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 	return db, sqlDB, nil
 }
 
-// hasTimeZone reports whether the parsed settings already name a session time
-// zone (PostgreSQL parameter names are case-insensitive).
-func hasTimeZone(params map[string]string) bool {
-	for k := range params {
+// sessionParams returns the runtime parameters for the connection with the
+// session time zone applied. When the operator wrote a time zone in
+// DATABASE_URL (zoneInURL) it is kept. In every other case, including the
+// DB_* parts and a DATABASE_URL without a zone, the configured zone wins and
+// replaces any zone already present, such as one pgx merged in from the PGTZ
+// environment variable (PostgreSQL parameter names are case-insensitive).
+func sessionParams(params map[string]string, timezone string, zoneInURL bool) map[string]string {
+	out := make(map[string]string, len(params)+1)
+	for k, v := range params {
 		if strings.EqualFold(k, "timezone") {
-			return true
+			if zoneInURL {
+				out[k] = v
+			}
+			continue
+		}
+		out[k] = v
+	}
+	for k := range out {
+		if strings.EqualFold(k, "timezone") {
+			return out
 		}
 	}
-	return false
+	out["TimeZone"] = timezone
+	return out
+}
+
+// urlNamesTimeZone reports whether the DATABASE_URL text itself sets a session
+// time zone, as a URL query parameter or, for the key=value form pgx also
+// accepts, as a keyword. Settings pgx adds from the environment do not count.
+func urlNamesTimeZone(raw string) bool {
+	if u, err := url.Parse(raw); err == nil && u.Scheme != "" && strings.Contains(raw, "://") {
+		for k := range u.Query() {
+			if strings.EqualFold(k, "timezone") {
+				return true
+			}
+		}
+		return false
+	}
+	return strings.Contains(strings.ToLower(raw), "timezone=")
 }
 
 // failed logs msg and returns it as an error.

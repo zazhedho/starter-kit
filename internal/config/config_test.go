@@ -268,6 +268,41 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects an unknown DB_SSLMODE", func(t *testing.T) {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("DB_SSLMODE", "required")
+		wantInError(t, validateFromEnv(t), "DB_SSLMODE")
+	})
+
+	t.Run("accepts every PostgreSQL sslmode", func(t *testing.T) {
+		for _, mode := range []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"} {
+			clearEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("DB_SSLMODE", mode)
+			if err := validateFromEnv(t); err != nil {
+				t.Fatalf("DB_SSLMODE=%s rejected: %v", mode, err)
+			}
+		}
+	})
+
+	t.Run("rejects Local as APP_TIMEZONE", func(t *testing.T) {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("APP_TIMEZONE", "Local")
+		wantInError(t, validateFromEnv(t), "APP_TIMEZONE")
+	})
+
+	t.Run("rejects blank and Local APP_TIMEZONE on a built config", func(t *testing.T) {
+		for _, tz := range []string{"", " ", "  Local  "} {
+			clearEnv(t)
+			setRequiredEnv(t)
+			cfg := FromEnv()
+			cfg.App.Timezone = tz
+			wantInError(t, cfg.Validate(), "APP_TIMEZONE")
+		}
+	})
+
 	t.Run("allows database url without parts", func(t *testing.T) {
 		clearEnv(t)
 		t.Setenv("PORT", "8080")

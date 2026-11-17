@@ -43,7 +43,12 @@ func (c Config) validatePort() []string {
 }
 
 func (c Config) validateApp() []string {
-	if _, err := time.LoadLocation(c.App.Timezone); err != nil {
+	// PostgreSQL does not know "Local", and an empty name would silently mean UTC.
+	tz := strings.TrimSpace(c.App.Timezone)
+	if tz == "" || tz == "Local" {
+		return []string{"APP_TIMEZONE must be an IANA time zone name such as Asia/Jakarta"}
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
 		return []string{"APP_TIMEZONE is not a known time zone"}
 	}
 	return nil
@@ -92,6 +97,12 @@ func (c Config) validateDatabase() []string {
 		if d.Port != "" && !validPort(d.Port) {
 			problems = append(problems, "DB_PORT must be a number between 1 and 65535")
 		}
+	}
+
+	switch d.SSLMode {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+	default:
+		problems = append(problems, "DB_SSLMODE must be one of: disable, allow, prefer, require, verify-ca, verify-full")
 	}
 
 	if d.MaxOpenConns <= 0 {
