@@ -62,7 +62,7 @@ Public registration example:
 - `is_active = true`, `value = true`: allowed
 - `is_active = true`, `value = false`: disabled
 
-Default auth config rows are seeded by the existing app config migration:
+Default auth config rows are seeded by authkit's embedded baseline, applied by `kit.Migrate`:
 - `auth.public_registration_enabled`: active, value `true`
 - `auth.register_otp_enabled`: active, value `false`
 - `auth.password_reset_email_enabled`: active, value `false`
@@ -164,6 +164,18 @@ Or run migration and server separately:
 go run . -migrate
 go run .
 ```
+
+### Migrations
+
+- This project's own migrations (`migrations/`) now start at `000005`. The core
+  tables (users, RBAC, audit trails, app configs) come from `kit.Migrate`, which
+  runs first.
+- A database whose `schema_migrations` version is 1 to 4 (it never reached 5)
+  cannot be started with this version. Bring it to version 6 with the previous
+  release first, then upgrade.
+- Docker and CI builds require the three modules (`authkit`, `gokit`, `logus`) to
+  be published. The `replace` directives in `go.mod` point at local directories
+  and are temporary.
 
 Default health check:
 
