@@ -3,7 +3,8 @@ package servicemedia
 import (
 	"context"
 	"errors"
-	"github.com/zazhedho/authkit/authutil"
+	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -14,11 +15,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/zazhedho/authkit/authscope"
-	"github.com/zazhedho/gokit/utils"
 	domainmedia "starter-kit/internal/domain/media"
 	interfacemedia "starter-kit/internal/interfaces/media"
-	"starter-kit/pkg/storage"
+	"starter-kit/internal/platform/storage"
 )
 
 const (
@@ -99,7 +98,7 @@ func (s *MediaService) Upload(ctx context.Context, ownerUserID string, file mult
 	}
 
 	media := domainmedia.Media{
-		ID:           utils.CreateUUID(),
+		ID:           gokit.CreateUUID(),
 		OwnerUserID:  ownerUserID,
 		ObjectKey:    uploaded.ObjectName,
 		URL:          uploaded.URL,
@@ -116,12 +115,12 @@ func (s *MediaService) Upload(ctx context.Context, ownerUserID string, file mult
 	return media, nil
 }
 
-func (s *MediaService) Delete(ctx context.Context, scope authscope.Scope, id string) (domainmedia.Media, error) {
+func (s *MediaService) Delete(ctx context.Context, scope authkit.Scope, id string) (domainmedia.Media, error) {
 	media, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return domainmedia.Media{}, err
 	}
-	if media.OwnerUserID != strings.TrimSpace(scope.UserID) && strings.TrimSpace(scope.Role) != authutil.RoleSuperAdmin {
+	if media.OwnerUserID != strings.TrimSpace(scope.UserID) && strings.TrimSpace(scope.Role) != authkit.RoleSuperAdmin {
 		return domainmedia.Media{}, domainmedia.ErrMediaForbidden
 	}
 

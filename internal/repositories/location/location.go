@@ -2,7 +2,7 @@ package repositorylocation
 
 import (
 	"context"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/gokit"
 	domainlocation "starter-kit/internal/domain/location"
 	interfacelocation "starter-kit/internal/interfaces/location"
 	"time"
@@ -151,7 +151,7 @@ func prepareUpsertRows[T any](items []T, fields func(*T) (*string, *time.Time, *
 	for i := range items {
 		id, createdAt, updatedAt := fields(&items[i])
 		if *id == "" {
-			*id = utils.CreateUUID()
+			*id = gokit.CreateUUID()
 		}
 		if createdAt.IsZero() {
 			*createdAt = now

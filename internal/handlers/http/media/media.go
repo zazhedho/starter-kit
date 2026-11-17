@@ -9,14 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/zazhedho/authkit/authscope"
-	domainaudit "github.com/zazhedho/authkit/domain/audit"
-	"github.com/zazhedho/authkit/handlers/auditwriter"
-	interfaceaudit "github.com/zazhedho/authkit/interfaces/audit"
-	"github.com/zazhedho/gokit/handlercommon"
-	"github.com/zazhedho/gokit/messages"
-	"github.com/zazhedho/gokit/response"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	domainmedia "starter-kit/internal/domain/media"
 	interfacemedia "starter-kit/internal/interfaces/media"
@@ -27,19 +21,19 @@ const multipartOverhead = int64(1 << 20)
 type MediaHandler struct {
 	Service       interfacemedia.ServiceMediaInterface
 	uploadTimeout time.Duration
-	auditwriter.AuditWriter
+	authkit.AuditWriter
 }
 
-func NewMediaHandler(service interfacemedia.ServiceMediaInterface, auditService interfaceaudit.ServiceAuditInterface, uploadTimeout time.Duration) *MediaHandler {
+func NewMediaHandler(service interfacemedia.ServiceMediaInterface, auditService authkit.AuditService, uploadTimeout time.Duration) *MediaHandler {
 	return &MediaHandler{
 		Service:       service,
 		uploadTimeout: uploadTimeout,
-		AuditWriter:   auditwriter.NewAuditWriter(auditService, "MediaHandler"),
+		AuditWriter:   authkit.NewAuditWriter(auditService, "MediaHandler"),
 	}
 }
 
 func (h *MediaHandler) Upload(ctx *gin.Context) {
-	logID := utils.GenerateLogId(ctx)
+	logID := gokit.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Upload]"
 	// Uploads may need longer than the server-wide read timeout.
 	if h.uploadTimeout > 0 {
@@ -59,7 +53,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 			message = domainmedia.ErrFileTooLarge.Error()
 		}
 		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; FormFile; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, response.ErrorResponse(statusCode, messages.InvalidRequest, logID, message))
+		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgInvalidRequest, logID, message))
 		return
 	}
 	defer func() {
@@ -68,13 +62,13 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 		}
 	}()
 
-	scope := authscope.FromContext(ctx.Request.Context())
+	scope := authkit.ScopeFrom(ctx.Request.Context())
 	data, err := h.Service.Upload(ctx.Request.Context(), scope.UserID, file, header)
 	if err != nil {
-		h.WriteAudit(ctx, domainaudit.AuditEvent{
-			Action:       domainaudit.ActionCreate,
+		h.WriteAudit(ctx, authkit.AuditEvent{
+			Action:       authkit.ActionCreate,
 			Resource:     "media",
-			Status:       domainaudit.StatusFailed,
+			Status:       authkit.StatusFailed,
 			Message:      "Failed to upload media",
 			ErrorMessage: err.Error(),
 			AfterData: map[string]any{
@@ -85,55 +79,55 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 
 		statusCode, publicError := mediaErrorResponse(err)
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Upload; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, response.ErrorResponse(statusCode, messages.InvalidRequest, logID, publicError))
+		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgInvalidRequest, logID, publicError))
 		return
 	}
 
-	h.WriteAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionCreate,
+	h.WriteAudit(ctx, authkit.AuditEvent{
+		Action:     authkit.ActionCreate,
 		Resource:   "media",
 		ResourceID: data.ID,
-		Status:     domainaudit.StatusSuccess,
+		Status:     authkit.StatusSuccess,
 		Message:    "Uploaded media",
 		AfterData:  data,
 	})
-	ctx.JSON(http.StatusCreated, response.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
+	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
 }
 
 func (h *MediaHandler) Delete(ctx *gin.Context) {
-	logID := utils.GenerateLogId(ctx)
+	logID := gokit.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Delete]"
-	id, err := handlercommon.ValidateUUID(ctx, logID)
+	id, err := gokit.ValidateUUIDParam(ctx, logID)
 	if err != nil {
 		return
 	}
 
-	data, err := h.Service.Delete(ctx.Request.Context(), authscope.FromContext(ctx.Request.Context()), id)
+	data, err := h.Service.Delete(ctx.Request.Context(), authkit.ScopeFrom(ctx.Request.Context()), id)
 	if err != nil {
-		h.WriteAudit(ctx, domainaudit.AuditEvent{
-			Action:       domainaudit.ActionDelete,
+		h.WriteAudit(ctx, authkit.AuditEvent{
+			Action:       authkit.ActionDelete,
 			Resource:     "media",
 			ResourceID:   id,
-			Status:       domainaudit.StatusFailed,
+			Status:       authkit.StatusFailed,
 			Message:      "Failed to delete media",
 			ErrorMessage: err.Error(),
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, response.ErrorResponse(statusCode, messages.MsgSomethingWrong, logID, publicError))
+		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgSomethingWrong, logID, publicError))
 		return
 	}
 
-	h.WriteAudit(ctx, domainaudit.AuditEvent{
-		Action:     domainaudit.ActionDelete,
+	h.WriteAudit(ctx, authkit.AuditEvent{
+		Action:     authkit.ActionDelete,
 		Resource:   "media",
 		ResourceID: data.ID,
-		Status:     domainaudit.StatusSuccess,
+		Status:     authkit.StatusSuccess,
 		Message:    "Deleted media",
 		BeforeData: data,
 	})
-	ctx.JSON(http.StatusOK, response.Response(http.StatusOK, "Media deleted successfully", logID, nil))
+	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, "Media deleted successfully", logID, nil))
 }
 
 func mediaErrorResponse(err error) (int, string) {
@@ -148,6 +142,6 @@ func mediaErrorResponse(err error) (int, string) {
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		return http.StatusNotFound, "media not found"
 	default:
-		return http.StatusInternalServerError, messages.MsgSomethingWrong
+		return http.StatusInternalServerError, gokit.MsgSomethingWrong
 	}
 }

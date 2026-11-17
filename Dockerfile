@@ -25,7 +25,7 @@ RUN apk add --no-cache tzdata \
 
 # Copy the built binary from the builder stage
 COPY --from=builder /app/main ./main
-COPY entrypoint.sh ./entrypoint.sh
+COPY deploy/entrypoint.sh ./entrypoint.sh
 
 # Copy migrations
 COPY migrations ./migrations
