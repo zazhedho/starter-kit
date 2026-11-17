@@ -84,7 +84,7 @@ Implemented in this project:
 - Locations
 - Media upload and owner-controlled deletion when `MEDIA_ENABLED=true`
 
-Shared plumbing comes from [`gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils) and [`logus`](https://github.com/zazhedho/logus) (logging). All three modules are pinned to tagged versions in `go.mod`.
+Shared plumbing comes from three modules, each imported through one path: [`github.com/zazhedho/gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils), [`github.com/zazhedho/authkit`](https://github.com/zazhedho/authkit) (authentication, RBAC, audit, mailer) and [`github.com/zazhedho/logus`](https://github.com/zazhedho/logus) (logging). They are pinned to tagged versions in `go.mod` (logus v0.1.1, gokit v0.2.0, authkit v0.2.0).
 
 ## Project Structure
 
@@ -102,15 +102,19 @@ starter-kit/
 │   ├── services/
 │   ├── handlers/http/
 │   ├── cache/
+│   ├── platform/
+│   │   ├── database/        # PostgreSQL pool, Redis client
+│   │   └── storage/         # object storage providers (MinIO, Cloudflare R2) and InitStorage
 │   └── testutil/            # test helpers (log capture)
-├── infrastructure/
-│   ├── database/            # PostgreSQL pool, Redis client
-│   └── media/               # object storage provider setup
 ├── migrations/              # this project's own migrations (start at 000005)
-├── pkg/storage/             # object storage providers (MinIO, Cloudflare R2)
+├── deploy/entrypoint.sh     # container entrypoint (runs the migration when asked)
+├── docs/                    # smoke-test.md, postman/ (API collection)
 ├── Dockerfile
-└── entrypoint.sh
+├── Makefile
+└── go.mod
 ```
+
+All Go code lives under `cmd/` or `internal/`; the repository root has no other Go packages.
 
 Pattern for each module:
 
@@ -120,9 +124,9 @@ route -> handler -> service -> repository -> database
 
 Rules that keep the structure uniform:
 - Only `cmd/api` calls `os.Exit`; everything else returns errors. Nothing outside `internal/config` reads the environment, and nothing outside `internal/app` opens connections: the router and modules receive a `router.Deps` value.
-- Repositories use the generic repository from `github.com/zazhedho/gokit/repository/generic` for common CRUD and list queries; module repository files hold only custom queries (joins, aggregates, transactions).
+- Repositories use the generic repository `gokit.Repository` (`gokit.NewRepository`) from `github.com/zazhedho/gokit` for common CRUD and list queries; module repository files hold only custom queries (joins, aggregates, transactions).
 - Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`.
-- For mutation handlers, embed `auditwriter.AuditWriter` (`github.com/zazhedho/authkit/handlers/auditwriter`) instead of creating per-handler audit wrapper methods.
+- For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods.
 
 ## Startup Flow
 
@@ -263,7 +267,7 @@ Flags (all optional; the environment supplies the defaults):
 | `-migrate-only` | run migrations and exit |
 | `-h` | print usage and exit 0 |
 
-`make run` is the same as `go run ./cmd/api`. In Docker, `entrypoint.sh` adds `-migrate` when `RUN_MIGRATION` is `true` or `1`.
+`make run` is the same as `go run ./cmd/api`. In Docker, `deploy/entrypoint.sh` (copied to `/app/entrypoint.sh` in the image) adds `-migrate` when `RUN_MIGRATION` is `true` or `1`.
 
 ### Exit codes
 
@@ -292,7 +296,7 @@ On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connec
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
 ```
 
-The unit tests need no services. `infrastructure/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
+The unit tests need no services. `internal/platform/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
 
 ### Migrations
 
@@ -440,19 +444,19 @@ package interfaceprojects
 import (
 	"context"
 
-	"github.com/zazhedho/gokit/filter"
+	"github.com/zazhedho/gokit"
 
 	domainprojects "starter-kit/internal/domain/projects"
 )
 
 type RepoProjectsInterface interface {
 	Store(ctx context.Context, p domainprojects.Project) error
-	List(ctx context.Context, params filter.BaseParams) ([]domainprojects.Project, int64, error)
+	List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error)
 }
 
 type ServiceProjectsInterface interface {
 	Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error)
-	List(ctx context.Context, params filter.BaseParams) ([]domainprojects.Project, int64, error)
+	List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error)
 }
 ```
 
@@ -464,8 +468,7 @@ package repositoryprojects
 import (
 	"context"
 
-	"github.com/zazhedho/gokit/filter"
-	repositorygeneric "github.com/zazhedho/gokit/repository/generic"
+	"github.com/zazhedho/gokit"
 	"gorm.io/gorm"
 
 	domainprojects "starter-kit/internal/domain/projects"
@@ -473,16 +476,16 @@ import (
 )
 
 type repo struct {
-	*repositorygeneric.GenericRepository[domainprojects.Project]
+	*gokit.Repository[domainprojects.Project]
 }
 
 func NewProjectsRepo(db *gorm.DB) interfaceprojects.RepoProjectsInterface {
-	return &repo{GenericRepository: repositorygeneric.New[domainprojects.Project](db)}
+	return &repo{Repository: gokit.NewRepository[domainprojects.Project](db)}
 }
 
-func (r *repo) List(ctx context.Context, params filter.BaseParams) ([]domainprojects.Project, int64, error) {
-	return r.GetAll(ctx, params, repositorygeneric.QueryOptions{
-		Search:              repositorygeneric.BuildSearchFunc("name"),
+func (r *repo) List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error) {
+	return r.GetAll(ctx, params, gokit.QueryOptions{
+		Search:              gokit.BuildSearchFunc("name"),
 		AllowedOrderColumns: []string{"name", "created_at"},
 		DefaultOrders:       []string{"created_at DESC"},
 	})
@@ -491,7 +494,7 @@ func (r *repo) List(ctx context.Context, params filter.BaseParams) ([]domainproj
 var _ interfaceprojects.RepoProjectsInterface = (*repo)(nil)
 ```
 
-Searchable columns, allowed filters, and sortable columns are configured through `repositorygeneric.QueryOptions`; add custom repository methods only for business-specific queries.
+Searchable columns, allowed filters, and sortable columns are configured through `gokit.QueryOptions`; add custom repository methods only for business-specific queries.
 
 ### 4. Service
 
@@ -507,7 +510,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zazhedho/gokit/filter"
+	"github.com/zazhedho/gokit"
 
 	domainprojects "starter-kit/internal/domain/projects"
 	interfaceprojects "starter-kit/internal/interfaces/projects"
@@ -535,14 +538,14 @@ func (s *service) Create(ctx context.Context, ownerUserID, name string) (domainp
 	return p, nil
 }
 
-func (s *service) List(ctx context.Context, params filter.BaseParams) ([]domainprojects.Project, int64, error) {
+func (s *service) List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error) {
 	return s.repo.List(ctx, params)
 }
 ```
 
 ### 5. Handler
 
-`internal/handlers/http/projects/projects.go` embeds `auditwriter.AuditWriter` and writes an audit event for the success and failure of every mutation. The caller comes from `authscope.FromContext`, which `d.Kit.Auth()` fills in:
+`internal/handlers/http/projects/projects.go` embeds `authkit.AuditWriter` and writes an audit event for the success and failure of every mutation. The caller comes from `authkit.ScopeFrom`, which `d.Kit.Auth()` fills in:
 
 ```go
 package handlerprojects
@@ -552,15 +555,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zazhedho/authkit/authscope"
-	domainaudit "github.com/zazhedho/authkit/domain/audit"
-	"github.com/zazhedho/authkit/handlers/auditwriter"
-	interfaceaudit "github.com/zazhedho/authkit/interfaces/audit"
-	"github.com/zazhedho/gokit/filter"
-	"github.com/zazhedho/gokit/handlercommon"
-	"github.com/zazhedho/gokit/messages"
-	"github.com/zazhedho/gokit/response"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 
 	interfaceprojects "starter-kit/internal/interfaces/projects"
 	serviceprojects "starter-kit/internal/services/projects"
@@ -569,14 +565,14 @@ import (
 type ProjectsHandler struct {
 	Service  interfaceprojects.ServiceProjectsInterface
 	pageSize int
-	auditwriter.AuditWriter
+	authkit.AuditWriter
 }
 
-func NewProjectsHandler(svc interfaceprojects.ServiceProjectsInterface, audit interfaceaudit.ServiceAuditInterface, pageSize int) *ProjectsHandler {
+func NewProjectsHandler(svc interfaceprojects.ServiceProjectsInterface, audit authkit.AuditService, pageSize int) *ProjectsHandler {
 	return &ProjectsHandler{
 		Service:     svc,
 		pageSize:    pageSize,
-		AuditWriter: auditwriter.NewAuditWriter(audit, "ProjectsHandler"),
+		AuditWriter: authkit.NewAuditWriter(audit, "ProjectsHandler"),
 	}
 }
 
@@ -585,47 +581,47 @@ type createRequest struct {
 }
 
 func (h *ProjectsHandler) List(ctx *gin.Context) {
-	logID := utils.GenerateLogId(ctx)
-	params, err := filter.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", h.pageSize)
+	logID := gokit.GenerateLogId(ctx)
+	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", h.pageSize)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.InvalidRequest, logID, err.Error()))
+		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 		return
 	}
 	items, total, err := h.Service.List(ctx.Request.Context(), params)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, response.InternalServerError(logID))
+		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
 		return
 	}
-	ctx.JSON(http.StatusOK, response.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, items))
+	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, items))
 }
 
 func (h *ProjectsHandler) Create(ctx *gin.Context) {
-	logID := utils.GenerateLogId(ctx)
+	logID := gokit.GenerateLogId(ctx)
 	var req createRequest
-	if !handlercommon.BindJSON(ctx, logID, "[ProjectsHandler][Create]", &req) {
+	if !gokit.BindJSON(ctx, logID, "[ProjectsHandler][Create]", &req) {
 		return
 	}
 
-	scope := authscope.FromContext(ctx.Request.Context())
+	scope := authkit.ScopeFrom(ctx.Request.Context())
 	p, err := h.Service.Create(ctx.Request.Context(), scope.UserID, req.Name)
 	if err != nil {
-		h.WriteAudit(ctx, domainaudit.AuditEvent{
-			Action: domainaudit.ActionCreate, Resource: "projects",
-			Status: domainaudit.StatusFailed, Message: "Failed to create project", ErrorMessage: err.Error(),
+		h.WriteAudit(ctx, authkit.AuditEvent{
+			Action: authkit.ActionCreate, Resource: "projects",
+			Status: authkit.StatusFailed, Message: "Failed to create project", ErrorMessage: err.Error(),
 		})
 		if errors.Is(err, serviceprojects.ErrNameRequired) {
-			ctx.JSON(http.StatusBadRequest, response.ErrorResponse(http.StatusBadRequest, messages.InvalidRequest, logID, err.Error()))
+			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, response.InternalServerError(logID))
+		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
 		return
 	}
 
-	h.WriteAudit(ctx, domainaudit.AuditEvent{
-		Action: domainaudit.ActionCreate, Resource: "projects", ResourceID: p.ID,
-		Status: domainaudit.StatusSuccess, Message: "Created project", AfterData: p,
+	h.WriteAudit(ctx, authkit.AuditEvent{
+		Action: authkit.ActionCreate, Resource: "projects", ResourceID: p.ID,
+		Status: authkit.StatusSuccess, Message: "Created project", AfterData: p,
 	})
-	ctx.JSON(http.StatusCreated, response.Response(http.StatusCreated, "Project created successfully", logID, p))
+	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Project created successfully", logID, p))
 }
 ```
 

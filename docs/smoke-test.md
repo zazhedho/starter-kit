@@ -96,7 +96,7 @@ curl -X POST http://127.0.0.1:18080/api/user/login -H 'Content-Type: application
 ```
 
 The automated integration test of the same fix
-(`infrastructure/database`, run with `STARTER_KIT_TEST_DATABASE_URL` pointing at this container)
+(`internal/platform/database`, run with `STARTER_KIT_TEST_DATABASE_URL` pointing at this container)
 also passes: both connection paths, `SHOW TimeZone` = `Asia/Jakarta`, a role with the password
 `p ass'w\ord@:/` connecting through the `DB_*` path, and a wrong password reported as
 `authentication failed` with no part of either password in the error or the captured log output.
