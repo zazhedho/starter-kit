@@ -3,7 +3,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -16,12 +15,14 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Register the PostgreSQL migration driver.
 	_ "github.com/golang-migrate/migrate/v4/source/file"       // Register the file-based migration source.
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/authkit/mailer"
 	"github.com/zazhedho/gokit/utils"
 	"github.com/zazhedho/logus"
 
 	"starter-kit/infrastructure/database"
+	appconfig "starter-kit/internal/config"
 	"starter-kit/internal/router"
 	"starter-kit/pkg/config"
 )
@@ -37,7 +38,6 @@ func FailOnError(err error, msg string) {
 func Run() {
 	var (
 		err        error
-		sqlDb      *sql.DB
 		runMigrate bool
 	)
 	if timeZone, err := time.LoadLocation("Asia/Jakarta"); err != nil {
@@ -76,22 +76,26 @@ func Run() {
 	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
 	FailOnError(config.ValidateStartupConfig(port), "Invalid app configuration")
 
-	// Initialize Redis for session management (optional)
-	redisClient, err := database.InitRedis()
-	if err != nil {
-		logus.WriteLog(logus.LogLevelDebug, "Redis not available, session management will be disabled")
-	} else {
-		defer func() {
-			if closeErr := database.CloseRedis(); closeErr != nil {
-				logus.WriteLog(logus.LogLevelError, "Failed to close redis connection: "+closeErr.Error())
-			}
-		}()
-		logus.WriteLog(logus.LogLevelInfo, "Redis initialized, session management enabled")
+	cfg := appconfig.FromEnv()
+
+	// Redis for session management is optional.
+	var redisClient *redis.Client
+	if cfg.Redis.Configured() {
+		redisClient, err = database.OpenRedis(context.Background(), cfg.Redis)
+		if err != nil {
+			redisClient = nil
+			logus.WriteLog(logus.LogLevelDebug, "Redis not available, session management will be disabled")
+		} else {
+			defer func() {
+				if closeErr := redisClient.Close(); closeErr != nil {
+					logus.WriteLog(logus.LogLevelError, "Failed to close redis connection: "+closeErr.Error())
+				}
+			}()
+			logus.WriteLog(logus.LogLevelInfo, "Redis initialized, session management enabled")
+		}
 	}
 
-	routes := router.NewRoutes()
-
-	routes.DB, sqlDb, err = database.ConnDb()
+	db, sqlDb, err := database.Open(cfg.Database, cfg.App.Timezone)
 	FailOnError(err, "Failed to open db")
 	defer func() {
 		if closeErr := sqlDb.Close(); closeErr != nil {
@@ -100,7 +104,7 @@ func Run() {
 	}()
 
 	authCfg := authkit.ConfigFromEnv()
-	authCfg.DB = routes.DB
+	authCfg.DB = db
 	if redisClient != nil {
 		authCfg.Redis = redisClient
 		// The mailer is only useful with Redis (OTP and password reset need it).
@@ -112,7 +116,6 @@ func Run() {
 	}
 	kit, err := authkit.New(authCfg)
 	FailOnError(err, "Failed to initialize authkit")
-	routes.Kit = kit
 
 	if runMigrate {
 		// authkit tables first: project migrations may reference users and roles.
@@ -120,13 +123,12 @@ func Run() {
 		runMigration()
 	}
 
-	routes.MountAuthKit()
-	routes.LocationRoutes()
-	FailOnError(routes.MediaRoutes(), "Failed to initialize media routes")
+	engine, err := router.New(router.Deps{Config: cfg, DB: db, SQLDB: sqlDb, Redis: redisClient, Kit: kit})
+	FailOnError(err, "Failed to initialize routes")
 
 	logus.WriteLog(logus.LogLevelInfo, "All routes registered successfully")
 
-	err = routes.App.Run(fmt.Sprintf(":%s", port))
+	err = engine.Run(fmt.Sprintf(":%s", port))
 	FailOnError(err, "Failed run service")
 }
 

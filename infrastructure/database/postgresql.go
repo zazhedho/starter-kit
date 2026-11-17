@@ -2,50 +2,51 @@ package database
 
 import (
 	"database/sql"
-	"fmt"
-	"github.com/zazhedho/gokit/utils"
-	"github.com/zazhedho/logus"
-	"time"
+	"errors"
+	"strings"
 
+	"github.com/zazhedho/logus"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"starter-kit/internal/config"
 )
 
-func ConnDb() (db *gorm.DB, sqlDB *sql.DB, err error) {
-	dsn := utils.GetEnv("DATABASE_URL", "")
+// Open connects to PostgreSQL with the given settings and applies the pool
+// limits. It never logs or returns the DSN or the password.
+func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
+	dsn := cfg.DSN(timezone)
+	logus.WriteLog(logus.LogLevelDebug, "database.Open; initialize db connection")
 
-	if dsn == "" {
-		dsn = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=Asia/Jakarta",
-			utils.GetEnv("DB_HOST", ""),
-			utils.GetEnv("DB_PORT", ""),
-			utils.GetEnv("DB_USERNAME", ""),
-			utils.GetEnv("DB_PASS", ""),
-			utils.GetEnv("DB_NAME", ""),
-			utils.GetEnv("DB_SSLMODE", "disable"))
-	}
-	logus.WriteLog(logus.LogLevelDebug, "ConnDb; Initialize db connection...")
-
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
 	if err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("ConnDb; %s Error: %s", dsn, err.Error()))
-		return
+		err = redacted(err, dsn, cfg.URL, cfg.Password)
+		logus.WriteLog(logus.LogLevelError, "database.Open; "+err.Error())
+		return nil, nil, err
 	}
 
-	maxIdle := 10
-	maxIdleTime := 5 * time.Minute
-	maxConn := 100
-	maxLifeTime := time.Hour
-
-	sqlDB, err = db.DB()
+	sqlDB, err := db.DB()
 	if err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("ConnDb.sqlDB; %s Error: %s", dsn, err.Error()))
-		return
+		err = redacted(err, dsn, cfg.URL, cfg.Password)
+		logus.WriteLog(logus.LogLevelError, "database.Open; sql.DB; "+err.Error())
+		return nil, nil, err
 	}
 
-	sqlDB.SetMaxIdleConns(maxIdle)
-	sqlDB.SetConnMaxIdleTime(maxIdleTime)
-	sqlDB.SetMaxOpenConns(maxConn)
-	sqlDB.SetConnMaxLifetime(maxLifeTime)
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 
-	return
+	return db, sqlDB, nil
+}
+
+// redacted returns an error with the same text minus every secret in it.
+func redacted(err error, secrets ...string) error {
+	msg := err.Error()
+	for _, s := range secrets {
+		if s != "" {
+			msg = strings.ReplaceAll(msg, s, "[redacted]")
+		}
+	}
+	return errors.New(msg)
 }

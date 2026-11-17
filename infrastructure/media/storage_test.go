@@ -3,12 +3,12 @@ package media
 import (
 	"strings"
 	"testing"
+
+	"starter-kit/internal/config"
 )
 
 func TestInitStorageReturnsErrorForUnsupportedProvider(t *testing.T) {
-	t.Setenv("STORAGE_PROVIDER", "unsupported")
-
-	provider, err := InitStorage()
+	provider, err := InitStorage(config.Storage{Provider: "unsupported"})
 	if err == nil {
 		t.Fatalf("expected error, got provider %#v", provider)
 	}

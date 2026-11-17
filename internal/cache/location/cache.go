@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zazhedho/gokit/utils"
 	"github.com/zazhedho/logus"
 	"starter-kit/internal/dto"
 	"time"
@@ -14,19 +13,9 @@ import (
 )
 
 const (
-	defaultTTL = 180 * 24 * time.Hour
-	prefix     = "location:"
-	scanCount  = int64(100)
+	prefix    = "location:"
+	scanCount = int64(100)
 )
-
-func TTL() time.Duration {
-	ttl := utils.GetEnv("LOCATION_CACHE_TTL", defaultTTL)
-	if ttl <= 0 {
-		return defaultTTL
-	}
-
-	return ttl
-}
 
 func ProvinceKey() string {
 	return "location:province"
@@ -73,7 +62,7 @@ func Get(ctx context.Context, client *redis.Client, cacheKey string) ([]dto.Loca
 	return locations, true
 }
 
-func Set(ctx context.Context, client *redis.Client, cacheKey string, locations []dto.Location) {
+func Set(ctx context.Context, client *redis.Client, cacheKey string, locations []dto.Location, ttl time.Duration) {
 	if client == nil {
 		return
 	}
@@ -87,7 +76,7 @@ func Set(ctx context.Context, client *redis.Client, cacheKey string, locations [
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	if err := client.Set(ctx, cacheKey, payload, TTL()).Err(); err != nil {
+	if err := client.Set(ctx, cacheKey, payload, ttl).Err(); err != nil {
 		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache set failed; key=%s; err=%v", cacheKey, err))
 	}
 }

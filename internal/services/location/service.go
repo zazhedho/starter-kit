@@ -20,13 +20,23 @@ import (
 	"gorm.io/gorm"
 )
 
-const defaultLocationServiceBaseURL = "https://location-service-y7si.onrender.com"
-
 type LocationService struct {
 	Repo       interfacelocation.RepoLocationInterface
 	Redis      *redis.Client
 	HTTPClient *http.Client
 	syncing    atomic.Bool
+
+	baseURL    string
+	sourceYear string
+	cacheTTL   time.Duration
+}
+
+// Options is what the service needs besides its repository. Redis may be nil.
+type Options struct {
+	Redis             *redis.Client
+	BaseURL           string
+	SourceYear        string
+	Timeout, CacheTTL time.Duration
 }
 
 type syncProgress struct {
@@ -39,16 +49,14 @@ type syncProgress struct {
 
 var ErrLocationSyncRunning = errors.New("location sync is already running")
 
-func NewLocationService(repo interfacelocation.RepoLocationInterface, redisClients ...*redis.Client) *LocationService {
-	var redisClient *redis.Client
-	if len(redisClients) > 0 {
-		redisClient = redisClients[0]
-	}
-
+func NewLocationService(repo interfacelocation.RepoLocationInterface, opts Options) *LocationService {
 	service := &LocationService{
 		Repo:       repo,
-		Redis:      redisClient,
-		HTTPClient: &http.Client{Timeout: locationServiceTimeout()},
+		Redis:      opts.Redis,
+		HTTPClient: &http.Client{Timeout: opts.Timeout},
+		baseURL:    opts.BaseURL,
+		sourceYear: opts.SourceYear,
+		cacheTTL:   opts.CacheTTL,
 	}
 
 	if err := service.Repo.FailActiveSyncJobs(context.Background(), "Service restarted before the previous location sync completed."); err != nil {
@@ -82,7 +90,7 @@ func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, erro
 		}
 		locations = mapProvinces(fetched)
 	}
-	setLocationCache(ctx, s.Redis, cacheKey, locations)
+	s.setLocationCache(ctx, cacheKey, locations)
 	return locations, nil
 }
 
@@ -110,7 +118,7 @@ func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]d
 		}
 		locations = mapCities(fetched)
 	}
-	setLocationCache(ctx, s.Redis, cacheKey, locations)
+	s.setLocationCache(ctx, cacheKey, locations)
 	return locations, nil
 }
 
@@ -142,7 +150,7 @@ func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]d
 		}
 		locations = mapDistricts(fetched)
 	}
-	setLocationCache(ctx, s.Redis, cacheKey, locations)
+	s.setLocationCache(ctx, cacheKey, locations)
 	return locations, nil
 }
 
@@ -178,7 +186,7 @@ func (s *LocationService) GetVillage(ctx context.Context, districtCode string) (
 		}
 		locations = mapVillages(fetched)
 	}
-	setLocationCache(ctx, s.Redis, cacheKey, locations)
+	s.setLocationCache(ctx, cacheKey, locations)
 	return locations, nil
 }
 
@@ -232,7 +240,7 @@ func (s *LocationService) GetSyncJob(ctx context.Context, id string) (dto.Locati
 
 func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationRequest) (dto.SyncLocationRequest, error) {
 	req.Level = normalizeSyncLevel(req.Level)
-	req.Year = normalizeSyncYear(req.Year)
+	req.Year = s.normalizeSyncYear(req.Year)
 
 	switch req.Level {
 	case "province":
@@ -608,14 +616,13 @@ func normalizeSyncLevel(level string) string {
 	}
 }
 
-func normalizeSyncYear(year string) string {
+func (s *LocationService) normalizeSyncYear(year string) string {
 	if year != "" {
 		return year
 	}
 
-	defaultYear := utils.GetEnv("LOCATION_SOURCE_YEAR", "")
-	if defaultYear != "" {
-		return defaultYear
+	if s.sourceYear != "" {
+		return s.sourceYear
 	}
 
 	return fmt.Sprintf("%d", time.Now().Year())
