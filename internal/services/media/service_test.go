@@ -14,7 +14,7 @@ import (
 
 	"github.com/zazhedho/authkit/authscope"
 	domainmedia "starter-kit/internal/domain/media"
-	"starter-kit/pkg/storage"
+	"starter-kit/internal/platform/storage"
 )
 
 type mediaTestFile struct {

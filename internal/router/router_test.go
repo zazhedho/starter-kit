@@ -27,7 +27,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/pkg/storage"
+	"starter-kit/internal/platform/storage"
 )
 
 func newDryRunDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {

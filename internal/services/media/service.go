@@ -18,7 +18,7 @@ import (
 	"github.com/zazhedho/gokit/utils"
 	domainmedia "starter-kit/internal/domain/media"
 	interfacemedia "starter-kit/internal/interfaces/media"
-	"starter-kit/pkg/storage"
+	"starter-kit/internal/platform/storage"
 )
 
 const (

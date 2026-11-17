@@ -38,11 +38,10 @@ import (
 	"github.com/zazhedho/logus"
 	"gorm.io/gorm"
 
-	"starter-kit/infrastructure/database"
-	"starter-kit/infrastructure/media"
 	"starter-kit/internal/config"
+	"starter-kit/internal/platform/database"
+	"starter-kit/internal/platform/storage"
 	"starter-kit/internal/router"
-	"starter-kit/pkg/storage"
 )
 
 // App holds the open connections and the HTTP server of one running service.
@@ -216,7 +215,7 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 	if cfg.Media.Enabled {
 		initStorage := d.initStorage
 		if initStorage == nil {
-			initStorage = media.InitStorage
+			initStorage = storage.InitStorage
 		}
 		if a.storage, err = initStorage(cfg.Storage); err != nil {
 			return fail(fmt.Errorf("initialize storage: %w", err))

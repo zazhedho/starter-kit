@@ -1,4 +1,4 @@
-package media
+package storage
 
 import (
 	"fmt"
@@ -6,14 +6,13 @@ import (
 	"github.com/zazhedho/logus"
 
 	"starter-kit/internal/config"
-	"starter-kit/pkg/storage"
 )
 
 // InitStorage starts the storage provider (MinIO or R2) from explicit settings.
-func InitStorage(cfg config.Storage) (storage.StorageProvider, error) {
+func InitStorage(cfg config.Storage) (StorageProvider, error) {
 	logus.WriteLog(logus.LogLevelDebug, "InitStorage; Initializing storage provider...")
 
-	provider, err := storage.NewStorageProvider(storage.Config{
+	provider, err := NewStorageProvider(Config{
 		Provider:        cfg.Provider,
 		Endpoint:        cfg.Endpoint,
 		AccessKeyID:     cfg.AccessKey,
