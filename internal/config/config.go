@@ -54,7 +54,7 @@ type Database struct {
 	ConnMaxLifetime, ConnMaxIdleTime                   time.Duration
 }
 
-// DSN returns DATABASE_URL when set, otherwise a key=value DSN for gorm/pgx.
+// DSN returns DATABASE_URL when set, otherwise a key=value DSN that pgx parses.
 // Every value is single-quoted with \ and ' escaped, so a space, quote or
 // backslash in a user name or password neither breaks the DSN nor splits it
 // into pieces that an error message could echo.

@@ -2,12 +2,16 @@ package database
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"starter-kit/internal/config"
 )
@@ -114,5 +118,31 @@ func TestOpenInvalidURLReturnsParseError(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 		t.Fatal("expected invalid dsn error")
+	}
+}
+
+func TestClassifyDistinguishesRejectionFromUnreachable(t *testing.T) {
+	timeout := &net.DNSError{IsTimeout: true}
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"wrong password", &pgconn.PgError{Code: "28P01"}, "authentication failed"},
+		{"role not permitted", &pgconn.PgError{Code: "28000"}, "authentication failed"},
+		{"bad parameter value", &pgconn.PgError{Code: "22023"}, "server rejected the connection parameters"},
+		{"database missing", &pgconn.PgError{Code: "3D000"}, "server rejected the connection parameters"},
+		{"wrapped rejection", fmt.Errorf("failed to connect: %w", &pgconn.PgError{Code: "22023"}), "server rejected the connection parameters"},
+		{"refused", fmt.Errorf("dial: %w", syscall.ECONNREFUSED), "connection refused"},
+		{"timeout", timeout, "timed out"},
+		{"no such host", &net.DNSError{Err: "no such host"}, "unreachable"},
+		{"parse", &pgconn.ParseConfigError{}, "invalid configuration"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := classify(c.err); got != c.want {
+				t.Fatalf("classify = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
