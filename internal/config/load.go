@@ -14,6 +14,7 @@ const (
 	defaultLocationServiceBaseURL = "https://location-service-y7si.onrender.com"
 	defaultLocationTimeoutSeconds = 20
 	defaultLocationCacheTTL       = 180 * 24 * time.Hour
+	maxSizeMB                     = 1024
 	defaultAllowedContentTypes    = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
 )
 
@@ -36,7 +37,7 @@ func FromEnv() Config {
 			WriteTimeout:      l.duration("HTTP_WRITE_TIMEOUT", 30*time.Second),
 			IdleTimeout:       l.duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout:   l.duration("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
-			MaxBodyBytes:      int64(l.integer("HTTP_MAX_BODY_MB", 10)) << 20,
+			MaxBodyBytes:      l.megabytes("HTTP_MAX_BODY_MB", 10),
 		},
 		Database: Database{
 			URL:             utils.GetEnv("DATABASE_URL", ""),
@@ -63,7 +64,7 @@ func FromEnv() Config {
 		},
 		Media: Media{
 			Enabled:             utils.GetEnv("MEDIA_ENABLED", false),
-			MaxFileSizeBytes:    int64(utils.GetEnv("MEDIA_MAX_FILE_SIZE_MB", 5)) << 20,
+			MaxFileSizeBytes:    l.megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
 			AllowedContentTypes: splitList(l.str("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
 			UploadRateLimit:     utils.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
 			UploadRateWindow:    time.Duration(utils.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
@@ -126,6 +127,19 @@ func (l *loader) duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// megabytes reads a size in whole megabytes and returns it in bytes. The raw
+// number is checked before it is shifted so a huge value cannot wrap around
+// to a small one; an out-of-range value is recorded for Validate and the
+// default is used.
+func (l *loader) megabytes(key string, def int) int64 {
+	n := l.integer(key, def)
+	if n < 1 || n > maxSizeMB {
+		l.problems = append(l.problems, key+" must be between 1 and 1024")
+		n = def
+	}
+	return int64(n) << 20
 }
 
 func (l *loader) integer(key string, def int) int {

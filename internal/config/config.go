@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -112,7 +113,7 @@ type Storage struct {
 // String redacts both keys.
 func (s Storage) String() string {
 	return fmt.Sprintf("Storage{Provider:%q Endpoint:%q AccessKey:%s SecretKey:%s Bucket:%q BaseURL:%q Region:%q R2AccountID:%q UseSSL:%t}",
-		s.Provider, s.Endpoint, redact(s.AccessKey), redact(s.SecretKey), s.Bucket, s.BaseURL, s.Region, s.R2AccountID, s.UseSSL)
+		s.Provider, s.Endpoint, redact(s.AccessKey), redact(s.SecretKey), s.Bucket, withoutUserinfo(s.BaseURL), s.Region, s.R2AccountID, s.UseSSL)
 }
 
 // String is safe to log: secrets are reported only as set or unset, and Auth
@@ -120,6 +121,22 @@ func (s Storage) String() string {
 func (c Config) String() string {
 	return fmt.Sprintf("Config{App:%+v HTTP:%+v Database:%s Redis:%s Migrate:%+v Location:%+v Media:%+v Storage:%s Auth:%s SMTPConfigured:%t}",
 		c.App, c.HTTP, c.Database, c.Redis, c.Migrate, c.Location, c.Media, c.Storage, c.Auth, c.SMTPConfigured)
+}
+
+// GoString keeps %#v from printing the raw fields.
+func (c Config) GoString() string   { return c.String() }
+func (d Database) GoString() string { return d.String() }
+func (r Redis) GoString() string    { return r.String() }
+func (s Storage) GoString() string  { return s.String() }
+
+// withoutUserinfo drops any user:password part of a URL so it can be printed.
+func withoutUserinfo(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid"
+	}
+	u.User = nil
+	return u.String()
 }
 
 func redact(v string) string {

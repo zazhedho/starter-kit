@@ -11,8 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const maxMediaFileSizeMB = 1024
-
 // Validate checks the whole configuration and returns one error that joins
 // every problem with "; ". Each problem names its environment variable and
 // never includes a value.
@@ -25,6 +23,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validateRedis()...)
 	problems = append(problems, c.validateSMTP()...)
 	problems = append(problems, c.validateStorage()...)
+	problems = append(problems, c.validateMediaRate()...)
 
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -194,8 +193,22 @@ func (c Config) validateStorage() []string {
 			problems = append(problems, "STORAGE_BASE_URL must be a valid URL")
 		}
 	}
-	if size := c.Media.MaxFileSizeBytes; size <= 0 || size > maxMediaFileSizeMB<<20 {
+	if size := c.Media.MaxFileSizeBytes; size <= 0 || size > maxSizeMB<<20 {
 		problems = append(problems, "MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024")
+	}
+	return problems
+}
+
+func (c Config) validateMediaRate() []string {
+	if !c.Media.Enabled {
+		return nil
+	}
+	var problems []string
+	if c.Media.UploadRateLimit <= 0 {
+		problems = append(problems, "MEDIA_UPLOAD_RATE_LIMIT must be greater than zero")
+	}
+	if c.Media.UploadRateWindow <= 0 {
+		problems = append(problems, "MEDIA_UPLOAD_RATE_WINDOW_SECONDS must be greater than zero")
 	}
 	return problems
 }
