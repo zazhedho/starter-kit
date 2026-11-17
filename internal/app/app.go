@@ -241,17 +241,22 @@ func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Confi
 	if !cfg.SMTP.Configured() {
 		return authCfg
 	}
-	s := cfg.SMTP
-	sender, err := authkit.NewBrevoMailer(authkit.BrevoConfig{
-		Host: s.Host, Port: s.Port, User: s.User, Pass: s.Password, From: s.From,
-		OTPSubject: s.OTPSubject, ResetSubject: s.ResetSubject, AppName: s.AppName,
-	})
+	sender, err := authkit.NewBrevoMailer(brevoConfig(cfg.SMTP))
 	if err != nil {
 		logus.WriteLog(logus.LogLevelWarn, "Email sender not configured: ", err)
 		return authCfg
 	}
 	authCfg.Mailer = sender
 	return authCfg
+}
+
+// brevoConfig maps this service's SMTP settings onto authkit's public Brevo
+// configuration. Empty values are passed through; authkit applies its defaults.
+func brevoConfig(s config.SMTP) authkit.BrevoConfig {
+	return authkit.BrevoConfig{
+		Host: s.Host, Port: s.Port, User: s.User, Pass: s.Password, From: s.From,
+		OTPSubject: s.OTPSubject, ResetSubject: s.ResetSubject, AppName: s.AppName,
+	}
 }
 
 // buildRoutes creates the router and the HTTP server. It does nothing when
