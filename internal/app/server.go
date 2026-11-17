@@ -14,11 +14,15 @@ import (
 // when the shutdown time limit ran out and had to be cut off.
 var ErrShutdownTimeout = errors.New("app: shutdown timed out with requests still in flight")
 
-// Serve handles requests until ctx is canceled, then stops accepting
-// connections and waits up to HTTP_SHUTDOWN_TIMEOUT for running requests. It
-// closes the App on every path and returns nil after a clean shutdown,
-// ErrShutdownTimeout when requests were cut off, or the listen/serve error.
+// Serve builds the routes if that has not happened yet, then handles requests
+// until ctx is canceled, stops accepting connections, and waits up to
+// HTTP_SHUTDOWN_TIMEOUT for running requests. It closes the App on every path
+// and returns nil after a clean shutdown, ErrShutdownTimeout when requests
+// were cut off, or the build/listen/serve error.
 func (a *App) Serve(ctx context.Context) error {
+	if err := a.buildRoutes(); err != nil {
+		return a.closeAfter(err)
+	}
 	ln := a.listener
 	if ln == nil {
 		var lc net.ListenConfig

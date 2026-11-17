@@ -1,6 +1,8 @@
-// Package config holds the typed application configuration. FromEnv builds it
-// from the process environment once, Validate checks it once, and the rest of
-// the service receives the result instead of reading the environment itself.
+// Package config holds the typed application configuration and is the only
+// package that reads the environment. LoadDotEnv and LoadRemote fill the
+// environment from .env and from Consul or a config file, FromEnv builds the
+// typed Config from it once, Validate checks it once, and the rest of the
+// service receives the result instead of reading the environment itself.
 package config
 
 import (
@@ -24,21 +26,36 @@ type Config struct {
 	Storage  Storage
 	Auth     authkit.Config // from authkit.ConfigFromEnv(); DB, Redis and Mailer are filled in later by the app
 
-	// SMTPConfigured is true when SMTP_HOST, SMTP_PASS and SMTP_FROM are all set.
-	SMTPConfigured bool
-
-	smtp smtpSettings
+	SMTP SMTP
 
 	// problems holds environment values FromEnv could not parse; Validate
 	// reports them. Each one names the variable, never its value.
 	problems []string
+
+	smtpPortInvalid bool // SMTP_PORT was set but is not a port number
 }
 
-// smtpSettings keeps what Validate needs to tell a partly configured SMTP
-// setup apart from an unset one, without storing the password.
-type smtpSettings struct {
-	hostSet, passSet bool
-	port, from       string
+// SMTP is the outgoing mail setting for OTP and password-reset emails. Empty
+// values mean "use the mailer's default"; only Host, Password and From are
+// required, and only when mail is used at all.
+type SMTP struct {
+	Host         string // SMTP_HOST
+	Port         int    // SMTP_PORT; 0 when unset
+	User         string // SMTP_USER
+	Password     string // SMTP_PASS
+	From         string // SMTP_FROM
+	OTPSubject   string // SMTP_SUBJECT
+	ResetSubject string // RESET_SUBJECT
+	AppName      string // AUTH_EMAIL_APP_NAME
+}
+
+// Configured is true when SMTP_HOST, SMTP_PASS and SMTP_FROM are all set.
+func (s SMTP) Configured() bool { return s.Host != "" && s.Password != "" && s.From != "" }
+
+// String redacts the password.
+func (s SMTP) String() string {
+	return fmt.Sprintf("SMTP{Host:%q Port:%d User:%q Password:%s From:%q OTPSubject:%q ResetSubject:%q AppName:%q}",
+		s.Host, s.Port, s.User, redact(s.Password), s.From, s.OTPSubject, s.ResetSubject, s.AppName)
 }
 
 type App struct{ Name, Env, Port, Timezone string }
@@ -133,8 +150,8 @@ func (s Storage) String() string {
 // String is safe to log: secrets are reported only as set or unset, and Auth
 // goes through its own redacting String.
 func (c Config) String() string {
-	return fmt.Sprintf("Config{App:%+v HTTP:%+v Database:%s Redis:%s Migrate:%+v Location:%+v Media:%+v Storage:%s Auth:%s SMTPConfigured:%t}",
-		c.App, c.HTTP, c.Database, c.Redis, c.Migrate, c.Location, c.Media, c.Storage, c.Auth, c.SMTPConfigured)
+	return fmt.Sprintf("Config{App:%+v HTTP:%+v Database:%s Redis:%s Migrate:%+v Location:%+v Media:%+v Storage:%s SMTP:%s Auth:%s}",
+		c.App, c.HTTP, c.Database, c.Redis, c.Migrate, c.Location, c.Media, c.Storage, c.SMTP, c.Auth)
 }
 
 // GoString keeps %#v from printing the raw fields.
@@ -142,6 +159,7 @@ func (c Config) GoString() string   { return c.String() }
 func (d Database) GoString() string { return d.String() }
 func (r Redis) GoString() string    { return r.String() }
 func (s Storage) GoString() string  { return s.String() }
+func (s SMTP) GoString() string     { return s.String() }
 
 // withoutUserinfo drops any user:password part of a URL so it can be printed.
 func withoutUserinfo(raw string) string {

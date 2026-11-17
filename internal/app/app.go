@@ -1,9 +1,20 @@
 // Package app owns the service lifecycle. Run loads and validates the
-// configuration, then New opens the connections, Migrate updates the schema,
-// Serve handles requests until the context ends, and Close releases
-// everything. Every failure is returned as an error; only cmd/api decides to
-// exit the process.
+// configuration, then New opens the connections, Migrate updates the schema
+// when asked, Serve builds the routes and handles requests until the context
+// ends, and Close releases everything. Every failure is returned as an error;
+// only cmd/api decides to exit the process.
 package app
+
+// Where to add things:
+//
+//   - A new config field: add it to the matching struct in internal/config
+//     (config.go), read it in load.go, and check it in validate.go. Nothing
+//     outside internal/config reads the environment.
+//   - A new dependency (a client, a connection, a provider): open it in
+//     newApp below, keep it on App so Close can release it, and pass it to the
+//     routes through router.Deps in internal/router/router.go.
+//   - A new module: write a registrar in internal/router (see location.go)
+//     and add one entry to apiRegistrars (or rootRegistrars) in router.go.
 
 import (
 	"context"
@@ -28,7 +39,6 @@ import (
 	"starter-kit/infrastructure/media"
 	"starter-kit/internal/config"
 	"starter-kit/internal/router"
-	appconfig "starter-kit/pkg/config"
 	"starter-kit/pkg/storage"
 )
 
@@ -39,8 +49,11 @@ type App struct {
 	sqlDB  *sql.DB
 	redis  *redis.Client
 	kit    *authkit.Kit
-	engine *gin.Engine
-	server *http.Server
+	engine *gin.Engine  // nil until buildRoutes has run
+	server *http.Server // nil until buildRoutes has run
+
+	storage storage.StorageProvider // nil unless media is enabled
+	routes  func(*gin.Engine)       // extra routes added by tests
 
 	listener net.Listener                    // nil: Serve listens on server.Addr
 	migrate  func(ctx context.Context) error // replaces the real migrations in tests
@@ -90,8 +103,7 @@ func loadConfig(args []string) (config.Config, error) {
 	if err := config.LoadDotEnv(".env"); err != nil {
 		return config.Config{}, fmt.Errorf("load environment: %w", err)
 	}
-	confID := appconfig.GetAppConf("CONFIG_ID", "", nil)
-	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %v", confID))
+	config.LoadRemote()
 
 	cfg := config.FromEnv()
 	if err := applyFlags(&cfg, args); err != nil {
@@ -142,11 +154,17 @@ func execute(ctx context.Context, cfg config.Config, d deps) (err error) {
 		logus.WriteLog(logus.LogLevelInfo, "Migration finished; not serving (migrate-only)")
 		return nil
 	}
+	// Routes come after the migration: some modules query their tables when
+	// they are registered.
+	if err := a.buildRoutes(); err != nil {
+		return err
+	}
 	return a.Serve(ctx)
 }
 
-// New opens the database, and Redis when configured, builds authkit and the
-// routes, and prepares the HTTP server. If any step fails, everything already
+// New opens the database, and Redis and the storage provider when configured,
+// and builds authkit. It builds no routes: Serve does that, after the caller
+// has had the chance to call Migrate. If any step fails, everything already
 // opened is closed and the error is returned.
 func New(ctx context.Context, cfg config.Config) (*App, error) {
 	return newApp(ctx, cfg, deps{})
@@ -168,7 +186,7 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		openDB = database.Open
 	}
 
-	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate}
+	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate, routes: d.routes}
 	if a.db, a.sqlDB, err = openDB(cfg.Database, cfg.App.Timezone); err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -192,55 +210,85 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 
 	// The storage provider exists only when media is enabled; a failure to
 	// start it is a startup failure, not a missing route.
-	var storageProvider storage.StorageProvider
 	if cfg.Media.Enabled {
 		initStorage := d.initStorage
 		if initStorage == nil {
 			initStorage = media.InitStorage
 		}
-		if storageProvider, err = initStorage(cfg.Storage); err != nil {
+		if a.storage, err = initStorage(cfg.Storage); err != nil {
 			return fail(fmt.Errorf("initialize storage: %w", err))
 		}
 	}
 
-	authCfg := cfg.Auth
-	authCfg.DB = a.db
-	if a.redis != nil {
-		authCfg.Redis = a.redis
-		// The mailer is only useful with Redis (OTP and password reset need it).
-		if cfg.SMTPConfigured {
-			if sender, mailErr := mailer.NewBrevoSenderFromEnv(); mailErr != nil {
-				logus.WriteLog(logus.LogLevelWarn, "Email sender not configured: ", mailErr)
-			} else {
-				authCfg.Mailer = sender
-			}
-		}
-	}
-	if a.kit, err = authkit.New(authCfg); err != nil {
+	if a.kit, err = authkit.New(authConfig(cfg, a.db, a.redis)); err != nil {
 		return fail(fmt.Errorf("initialize authkit: %w", err))
-	}
-
-	if a.engine, err = router.New(router.Deps{Config: cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: storageProvider}); err != nil {
-		return fail(fmt.Errorf("initialize routes: %w", err))
-	}
-	if d.routes != nil {
-		d.routes(a.engine)
-	}
-	logus.WriteLog(logus.LogLevelInfo, "All routes registered successfully")
-
-	a.server = &http.Server{
-		Addr:              ":" + cfg.App.Port,
-		Handler:           a.engine,
-		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
-		ReadTimeout:       cfg.HTTP.ReadTimeout,
-		WriteTimeout:      cfg.HTTP.WriteTimeout,
-		IdleTimeout:       cfg.HTTP.IdleTimeout,
 	}
 	return a, nil
 }
 
-// Handler returns the HTTP handler with every route mounted.
-func (a *App) Handler() http.Handler { return a.engine }
+// authConfig completes authkit's configuration with the open connections. A
+// mailer is passed only when Redis is present (OTP and password reset need
+// it) and SMTP is fully configured; if the sender cannot be built the service
+// continues without it.
+func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Config {
+	authCfg := cfg.Auth
+	authCfg.DB = db
+	if rdb == nil {
+		return authCfg
+	}
+	authCfg.Redis = rdb
+	if !cfg.SMTP.Configured() {
+		return authCfg
+	}
+	s := cfg.SMTP
+	sender, err := mailer.NewBrevoSender(mailer.BrevoConfig{
+		Host: s.Host, Port: s.Port, User: s.User, Pass: s.Password, From: s.From,
+		OTPSubject: s.OTPSubject, ResetSubject: s.ResetSubject, AppName: s.AppName,
+	})
+	if err != nil {
+		logus.WriteLog(logus.LogLevelWarn, "Email sender not configured: ", err)
+		return authCfg
+	}
+	authCfg.Mailer = sender
+	return authCfg
+}
+
+// buildRoutes creates the router and the HTTP server. It does nothing when
+// they exist already. It runs after the migrations, because registering some
+// routes queries the database.
+func (a *App) buildRoutes() error {
+	if a.engine != nil {
+		return nil
+	}
+	engine, err := router.New(router.Deps{Config: a.cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: a.storage})
+	if err != nil {
+		return fmt.Errorf("initialize routes: %w", err)
+	}
+	if a.routes != nil {
+		a.routes(engine)
+	}
+	logus.WriteLog(logus.LogLevelInfo, "All routes registered successfully")
+
+	a.engine = engine
+	a.server = &http.Server{
+		Addr:              ":" + a.cfg.App.Port,
+		Handler:           engine,
+		ReadHeaderTimeout: a.cfg.HTTP.ReadHeaderTimeout,
+		ReadTimeout:       a.cfg.HTTP.ReadTimeout,
+		WriteTimeout:      a.cfg.HTTP.WriteTimeout,
+		IdleTimeout:       a.cfg.HTTP.IdleTimeout,
+	}
+	return nil
+}
+
+// Handler returns the HTTP handler with every route mounted, or nil before
+// the routes are built (Serve builds them).
+func (a *App) Handler() http.Handler {
+	if a.engine == nil {
+		return nil
+	}
+	return a.engine
+}
 
 // Close closes Redis, then the database. It is safe to call more than once;
 // only the first call does anything and reports errors.

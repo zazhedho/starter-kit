@@ -92,13 +92,7 @@ func FromEnv() Config {
 	}
 	cfg.Redis.DB, cfg.Redis.dbInvalid = redisDB()
 
-	cfg.smtp = smtpSettings{
-		hostSet: utils.GetEnv("SMTP_HOST", "") != "",
-		passSet: utils.GetEnv("SMTP_PASS", "") != "",
-		port:    utils.GetEnv("SMTP_PORT", ""),
-		from:    utils.GetEnv("SMTP_FROM", ""),
-	}
-	cfg.SMTPConfigured = cfg.smtp.hostSet && cfg.smtp.passSet && cfg.smtp.from != ""
+	cfg.SMTP, cfg.smtpPortInvalid = smtpFromEnv()
 	cfg.problems = l.problems
 
 	return cfg
@@ -173,6 +167,30 @@ func locationCacheTTL() time.Duration {
 		return defaultLocationCacheTTL
 	}
 	return ttl
+}
+
+// smtpFromEnv reads the SMTP_* variables (and the mail labels) with the names
+// and defaults authkit's own env helper uses; an unset value stays empty so
+// the mailer applies its default. A port that is not a number is reported
+// through the second result and read as unset.
+func smtpFromEnv() (s SMTP, portInvalid bool) {
+	s = SMTP{
+		Host:         utils.GetEnv("SMTP_HOST", ""),
+		User:         utils.GetEnv("SMTP_USER", ""),
+		Password:     utils.GetEnv("SMTP_PASS", ""),
+		From:         utils.GetEnv("SMTP_FROM", ""),
+		OTPSubject:   utils.GetEnv("SMTP_SUBJECT", ""),
+		ResetSubject: utils.GetEnv("RESET_SUBJECT", ""),
+		AppName:      utils.GetEnv("AUTH_EMAIL_APP_NAME", ""),
+	}
+	if raw := utils.GetEnv("SMTP_PORT", ""); raw != "" {
+		if validPort(raw) {
+			s.Port, _ = strconv.Atoi(raw)
+		} else {
+			portInvalid = true
+		}
+	}
+	return s, portInvalid
 }
 
 // redisDB returns REDIS_DB and whether it was set to something that is not an

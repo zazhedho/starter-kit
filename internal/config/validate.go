@@ -131,8 +131,8 @@ func (c Config) validateRedis() []string {
 }
 
 func (c Config) validateSMTP() []string {
-	s := c.smtp
-	if !s.hostSet && !s.passSet && s.from == "" {
+	s := c.SMTP
+	if s.Host == "" && s.Password == "" && s.From == "" {
 		return nil
 	}
 
@@ -141,17 +141,17 @@ func (c Config) validateSMTP() []string {
 		key string
 		set bool
 	}{
-		{"SMTP_HOST", s.hostSet}, {"SMTP_PASS", s.passSet}, {"SMTP_FROM", s.from != ""},
+		{"SMTP_HOST", s.Host != ""}, {"SMTP_PASS", s.Password != ""}, {"SMTP_FROM", s.From != ""},
 	} {
 		if !f.set {
 			problems = append(problems, f.key+" is required when SMTP is configured")
 		}
 	}
-	if s.port != "" && !validPort(s.port) {
+	if c.smtpPortInvalid {
 		problems = append(problems, "SMTP_PORT must be a number between 1 and 65535")
 	}
-	if s.from != "" {
-		if _, err := mail.ParseAddress(s.from); err != nil {
+	if s.From != "" {
+		if _, err := mail.ParseAddress(s.From); err != nil {
 			problems = append(problems, "SMTP_FROM must be a valid email address")
 		}
 	}

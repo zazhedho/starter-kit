@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/authkit/mailer"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -87,6 +89,9 @@ func newTestApp(t *testing.T, cfg config.Config, routes func(*gin.Engine)) (*App
 		t.Fatalf("newApp: %v", err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
+	if err := a.buildRoutes(); err != nil {
+		t.Fatalf("buildRoutes: %v", err)
+	}
 	return a, ln
 }
 
@@ -237,6 +242,9 @@ func TestServeReturnsListenError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := a.buildRoutes(); err != nil {
+		t.Fatal(err)
+	}
 	// Bind to the exact busy address: ":port" may coexist with a loopback
 	// listener on some platforms.
 	a.server.Addr = busy.Addr().String()
@@ -339,6 +347,9 @@ func TestNewWithoutRedisDoesNotDial(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = a.Close() }()
+	if err := a.buildRoutes(); err != nil {
+		t.Fatal(err)
+	}
 	if d := time.Since(start); d > 500*time.Millisecond {
 		t.Fatalf("New took %v", d)
 	}
@@ -350,6 +361,63 @@ func TestNewWithoutRedisDoesNotDial(t *testing.T) {
 			t.Fatalf("session route %s mounted without Redis", r.Path)
 		}
 	}
+}
+
+func TestAuthConfigPassesAMailerOnlyWithRedisAndCompleteSMTP(t *testing.T) {
+	full := config.SMTP{
+		Host: "smtp.example.test", Port: 2525, User: "mailer", Password: "pw", From: "a@example.test",
+		OTPSubject: "Code", ResetSubject: "Reset", AppName: "Starter",
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	build := func(smtp config.SMTP, client *redis.Client) authkit.Config {
+		cfg := testConfig()
+		cfg.SMTP = smtp
+		return authConfig(cfg, nil, client)
+	}
+
+	t.Run("without redis there is no mailer", func(t *testing.T) {
+		got := build(full, nil)
+		if got.Mailer != nil || got.Redis != nil {
+			t.Fatalf("Mailer = %v, Redis = %v; want neither", got.Mailer, got.Redis)
+		}
+	})
+	t.Run("without smtp there is no mailer", func(t *testing.T) {
+		got := build(config.SMTP{}, rdb)
+		if got.Mailer != nil || got.Redis != rdb {
+			t.Fatalf("Mailer = %v, Redis ok = %t", got.Mailer, got.Redis == rdb)
+		}
+	})
+	t.Run("incomplete smtp has no mailer", func(t *testing.T) {
+		partial := full
+		partial.Password = ""
+		if got := build(partial, rdb); got.Mailer != nil {
+			t.Fatalf("Mailer = %v, want nil", got.Mailer)
+		}
+	})
+	t.Run("redis and complete smtp build the sender from config", func(t *testing.T) {
+		got := build(full, rdb)
+		sender, ok := got.Mailer.(*mailer.BrevoSender)
+		if !ok {
+			t.Fatalf("Mailer = %T, want *mailer.BrevoSender", got.Mailer)
+		}
+		if sender.Host != full.Host || sender.Port != full.Port || sender.User != full.User ||
+			sender.Pass != full.Password || sender.From != full.From || sender.Subject != full.OTPSubject ||
+			sender.ResetSubject != full.ResetSubject || sender.AppName != full.AppName {
+			t.Fatalf("sender = %+v, does not match the SMTP settings", *sender)
+		}
+	})
+	t.Run("empty optional values get the sender's defaults", func(t *testing.T) {
+		minimal := config.SMTP{Host: "smtp.example.test", Password: "pw", From: "a@example.test"}
+		sender, ok := build(minimal, rdb).Mailer.(*mailer.BrevoSender)
+		if !ok {
+			t.Fatal("no sender")
+		}
+		if sender.Port != 587 || sender.User != "apikey" {
+			t.Fatalf("defaults = port %d user %q, want 587 and apikey", sender.Port, sender.User)
+		}
+	})
 }
 
 func TestNewFailsOnInvalidAuthConfig(t *testing.T) {
@@ -395,6 +463,9 @@ func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = a.Close() }()
+		if err := a.buildRoutes(); err != nil {
+			t.Fatal(err)
+		}
 		if mediaRoutes(a) != 0 {
 			t.Fatal("media routes registered while media is disabled")
 		}
@@ -414,6 +485,9 @@ func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = a.Close() }()
+		if err := a.buildRoutes(); err != nil {
+			t.Fatal(err)
+		}
 		if mediaRoutes(a) == 0 {
 			t.Fatal("media routes missing although media is enabled")
 		}
@@ -488,10 +562,12 @@ func TestRunMigrateOnlyDoesNotListen(t *testing.T) {
 	defer func() { _ = ln.Close() }()
 
 	var migrations int
+	routesBuilt := false
 	err = execute(context.Background(), cfg, deps{
 		openDB:   open,
 		listener: ln,
 		migrate:  func(context.Context) error { migrations++; return nil },
+		routes:   func(*gin.Engine) { routesBuilt = true },
 	})
 	if err != nil {
 		t.Fatalf("execute = %v", err)
@@ -502,8 +578,85 @@ func TestRunMigrateOnlyDoesNotListen(t *testing.T) {
 	if ln.accepts.Load() != 0 {
 		t.Fatal("a listener was used in migrate-only mode")
 	}
+	if routesBuilt {
+		t.Fatal("routes were built in migrate-only mode")
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("database was not closed: %v", err)
+	}
+}
+
+// TestStartupOrder: dependencies are opened, then the schema is migrated, then
+// the routes are built (some of them query tables the migration creates), then
+// the server runs.
+func TestStartupOrder(t *testing.T) {
+	cfg := testConfig()
+	cfg.Migrate.Run = true
+	mock, _, openMock := mockDB(t)
+	mock.ExpectClose()
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = inner.Close() }()
+
+	var mu sync.Mutex
+	var steps []string
+	record := func(step string) {
+		mu.Lock()
+		defer mu.Unlock()
+		steps = append(steps, step)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = execute(ctx, cfg, deps{
+		openDB: func(c config.Database, tz string) (*gorm.DB, *sql.DB, error) {
+			record("open")
+			return openMock(c, tz)
+		},
+		listener: inner,
+		migrate:  func(context.Context) error { record("migrate"); return nil },
+		routes: func(e *gin.Engine) {
+			record("routes")
+			e.GET("/stop", func(c *gin.Context) { record("serve"); cancel(); c.Status(http.StatusNoContent) })
+			go func() {
+				for i := 0; i < 100; i++ {
+					time.Sleep(20 * time.Millisecond)
+					if resp, err := noKeepAlive.Get("http://" + inner.Addr().String() + "/stop"); err == nil {
+						_ = resp.Body.Close()
+						return
+					}
+				}
+			}()
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got, want := strings.Join(steps, ","), "open,migrate,routes,serve"; got != want {
+		t.Fatalf("startup order = %s, want %s", got, want)
+	}
+}
+
+func TestMigrationFailureBuildsNoRoutes(t *testing.T) {
+	cfg := testConfig()
+	cfg.Migrate.Run = true
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	built := false
+	err := execute(context.Background(), cfg, deps{
+		openDB:  open,
+		migrate: func(context.Context) error { return errors.New("boom") },
+		routes:  func(*gin.Engine) { built = true },
+	})
+	if err == nil {
+		t.Fatal("execute succeeded although the migration failed")
+	}
+	if built {
+		t.Fatal("routes were built although the migration failed")
 	}
 }
 

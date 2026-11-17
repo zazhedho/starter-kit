@@ -16,7 +16,17 @@ import (
 	"github.com/spf13/viper"
 )
 
-func GetAppConf(key string, def any, rdbCache *redis.Client) any {
+// LoadRemote applies the optional remote or file configuration: Consul when
+// CONSUL is set, otherwise the file named by APP_CONFIG (or config/<APP_ENV>.env).
+// Whatever it finds is exported to the process environment unless CONFIG_ID
+// shows the same version was already applied; FromEnv then reads the result.
+// A missing source is logged and ignored. Call it once, before FromEnv.
+func LoadRemote() {
+	confID := getAppConf("CONFIG_ID", "", nil)
+	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %v", confID))
+}
+
+func getAppConf(key string, def any, rdbCache *redis.Client) any {
 	cacheKey := authutil.RedisAppConf
 	var appConf map[string]string
 	var cache, getNewConfig bool

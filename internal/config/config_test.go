@@ -18,7 +18,7 @@ var managedEnv = []string{
 	"REDIS_URL", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
 	"RUN_MIGRATION", "PATH_MIGRATE",
 	"LOCATION_SERVICE_BASE_URL", "LOCATION_SOURCE_YEAR", "LOCATION_SERVICE_TIMEOUT_SECONDS", "LOCATION_CACHE_TTL",
-	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SUBJECT", "RESET_SUBJECT",
+	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SUBJECT", "RESET_SUBJECT", "AUTH_EMAIL_APP_NAME",
 	"MEDIA_ENABLED", "MEDIA_MAX_FILE_SIZE_MB", "MEDIA_ALLOWED_CONTENT_TYPES", "MEDIA_UPLOAD_RATE_LIMIT",
 	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT",
 	"STORAGE_PROVIDER", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME",
@@ -117,7 +117,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Redis.Port != "6379" || cfg.Redis.DB != 0 {
 		t.Fatalf("Redis = %+v", cfg.Redis)
 	}
-	if cfg.SMTPConfigured {
+	if cfg.SMTP.Configured() {
 		t.Fatal("SMTP must not be configured by default")
 	}
 	if err := cfg.Validate(); err != nil {
@@ -166,7 +166,7 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if cfg.Location.ServiceTimeout != 7*time.Second || cfg.Location.CacheTTL != 24*time.Hour || cfg.Location.SourceYear != "2024" {
 		t.Fatalf("Location = %+v", cfg.Location)
 	}
-	if !cfg.SMTPConfigured {
+	if !cfg.SMTP.Configured() {
 		t.Fatal("SMTP must be configured when host, pass and from are set")
 	}
 	if err := cfg.Validate(); err != nil {
@@ -188,12 +188,52 @@ func TestFromEnvKeepsLegacySecondsForms(t *testing.T) {
 	}
 }
 
+func TestFromEnvReadsSMTP(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	//nolint:gosec // G101: fixture values, not real credentials
+	for k, v := range map[string]string{
+		"SMTP_HOST": "smtp.example.com", "SMTP_PORT": "2525", "SMTP_USER": "mailer",
+		"SMTP_PASS": "smtp-PASS-SECRET", "SMTP_FROM": "Team <a@example.com>",
+		"SMTP_SUBJECT": "Your code", "RESET_SUBJECT": "Reset it", "AUTH_EMAIL_APP_NAME": "Starter",
+	} {
+		t.Setenv(k, v)
+	}
+	cfg := FromEnv()
+	//nolint:gosec // G101: fixture values, not real credentials
+	want := SMTP{
+		Host: "smtp.example.com", Port: 2525, User: "mailer", Password: "smtp-PASS-SECRET",
+		From: "Team <a@example.com>", OTPSubject: "Your code", ResetSubject: "Reset it", AppName: "Starter",
+	}
+	if cfg.SMTP != want {
+		t.Fatalf("SMTP = %+v, want %+v", cfg.SMTP, want)
+	}
+	if !cfg.SMTP.Configured() {
+		t.Fatal("SMTP must be configured")
+	}
+	out := fmt.Sprintf("%v %+v %#v %s %v %+v %#v", cfg, cfg, cfg, cfg, cfg.SMTP, cfg.SMTP, cfg.SMTP)
+	if strings.Contains(out, "smtp-PASS-SECRET") {
+		t.Fatalf("output leaks the SMTP password: %s", out)
+	}
+	if !strings.Contains(out, "smtp.example.com") {
+		t.Fatalf("output lacks the SMTP host: %s", out)
+	}
+}
+
+func TestSMTPDefaultsAreEmptySoTheSenderAppliesItsOwn(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	if got := FromEnv().SMTP; got != (SMTP{}) {
+		t.Fatalf("SMTP = %+v, want the zero value when nothing is set", got)
+	}
+}
+
 func TestSMTPConfiguredNeedsHostPassAndFrom(t *testing.T) {
 	clearEnv(t)
 	setRequiredEnv(t)
 	t.Setenv("SMTP_HOST", "smtp.example.com")
 	t.Setenv("SMTP_FROM", "a@example.com")
-	if FromEnv().SMTPConfigured {
+	if FromEnv().SMTP.Configured() {
 		t.Fatal("host and from without pass must not count as configured")
 	}
 }
