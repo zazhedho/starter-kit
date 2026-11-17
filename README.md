@@ -102,7 +102,7 @@ starter-kit/
 │   └── services/
 ├── migrations/
 ├── pkg/
-└── main.go
+└── cmd/api/main.go
 ```
 
 Pattern for each module:

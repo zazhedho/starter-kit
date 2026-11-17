@@ -13,9 +13,6 @@ func TestNoEnvReadsOutsideConfig(t *testing.T) {
 	root := filepath.Join("..", "..")
 	allowed := map[string]bool{
 		filepath.Join("pkg", "config", "app_conf.go"): true,
-		// Until the startup rewrite replaces them.
-		filepath.Join("internal", "app", "app.go"):   true,
-		filepath.Join("pkg", "config", "startup.go"): true,
 	}
 	banned := []string{"GetEnv(", "DurationFromEnv(", "os.Getenv(", "os.LookupEnv("}
 

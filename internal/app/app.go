@@ -1,156 +1,271 @@
-// Package app holds the service startup sequence shared by every entrypoint.
+// Package app owns the service lifecycle. Run loads and validates the
+// configuration, then New opens the connections, Migrate updates the schema,
+// Serve handles requests until the context ends, and Close releases
+// everything. Every failure is returned as an error; only cmd/api decides to
+// exit the process.
 package app
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"net"
+	"net/http"
 	"os"
-	"strings"
+	"sync"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Register the PostgreSQL migration driver.
-	_ "github.com/golang-migrate/migrate/v4/source/file"       // Register the file-based migration source.
-	"github.com/joho/godotenv"
+	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/authkit/mailer"
-	"github.com/zazhedho/gokit/utils"
 	"github.com/zazhedho/logus"
+	"gorm.io/gorm"
 
 	"starter-kit/infrastructure/database"
-	appconfig "starter-kit/internal/config"
+	"starter-kit/internal/config"
 	"starter-kit/internal/router"
-	"starter-kit/pkg/config"
+	appconfig "starter-kit/pkg/config"
 )
 
-func FailOnError(err error, msg string) {
-	if err != nil {
-		log.Fatalf("%s: %s", msg, err)
-	}
+// App holds the open connections and the HTTP server of one running service.
+type App struct {
+	cfg    config.Config
+	db     *gorm.DB
+	sqlDB  *sql.DB
+	redis  *redis.Client
+	kit    *authkit.Kit
+	engine *gin.Engine
+	server *http.Server
+
+	listener net.Listener                    // nil: Serve listens on server.Addr
+	migrate  func(ctx context.Context) error // replaces the real migrations in tests
+
+	closeMu sync.Mutex
+	closed  bool
 }
 
-// Run loads configuration, connects dependencies, migrates when asked, mounts
-// all routes, and serves until the process exits.
-func Run() {
-	var (
-		err        error
-		runMigrate bool
-	)
-	if timeZone, err := time.LoadLocation("Asia/Jakarta"); err != nil {
-		logus.WriteLog(logus.LogLevelError, "time.LoadLocation - Error: "+err.Error())
-	} else {
-		time.Local = timeZone
+// deps lets tests replace the pieces that need a real database or a fixed
+// port. The zero value is production behavior.
+type deps struct {
+	openDB   func(config.Database, string) (*gorm.DB, *sql.DB, error)
+	listener net.Listener
+	routes   func(*gin.Engine)
+	migrate  func(ctx context.Context) error
+}
+
+// Run is the whole program: it loads configuration, builds the App, migrates
+// when asked, and serves until ctx is canceled. args are the command-line
+// arguments without the program name.
+func Run(ctx context.Context, args []string) error {
+	return run(ctx, args, deps{})
+}
+
+func run(ctx context.Context, args []string, d deps) error {
+	if err := setServerIPEnv(); err != nil {
+		return err
 	}
 
-	if err = godotenv.Load(".env"); err != nil && os.Getenv("APP_ENV") == "" {
-		log.Fatalf("Error app environment")
+	cfg, err := loadConfig(args)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil // usage has been printed
 	}
-
-	myAddr := "unknown"
-	addrs, _ := net.InterfaceAddrs()
-	for _, address := range addrs {
-		if ipNet, ok := address.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ipNet.IP.To4() != nil {
-				myAddr = ipNet.IP.String()
-				break
-			}
-		}
+	if err != nil {
+		return err
 	}
+	logus.WriteLog(logus.LogLevelInfo, "APP: "+cfg.App.Name+"; PORT: "+cfg.App.Port)
 
-	myAddr += strings.Repeat(" ", 15-len(myAddr))
-	FailOnError(os.Setenv("ServerIP", myAddr), "Failed to set server IP")
-	logus.WriteLog(logus.LogLevelInfo, "Server IP: "+myAddr)
+	return execute(ctx, cfg, d)
+}
 
-	var port, appName string
-	flag.StringVar(&port, "port", os.Getenv("PORT"), "port of the service")
-	flag.StringVar(&appName, "appname", os.Getenv("APP_NAME"), "service name")
-	flag.BoolVar(&runMigrate, "migrate", utils.GetEnv("RUN_MIGRATION", true), "run database migration before starting server")
-	flag.Parse()
-	logus.WriteLog(logus.LogLevelInfo, "APP: "+appName+"; PORT: "+port)
-
-	confID := config.GetAppConf("CONFIG_ID", "", nil)
-	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %s", confID))
-	FailOnError(config.ValidateStartupConfig(port), "Invalid app configuration")
-
-	cfg := appconfig.FromEnv()
-
-	// Redis for session management is optional.
-	var redisClient *redis.Client
-	if cfg.Redis.Configured() {
-		redisClient, err = database.OpenRedis(context.Background(), cfg.Redis)
-		if err != nil {
-			redisClient = nil
-			logus.WriteLog(logus.LogLevelDebug, "Redis not available, session management will be disabled")
-		} else {
-			defer func() {
-				if closeErr := redisClient.Close(); closeErr != nil {
-					logus.WriteLog(logus.LogLevelError, "Failed to close redis connection: "+closeErr.Error())
-				}
-			}()
-			logus.WriteLog(logus.LogLevelInfo, "Redis initialized, session management enabled")
-		}
+// loadConfig applies the sources in their fixed order: .env (never overriding
+// the environment), Consul or the config file, the environment, command-line
+// flags, then validation.
+func loadConfig(args []string) (config.Config, error) {
+	if err := config.LoadDotEnv(".env"); err != nil {
+		return config.Config{}, fmt.Errorf("load environment: %w", err)
 	}
+	confID := appconfig.GetAppConf("CONFIG_ID", "", nil)
+	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %v", confID))
 
-	db, sqlDb, err := database.Open(cfg.Database, cfg.App.Timezone)
-	FailOnError(err, "Failed to open db")
+	cfg := config.FromEnv()
+	if err := applyFlags(&cfg, args); err != nil {
+		return config.Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return config.Config{}, fmt.Errorf("invalid configuration: %w", err)
+	}
+	return cfg, nil
+}
+
+// applyFlags parses args on a private FlagSet, so Run can be called more than
+// once and from tests. Flag defaults are the values already in cfg.
+func applyFlags(cfg *config.Config, args []string) error {
+	fs := flag.NewFlagSet("api", flag.ContinueOnError)
+	fs.StringVar(&cfg.App.Port, "port", cfg.App.Port, "port of the service")
+	fs.StringVar(&cfg.App.Name, "appname", cfg.App.Name, "service name")
+	fs.BoolVar(&cfg.Migrate.Run, "migrate", cfg.Migrate.Run, "run database migration before starting server")
+	fs.BoolVar(&cfg.Migrate.Only, "migrate-only", false, "run database migration, then exit without serving")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	return nil
+}
+
+// execute builds the App from a validated config and runs the requested mode.
+// The App is closed on every path.
+func execute(ctx context.Context, cfg config.Config, d deps) (err error) {
+	a, err := newApp(ctx, cfg, d)
+	if err != nil {
+		return err
+	}
 	defer func() {
-		if closeErr := sqlDb.Close(); closeErr != nil {
-			logus.WriteLog(logus.LogLevelError, "Failed to close database connection: "+closeErr.Error())
+		if closeErr := a.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
 		}
 	}()
 
-	authCfg := authkit.ConfigFromEnv()
-	authCfg.DB = db
-	if redisClient != nil {
-		authCfg.Redis = redisClient
-		// The mailer is only useful with Redis (OTP and password reset need it).
-		if sender, mailErr := mailer.NewBrevoSenderFromEnv(); mailErr != nil {
-			logus.WriteLog(logus.LogLevelWarn, "Email sender not configured: ", mailErr)
-		} else {
-			authCfg.Mailer = sender
+	if cfg.Migrate.Run || cfg.Migrate.Only {
+		if err := a.Migrate(ctx); err != nil {
+			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	kit, err := authkit.New(authCfg)
-	FailOnError(err, "Failed to initialize authkit")
-
-	if runMigrate {
-		// authkit tables first: project migrations may reference users and roles.
-		FailOnError(kit.Migrate(context.Background()), "Failed to migrate core tables")
-		runMigration()
+	if cfg.Migrate.Only {
+		logus.WriteLog(logus.LogLevelInfo, "Migration finished; not serving (migrate-only)")
+		return nil
 	}
-
-	engine, err := router.New(router.Deps{Config: cfg, DB: db, SQLDB: sqlDb, Redis: redisClient, Kit: kit})
-	FailOnError(err, "Failed to initialize routes")
-
-	logus.WriteLog(logus.LogLevelInfo, "All routes registered successfully")
-
-	err = engine.Run(fmt.Sprintf(":%s", port))
-	FailOnError(err, "Failed run service")
+	return a.Serve(ctx)
 }
 
-func runMigration() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
-			utils.GetEnv("DB_USERNAME", ""),
-			utils.GetEnv("DB_PASS", ""),
-			utils.GetEnv("DB_HOST", ""),
-			utils.GetEnv("DB_PORT", ""),
-			utils.GetEnv("DB_NAME", ""),
-			utils.GetEnv("DB_SSLMODE", "disable"))
-	}
+// New opens the database, and Redis when configured, builds authkit and the
+// routes, and prepares the HTTP server. If any step fails, everything already
+// opened is closed and the error is returned.
+func New(ctx context.Context, cfg config.Config) (*App, error) {
+	return newApp(ctx, cfg, deps{})
+}
 
-	m, err := migrate.New(utils.GetEnv("PATH_MIGRATE", "file://migrations"), dsn)
+func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
+	loc, err := time.LoadLocation(cfg.App.Timezone)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("load time zone: %w", err)
+	}
+	// A process-wide setting: write it only when it changes, so a second App
+	// in the same process (tests) does not race with readers of time.Local.
+	if loc.String() != time.Local.String() {
+		time.Local = loc
 	}
 
-	if err := m.Up(); err != nil && err.Error() != "no change" {
-		log.Fatal(err)
+	openDB := d.openDB
+	if openDB == nil {
+		openDB = database.Open
 	}
-	logus.WriteLog(logus.LogLevelInfo, "Migration Success")
+
+	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate}
+	if a.db, a.sqlDB, err = openDB(cfg.Database, cfg.App.Timezone); err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	// From here on, a failure must release what is open.
+	fail := func(err error) (*App, error) {
+		if closeErr := a.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+		return nil, err
+	}
+
+	// Redis is optional: not configured means no connection attempt, and
+	// configured but unreachable is a startup failure.
+	if cfg.Redis.Configured() {
+		if a.redis, err = database.OpenRedis(ctx, cfg.Redis); err != nil {
+			return fail(fmt.Errorf("open redis: %w", err))
+		}
+		logus.WriteLog(logus.LogLevelInfo, "Redis initialized, session management enabled")
+	}
+
+	authCfg := cfg.Auth
+	authCfg.DB = a.db
+	if a.redis != nil {
+		authCfg.Redis = a.redis
+		// The mailer is only useful with Redis (OTP and password reset need it).
+		if cfg.SMTPConfigured {
+			if sender, mailErr := mailer.NewBrevoSenderFromEnv(); mailErr != nil {
+				logus.WriteLog(logus.LogLevelWarn, "Email sender not configured: ", mailErr)
+			} else {
+				authCfg.Mailer = sender
+			}
+		}
+	}
+	if a.kit, err = authkit.New(authCfg); err != nil {
+		return fail(fmt.Errorf("initialize authkit: %w", err))
+	}
+
+	if a.engine, err = router.New(router.Deps{Config: cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit}); err != nil {
+		return fail(fmt.Errorf("initialize routes: %w", err))
+	}
+	if d.routes != nil {
+		d.routes(a.engine)
+	}
+	logus.WriteLog(logus.LogLevelInfo, "All routes registered successfully")
+
+	a.server = &http.Server{
+		Addr:              ":" + cfg.App.Port,
+		Handler:           a.engine,
+		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
+		ReadTimeout:       cfg.HTTP.ReadTimeout,
+		WriteTimeout:      cfg.HTTP.WriteTimeout,
+		IdleTimeout:       cfg.HTTP.IdleTimeout,
+	}
+	return a, nil
+}
+
+// Handler returns the HTTP handler with every route mounted.
+func (a *App) Handler() http.Handler { return a.engine }
+
+// Close closes Redis, then the database. It is safe to call more than once;
+// only the first call does anything and reports errors.
+func (a *App) Close() error {
+	a.closeMu.Lock()
+	defer a.closeMu.Unlock()
+	if a.closed {
+		return nil
+	}
+	a.closed = true
+
+	var errs []error
+	if a.redis != nil {
+		if err := a.redis.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close redis: %w", err))
+		}
+	}
+	if a.sqlDB != nil {
+		if err := a.sqlDB.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close database: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// setServerIPEnv publishes the host's first non-loopback IPv4 address as
+// ServerIP, which the logger adds to every line. It is the only place outside
+// internal/config that writes the environment.
+func setServerIPEnv() error {
+	addr := "unknown"
+	addrs, _ := net.InterfaceAddrs()
+	for _, address := range addrs {
+		if ipNet, ok := address.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			addr = ipNet.IP.String()
+			break
+		}
+	}
+	addr = fmt.Sprintf("%-15s", addr)
+	if err := os.Setenv("ServerIP", addr); err != nil {
+		return fmt.Errorf("set server IP: %w", err)
+	}
+	logus.WriteLog(logus.LogLevelInfo, "Server IP: "+addr)
+	return nil
 }
