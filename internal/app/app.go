@@ -15,6 +15,9 @@ package app
 //     routes through router.Deps in internal/router/router.go.
 //   - A new module: write a registrar in internal/router (see location.go)
 //     and add one entry to apiRegistrars (or rootRegistrars) in router.go.
+//     Also add the new routes to the expected list in
+//     internal/router/routes_test.go (ownRoutesWithoutMedia), or the route
+//     table test fails.
 
 import (
 	"context"

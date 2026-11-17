@@ -41,7 +41,9 @@ var rootRegistrars = []registrar{
 	{"health", registerHealth},
 }
 
-// apiRegistrars are mounted under /api, after authkit's own routes.
+// apiRegistrars are mounted under /api, after authkit's own routes. A new
+// module's routes must also be added to the expected list in routes_test.go
+// (ownRoutesWithoutMedia), or TestRouteTable fails.
 var apiRegistrars = []registrar{
 	{"location", registerLocation},
 	{"media", registerMedia},

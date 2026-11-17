@@ -206,14 +206,18 @@ A request whose declared `Content-Length` exceeds `HTTP_MAX_BODY_MB` is answered
 
 ### Database connection
 
-The connection is made with pgx. With the `DB_*` parts the session time zone is `APP_TIMEZONE`; with `DATABASE_URL` it is `APP_TIMEZONE` too, unless the URL sets its own (`?timezone=...`), which then wins.
+The connection is made with pgx. With the `DB_*` parts the session time zone is always `APP_TIMEZONE`, even if the process environment sets `PGTZ`; with `DATABASE_URL` it is `APP_TIMEZONE` too, unless the URL itself sets its own (`?timezone=...`), which then wins.
+
+`DB_SSLMODE` defaults to `disable` and must be one of `disable`, `allow`, `prefer`, `require`, `verify-ca`, or `verify-full`. Use `require` or stricter outside local development.
+
+After startup, SQL errors and slow queries (200ms or more) are logged at warn level through the service logger. The log shows the SQL with its placeholders (`$1`, `$2`) and never the parameter values; a query that finds no row is not logged.
 
 A failed connection is reported without the driver's text, which can quote the connection string, and without any credential. The message names the kind of problem, so a configuration error can be told from a network one:
 
 | Message | Meaning |
 |---|---|
 | `connect to database: invalid configuration` | `DATABASE_URL` or the `DB_*` parts cannot be parsed |
-| `connect to database: authentication failed` | the server answered and refused the user or password |
+| `connect to database: authentication failed` | the server answered and refused the user, the password, or the host (host-access rules also produce this) |
 | `connect to database: server rejected the connection parameters` | the server answered and refused something else, such as an unknown database |
 | `connect to database: connection refused` | nothing is listening at that host and port |
 | `connect to database: timed out` | the host did not answer in time |
@@ -702,7 +706,19 @@ If the module needs settings, add them to `internal/config`, never read the envi
 
 4. document the variable, with its default as a comment, in `.env.example`, and use it from the registrar as `d.Config.Projects.PageSize`.
 
-### 9. Check it
+### 9. Add the routes to the route-table test
+
+`internal/router/routes_test.go` lists this service's own routes by hand, in the variables `ownRoutesWithoutMedia` (and `mediaRoutes` for the media routes). A new module's routes make `TestRouteTable` fail until they are added there, so add them on purpose:
+
+```go
+ownRoutesWithoutMedia = []string{
+	// ...existing routes...
+	"GET /api/projects",
+	"POST /api/projects",
+}
+```
+
+### 10. Check it
 
 ```bash
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint

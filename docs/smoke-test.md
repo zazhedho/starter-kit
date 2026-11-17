@@ -1,7 +1,11 @@
 # Smoke test
 
-Smoke test of starter-kit (branch `feat/app-bootstrap`, commit `dc9cf41`) against a real, throwaway
-PostgreSQL, run on 2026-11-17 after the fix wave. It repeats the 31 checks of the previous run (empty
+Smoke test of starter-kit (branch `feat/app-bootstrap`) against a real, throwaway PostgreSQL, run on
+2026-11-17 after the fix wave. The run was made on the code at `dc9cf41`; later commits changed
+documentation, validation rules (`DB_SSLMODE`, `APP_TIMEZONE`), and the database logger only (plus the
+session time zone selection on the `DB_*` path), and were checked by their own tests, not by this run.
+
+The run repeats the 31 checks of the previous run (empty
 database `fresh`, "legacy" database `legacy`, the new startup flow, the "Adding a module" recipe) and
 adds the checks for the fixes. This time the database is configured through the `DB_*` variables
 everywhere; `DATABASE_URL` is a separate check (1b, 1c).
