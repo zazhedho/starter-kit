@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -41,10 +43,26 @@ func OpenRedis(ctx context.Context, cfg config.Redis) (*redis.Client, error) {
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
 		_ = client.Close()
-		logus.WriteLog(logus.LogLevelError, "OpenRedis; ping failed: "+redacted(err, cfg.Password).Error())
-		return nil, redacted(err, cfg.Password)
+		return nil, failed("ping redis: "+classifyRedis(err), "OpenRedis; ")
 	}
 
 	logus.WriteLog(logus.LogLevelInfo, "OpenRedis; connected to Redis at "+client.Options().Addr)
 	return client, nil
+}
+
+// classifyRedis names the kind of failure without using the client's text,
+// which can quote addresses and credentials.
+func classifyRedis(err error) string {
+	var netErr net.Error
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "WRONGPASS") || strings.HasPrefix(msg, "NOAUTH") || strings.Contains(msg, "AUTH"):
+		return "authentication failed"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):
+		return "timed out"
+	default:
+		return "unavailable"
+	}
 }

@@ -55,13 +55,27 @@ type Database struct {
 }
 
 // DSN returns DATABASE_URL when set, otherwise a key=value DSN for gorm/pgx.
+// Every value is single-quoted with \ and ' escaped, so a space, quote or
+// backslash in a user name or password neither breaks the DSN nor splits it
+// into pieces that an error message could echo.
 func (d Database) DSN(timezone string) string {
 	if d.URL != "" {
 		return d.URL
 	}
-	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		d.Host, d.Port, d.Username, d.Password, d.Name, d.SSLMode, timezone)
+	var b strings.Builder
+	for i, kv := range [][2]string{
+		{"host", d.Host}, {"port", d.Port}, {"user", d.Username}, {"password", d.Password},
+		{"dbname", d.Name}, {"sslmode", d.SSLMode}, {"TimeZone", timezone},
+	} {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(kv[0] + "='" + dsnEscaper.Replace(kv[1]) + "'")
+	}
+	return b.String()
 }
+
+var dsnEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 
 // String redacts the URL and the password.
 func (d Database) String() string {

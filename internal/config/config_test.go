@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"os"
 	"strings"
 	"testing"
@@ -472,9 +473,23 @@ func TestDatabaseDSN(t *testing.T) {
 
 	parts := Database{Host: "localhost", Port: "5432", Username: "starter", Password: "pw", Name: "app", SSLMode: "disable"}
 	dsn := parts.DSN("Asia/Jakarta")
-	for _, want := range []string{"host=localhost", "port=5432", "user=starter", "dbname=app", "sslmode=disable", "TimeZone=Asia/Jakarta"} {
+	for _, want := range []string{"host='localhost'", "port='5432'", "user='starter'", "dbname='app'", "sslmode='disable'", "TimeZone='Asia/Jakarta'"} {
 		if !strings.Contains(dsn, want) {
 			t.Fatalf("expected %q in DSN %q", want, dsn)
+		}
+	}
+}
+
+func TestDatabaseDSNRoundTripsAwkwardValues(t *testing.T) {
+	for _, password := range []string{"plain", "p ass", "p'ass", `p\ass`, "p@ss:word/x?y=z#w", `a b'c\d`} {
+		d := Database{Host: "db.internal", Port: "5433", Username: "us er", Password: password, Name: "my db", SSLMode: "disable"}
+		cfg, err := pgconn.ParseConfig(d.DSN("Asia/Jakarta"))
+		if err != nil {
+			t.Fatalf("password %q: DSN does not parse: %v", password, err)
+		}
+		if cfg.Password != password || cfg.User != "us er" || cfg.Host != "db.internal" ||
+			cfg.Port != 5433 || cfg.Database != "my db" || cfg.RuntimeParams["TimeZone"] != "Asia/Jakarta" {
+			t.Errorf("password %q: parsed back as %+v", password, cfg)
 		}
 	}
 }

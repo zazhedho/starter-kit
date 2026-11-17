@@ -64,25 +64,45 @@ func captureOutput(t *testing.T) (stop func() string) {
 	return stop
 }
 
-func TestOpenErrorDoesNotLeakDSN(t *testing.T) {
-	stop := captureOutput(t)
-	cfg := config.Database{
-		Host: "127.0.0.1", Port: "1", Username: "starter", Password: "p@ss-SECRET",
-		Name: "app", SSLMode: "disable", MaxOpenConns: 1, MaxIdleConns: 1,
-	}
-	db, sqlDB, err := Open(cfg, "Asia/Jakarta")
-	output := stop()
-	if err == nil {
-		if sqlDB != nil {
-			_ = sqlDB.Close()
+// TestOpenErrorDoesNotLeakCredentials uses inputs that make the driver echo
+// part of the DSN in its own error text (a refused connection never does).
+func TestOpenErrorDoesNotLeakCredentials(t *testing.T) {
+	parts := func(password string) config.Database {
+		return config.Database{
+			Host: "127.0.0.1", Port: "1", Username: "starter", Password: password,
+			Name: "app", SSLMode: "disable", MaxOpenConns: 1, MaxIdleConns: 1,
 		}
-		t.Fatalf("expected connection error, db=%v", db)
 	}
-	dsn := cfg.DSN("Asia/Jakarta")
-	for name, text := range map[string]string{"error": err.Error(), "output": output} {
-		if strings.Contains(text, "p@ss-SECRET") || strings.Contains(text, dsn) {
-			t.Fatalf("%s leaks the password or DSN: %q", name, text)
-		}
+	//nolint:gosec // G101: fixture values, not real credentials
+	cases := map[string]config.Database{
+		"space":     parts("p ass-SECRET"),
+		"quote":     parts("p'ass-SECRET"),
+		"backslash": parts(`p\ass-SECRET`),
+		"at-colon":  parts("p@ss:/-SECRET"),
+		"malformed url": {
+			URL: "postgres://u:p%ZZ-SECRET@127.0.0.1:1/db", MaxOpenConns: 1,
+		},
+		"url refused": {
+			URL: "postgres://u:p-SECRET@127.0.0.1:1/db?sslmode=disable", MaxOpenConns: 1,
+		},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			stop := captureOutput(t)
+			_, sqlDB, err := Open(cfg, "Asia/Jakarta")
+			output := stop()
+			if err == nil {
+				if sqlDB != nil {
+					_ = sqlDB.Close()
+				}
+				t.Fatal("expected an error")
+			}
+			for what, text := range map[string]string{"error": err.Error(), "output": output} {
+				if strings.Contains(text, "SECRET") {
+					t.Errorf("%s leaks the password: %q", what, text)
+				}
+			}
+		})
 	}
 }
 
