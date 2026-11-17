@@ -93,7 +93,7 @@ starter-kit/
 ├── cmd/api/                 # main(): signal handling, exit code (nothing else)
 ├── internal/
 │   ├── app/                 # lifecycle: Run, New, Migrate, Serve, Close
-│   ├── config/              # typed Config: FromEnv, Validate, LoadDotEnv
+│   ├── config/              # the one config package: Config, FromEnv, Validate, LoadDotEnv, LoadRemote (Consul/file)
 │   ├── router/              # gin engine, global middleware, one register<Module> per module
 │   ├── domain/              # entities and domain errors
 │   ├── dto/
@@ -101,12 +101,13 @@ starter-kit/
 │   ├── repositories/
 │   ├── services/
 │   ├── handlers/http/
-│   └── cache/
+│   ├── cache/
+│   └── testutil/            # test helpers (log capture)
 ├── infrastructure/
 │   ├── database/            # PostgreSQL pool, Redis client
 │   └── media/               # object storage provider setup
 ├── migrations/              # this project's own migrations (start at 000005)
-├── pkg/                     # config source (Consul/file) and storage providers
+├── pkg/storage/             # object storage providers (MinIO, Cloudflare R2)
 ├── Dockerfile
 └── entrypoint.sh
 ```
@@ -128,34 +129,37 @@ Rules that keep the structure uniform:
 ```text
 cmd/api/main.go
   signal.NotifyContext(SIGINT, SIGTERM)
-  app.Run(ctx, os.Args[1:])                 any error -> log, exit code 1
+  app.Run(ctx, os.Args[1:])                 any error -> log "service exited with error: ...", exit code 1
     |
     |- 1. load configuration (internal/app.loadConfig), in this order:
     |      a. .env            godotenv, never overrides variables that are already set;
     |                         a missing file is an error only when APP_ENV is not set
-    |      b. CONFIG_ID       Consul or config file (pkg/config.GetAppConf) fills the environment
-    |      c. environment     config.FromEnv() builds the typed Config
+    |      b. CONFIG_ID       config.LoadRemote(): Consul or config file fills the environment
+    |      c. environment     config.FromEnv() builds the typed Config (database, Redis, SMTP, ...)
     |      d. flags           -port, -appname, -migrate, -migrate-only
     |      e. Validate()      every problem reported at once, naming variables, never values
     |
-    |- 2. build the App (internal/app.New); a failure closes whatever is already open
+    |- 2. open the dependencies (internal/app.New); a failure closes whatever is already open
     |      a. load APP_TIMEZONE
-    |      b. open PostgreSQL and apply the pool limits
+    |      b. open PostgreSQL (session time zone = APP_TIMEZONE) and apply the pool limits
     |      c. open Redis, only if REDIS_URL or REDIS_HOST is set (PING must succeed)
     |      d. open object storage, only if MEDIA_ENABLED=true
-    |      e. authkit.New, then router.New (middleware, /healthcheck, /readyz, authkit, modules)
-    |      f. http.Server with the HTTP_* timeouts
+    |      e. authkit.New; the mailer is built from the SMTP section of Config and handed
+    |         over only when Redis is open and SMTP_HOST, SMTP_PASS and SMTP_FROM are all set
     |
     |- 3. migrate, when -migrate is on (RUN_MIGRATION, default true) or -migrate-only:
     |      authkit migrations first, then this project's migrations
-    |      -migrate-only stops here with exit code 0, without opening a port
+    |      -migrate-only stops here with exit code 0: no routes are built, no port is opened
     |
-    `- 4. serve until SIGINT/SIGTERM, then shut down gracefully
+    |- 4. build the routes (router.New: middleware, /healthcheck, /readyz, authkit, modules)
+    |      and the http.Server with the HTTP_* timeouts
+    |
+    `- 5. serve until SIGINT/SIGTERM, then shut down gracefully
            stop accepting connections, wait up to HTTP_SHUTDOWN_TIMEOUT for running
            requests, close Redis, close the database
 ```
 
-Because the routes are built before the migrations run, the very first start against an empty database logs one `WARN failed to mark interrupted location sync jobs: ... location_sync_jobs does not exist`. It is harmless; the next start is quiet.
+The routes are built after the migrations because some modules read their tables when they are registered (the location service marks sync jobs that were interrupted by a previous run), so the first start against an empty database is as quiet as every other start.
 
 ## Environment
 
@@ -165,7 +169,7 @@ Minimum required variables:
 - `APP_NAME` (unique per application; authkit binds tokens to it)
 - `APP_ENV`
 - `PORT` (no default)
-- `DATABASE_URL`, or these database parts when `DATABASE_URL` is empty:
+- `DATABASE_URL` (used as it is), or these database parts when `DATABASE_URL` is empty (values may contain spaces, quotes, backslashes, `@`, `:` and `/`):
   - `DB_HOST`
   - `DB_PORT`
   - `DB_USERNAME`
@@ -200,6 +204,21 @@ Durations use Go syntax (`30s`, `2m`, `1h`). Every duration must be greater than
 
 A request whose declared `Content-Length` exceeds `HTTP_MAX_BODY_MB` is answered with `413`. A body without a declared length is cut off at the limit while it is read, and the handler answers (most JSON handlers with `400`, the media handler with `413`).
 
+### Database connection
+
+The connection is made with pgx. With the `DB_*` parts the session time zone is `APP_TIMEZONE`; with `DATABASE_URL` it is `APP_TIMEZONE` too, unless the URL sets its own (`?timezone=...`), which then wins.
+
+A failed connection is reported without the driver's text, which can quote the connection string, and without any credential. The message names the kind of problem, so a configuration error can be told from a network one:
+
+| Message | Meaning |
+|---|---|
+| `connect to database: invalid configuration` | `DATABASE_URL` or the `DB_*` parts cannot be parsed |
+| `connect to database: authentication failed` | the server answered and refused the user or password |
+| `connect to database: server rejected the connection parameters` | the server answered and refused something else, such as an unknown database |
+| `connect to database: connection refused` | nothing is listening at that host and port |
+| `connect to database: timed out` | the host did not answer in time |
+| `connect to database: unreachable` | any other failure to reach the server (for example an unknown host name) |
+
 ### Redis
 
 Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is not empty (`REDIS_PORT` defaults to `6379`; `REDIS_PASSWORD` and `REDIS_DB` are optional).
@@ -218,7 +237,7 @@ Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is n
 - `MEDIA_MAX_FILE_SIZE_MB` controls maximum file size (default `5`). `MEDIA_ALLOWED_CONTENT_TYPES` controls accepted MIME types after server-side byte sniffing; client extensions and `Content-Type` headers are not trusted.
 - Media upload rate limiting uses Redis when available. Configure `MEDIA_UPLOAD_RATE_LIMIT` and `MEDIA_UPLOAD_RATE_WINDOW_SECONDS`; without Redis it degrades safely to no distributed rate limit.
 - `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
-- SMTP settings for register OTP and password reset email flows. These stay optional; when SMTP connection env is set, `SMTP_HOST`, `SMTP_PASS`, `SMTP_FROM`, and `SMTP_PORT` format are validated. The mailer is only created when Redis is configured too.
+- SMTP settings for register OTP and password reset email flows, read into the `SMTP` section of `Config`: `SMTP_HOST`, `SMTP_PORT` (default `587`), `SMTP_USER` (default `apikey`), `SMTP_PASS`, `SMTP_FROM`, `SMTP_SUBJECT`, `RESET_SUBJECT`, `AUTH_EMAIL_APP_NAME`. These stay optional; as soon as one of `SMTP_HOST`, `SMTP_PASS` or `SMTP_FROM` is set, all three are required and `SMTP_PORT` and `SMTP_FROM` are validated. The mailer is only passed to authkit when Redis is configured too; if it cannot be built, the service logs a warning and continues without it. The password never appears in `String`/`%+v` output of the configuration.
 
 ## Run Locally
 
@@ -247,7 +266,8 @@ Flags (all optional; the environment supplies the defaults):
 | Code | When |
 |---|---|
 | `0` | clean shutdown after SIGINT/SIGTERM; `-migrate-only` finished; `-h` |
-| `1` | invalid configuration, unreachable database, or Redis configured but unreachable; migration failure; listen/serve error; running requests still open when `HTTP_SHUTDOWN_TIMEOUT` ran out |
+| `1` | invalid configuration, unreachable database, or Redis configured but unreachable; migration failure; listen/serve error; running requests still open when `HTTP_SHUTDOWN_TIMEOUT` ran out. The log line is `service exited with error: <cause>` for every one of these; the cause says whether it happened during startup, serving, or shutdown |
+| killed by the signal | a second SIGINT/SIGTERM while the graceful shutdown is still waiting (see below) |
 
 ### Health, readiness, and shutdown
 
@@ -260,7 +280,15 @@ Both probes are on the engine root, outside `/api`:
 
 Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the log (`readyz; database ping failed: ...`), never in the response.
 
-On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it closes Redis and the database and logs `Shutdown complete`, exit code `0`. If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
+On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it closes Redis and the database and logs `Shutdown complete`, exit code `0`. If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
+
+### Tests
+
+```bash
+go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
+```
+
+The unit tests need no services. `infrastructure/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
 
 ### Migrations
 
