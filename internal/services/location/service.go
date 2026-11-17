@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/zazhedho/authkit/authscope"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	locationcache "starter-kit/internal/cache/location"
 	domainlocation "starter-kit/internal/domain/location"
@@ -204,7 +204,7 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 	if err != nil {
 		return dto.LocationSyncJob{}, err
 	}
-	requestedByUserID := authscope.FromContext(ctx).ActorUserID()
+	requestedByUserID := authkit.ScopeFrom(ctx).ActorUserID()
 
 	activeJob, err := s.Repo.GetActiveSyncJob(ctx)
 	switch {
@@ -216,7 +216,7 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 
 	now := time.Now()
 	job := domainlocation.SyncJob{
-		ID:           utils.CreateUUID(),
+		ID:           gokit.CreateUUID(),
 		Status:       "queued",
 		Level:        normalizedReq.Level,
 		Year:         normalizedReq.Year,

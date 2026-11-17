@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/zazhedho/gokit/middlewares"
+	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 
 	mediaHandler "starter-kit/internal/handlers/http/media"
@@ -25,7 +25,7 @@ func registerMedia(r gin.IRouter, d Deps) error {
 
 	media := r.Group("/media").Use(d.Kit.Auth())
 	{
-		uploadLimiter := middlewares.IPRateLimitMiddleware(d.Redis, "media_upload", m.UploadRateLimit, m.UploadRateWindow)
+		uploadLimiter := gokit.IPRateLimitMiddleware(d.Redis, "media_upload", m.UploadRateLimit, m.UploadRateWindow)
 		media.POST("", uploadLimiter, h.Upload)
 		media.DELETE("/:id", h.Delete)
 	}

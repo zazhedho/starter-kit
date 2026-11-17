@@ -3,11 +3,11 @@ package servicelocation
 import (
 	"context"
 	"errors"
+	"github.com/zazhedho/authkit"
 	"io"
 	"net/http"
 	"reflect"
 
-	"github.com/zazhedho/authkit/authscope"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	"strings"
@@ -387,7 +387,7 @@ func TestLocationHelperCacheKeysAndCodeNormalization(t *testing.T) {
 }
 
 func locationTestActorContext(userID string) context.Context {
-	return authscope.WithContext(context.Background(), authscope.New(userID, "admin", "admin", nil))
+	return authkit.WithScope(context.Background(), authkit.NewScope(userID, "admin", "admin", nil))
 }
 
 func TestLocationMapAndSortHelpers(t *testing.T) {

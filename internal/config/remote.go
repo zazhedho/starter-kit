@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zazhedho/authkit/authutil"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	"os"
 	"time"
@@ -15,6 +14,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 )
+
+// remoteConfigCacheKey is the Redis key under which the remote configuration is
+// cached. Its value is part of the cache layout shared with earlier releases.
+const remoteConfigCacheKey = "cache:config:app"
 
 // LoadRemote applies the optional remote or file configuration: Consul when
 // CONSUL is set, otherwise the file named by APP_CONFIG (or config/<APP_ENV>.env).
@@ -27,23 +30,23 @@ func LoadRemote() {
 }
 
 func getAppConf(key string, def any, rdbCache *redis.Client) any {
-	cacheKey := authutil.RedisAppConf
+	cacheKey := remoteConfigCacheKey
 	var appConf map[string]string
 	var cache, getNewConfig bool
 
-	if consul := utils.GetEnv("CONSUL", ""); consul != "" {
+	if consul := gokit.GetEnv("CONSUL", ""); consul != "" {
 		appConf, cache, getNewConfig = loadConsulConfig(consul, rdbCache, cacheKey)
 	} else {
 		appConf = loadFileConfig()
 	}
 
 	applyAppConfig(appConf, cache, getNewConfig, rdbCache, cacheKey)
-	return utils.GetEnv(key, def)
+	return gokit.GetEnv(key, def)
 }
 
 func loadConsulConfig(consul string, client *redis.Client, cacheKey string) (map[string]string, bool, bool) {
 	appConf := make(map[string]string)
-	cache := utils.NormalizeKey(utils.GetEnv("CACHE", "")) == "on" && client != nil
+	cache := gokit.NormalizeKey(gokit.GetEnv("CACHE", "")) == "on" && client != nil
 	getNewConfig := !cache
 
 	if cache {
@@ -65,7 +68,7 @@ func loadConsulConfig(consul string, client *redis.Client, cacheKey string) (map
 }
 
 func loadConsulRemoteConfig(consul string, appConf map[string]string) {
-	consulPath := fmt.Sprintf("%s/%s", utils.GetEnv("CONSUL_PATH", ""), utils.GetEnv("APP_ENV", ""))
+	consulPath := fmt.Sprintf("%s/%s", gokit.GetEnv("CONSUL_PATH", ""), gokit.GetEnv("APP_ENV", ""))
 	runtimeViper := viper.New()
 	if err := runtimeViper.AddRemoteProvider("consul", consul, consulPath); err != nil {
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err))
@@ -81,10 +84,10 @@ func loadConsulRemoteConfig(consul string, appConf map[string]string) {
 func loadFileConfig() map[string]string {
 	appConf := make(map[string]string)
 	configName := "app"
-	pathConfig := utils.GetEnv("APP_CONFIG", "")
+	pathConfig := gokit.GetEnv("APP_CONFIG", "")
 	if pathConfig == "" {
 		pathConfig = "config"
-		configName = utils.GetEnv("APP_ENV", "")
+		configName = gokit.GetEnv("APP_ENV", "")
 	}
 
 	viper.AddConfigPath(pathConfig)
@@ -105,9 +108,9 @@ func applyAppConfig(appConf map[string]string, cache, getNewConfig bool, client 
 	if _, ok := appConf["config_id"]; !ok {
 		appConf["config_id"] = uuid.NewString()
 	}
-	if appConf["config_id"] != utils.GetEnv("CONFIG_ID", "") {
+	if appConf["config_id"] != gokit.GetEnv("CONFIG_ID", "") {
 		for key, value := range appConf {
-			if err := os.Setenv(utils.NormalizeUpperKey(key), value); err != nil {
+			if err := os.Setenv(gokit.NormalizeUpperKey(key), value); err != nil {
 				logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to set app config %s: %v", key, err))
 			}
 		}
@@ -115,7 +118,7 @@ func applyAppConfig(appConf map[string]string, cache, getNewConfig bool, client 
 	if cache && getNewConfig {
 		go func() {
 			if cacheData, err := json.Marshal(appConf); err == nil {
-				ttl := utils.GetEnv("TTL_CACHE_CONFIG_APP", time.Duration(60*60*24)) * time.Second
+				ttl := gokit.GetEnv("TTL_CACHE_CONFIG_APP", time.Duration(60*60*24)) * time.Second
 				_ = client.Set(context.Background(), cacheKey, string(cacheData), ttl).Err()
 			}
 		}()

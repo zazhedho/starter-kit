@@ -1,13 +1,13 @@
 package config
 
 import (
+	"github.com/zazhedho/gokit"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/gokit/utils"
 )
 
 const (
@@ -26,9 +26,9 @@ func FromEnv() Config {
 
 	cfg := Config{
 		App: App{
-			Name:     utils.GetEnv("APP_NAME", ""),
-			Env:      utils.GetEnv("APP_ENV", ""),
-			Port:     utils.GetEnv("PORT", ""),
+			Name:     gokit.GetEnv("APP_NAME", ""),
+			Env:      gokit.GetEnv("APP_ENV", ""),
+			Port:     gokit.GetEnv("PORT", ""),
 			Timezone: l.str("APP_TIMEZONE", "Asia/Jakarta"),
 		},
 		HTTP: HTTP{
@@ -40,12 +40,12 @@ func FromEnv() Config {
 			MaxBodyBytes:      l.megabytes("HTTP_MAX_BODY_MB", 10),
 		},
 		Database: Database{
-			URL:             utils.GetEnv("DATABASE_URL", ""),
-			Host:            utils.GetEnv("DB_HOST", ""),
-			Port:            utils.GetEnv("DB_PORT", ""),
-			Username:        utils.GetEnv("DB_USERNAME", ""),
-			Password:        utils.GetEnv("DB_PASS", ""),
-			Name:            utils.GetEnv("DB_NAME", ""),
+			URL:             gokit.GetEnv("DATABASE_URL", ""),
+			Host:            gokit.GetEnv("DB_HOST", ""),
+			Port:            gokit.GetEnv("DB_PORT", ""),
+			Username:        gokit.GetEnv("DB_USERNAME", ""),
+			Password:        gokit.GetEnv("DB_PASS", ""),
+			Name:            gokit.GetEnv("DB_NAME", ""),
 			SSLMode:         l.str("DB_SSLMODE", "disable"),
 			MaxOpenConns:    l.integer("DB_MAX_OPEN_CONNS", 100),
 			MaxIdleConns:    l.integer("DB_MAX_IDLE_CONNS", 10),
@@ -53,42 +53,42 @@ func FromEnv() Config {
 			ConnMaxIdleTime: l.duration("DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
 		},
 		Migrate: Migrate{
-			Run:  utils.GetEnv("RUN_MIGRATION", true),
+			Run:  gokit.GetEnv("RUN_MIGRATION", true),
 			Path: l.str("PATH_MIGRATE", "file://migrations"),
 		},
 		Location: Location{
 			ServiceBaseURL: strings.TrimRight(l.str("LOCATION_SERVICE_BASE_URL", defaultLocationServiceBaseURL), "/"),
-			SourceYear:     utils.GetEnv("LOCATION_SOURCE_YEAR", ""),
+			SourceYear:     gokit.GetEnv("LOCATION_SOURCE_YEAR", ""),
 			ServiceTimeout: locationTimeout(),
 			CacheTTL:       locationCacheTTL(),
 		},
 		Media: Media{
-			Enabled:             utils.GetEnv("MEDIA_ENABLED", false),
+			Enabled:             gokit.GetEnv("MEDIA_ENABLED", false),
 			MaxFileSizeBytes:    l.megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
 			AllowedContentTypes: splitList(l.str("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
-			UploadRateLimit:     utils.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
-			UploadRateWindow:    time.Duration(utils.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
+			UploadRateLimit:     gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
+			UploadRateWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
 			UploadTimeout:       l.duration("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
 		},
 		Storage: Storage{
-			Provider:    utils.NormalizeKey(l.str("STORAGE_PROVIDER", "minio")),
-			Endpoint:    utils.GetEnv("STORAGE_ENDPOINT", ""),
-			AccessKey:   utils.GetEnv("STORAGE_ACCESS_KEY", ""),
-			SecretKey:   utils.GetEnv("STORAGE_SECRET_KEY", ""),
-			Bucket:      utils.GetEnv("STORAGE_BUCKET_NAME", ""),
-			BaseURL:     utils.GetEnv("STORAGE_BASE_URL", ""),
+			Provider:    gokit.NormalizeKey(l.str("STORAGE_PROVIDER", "minio")),
+			Endpoint:    gokit.GetEnv("STORAGE_ENDPOINT", ""),
+			AccessKey:   gokit.GetEnv("STORAGE_ACCESS_KEY", ""),
+			SecretKey:   gokit.GetEnv("STORAGE_SECRET_KEY", ""),
+			Bucket:      gokit.GetEnv("STORAGE_BUCKET_NAME", ""),
+			BaseURL:     gokit.GetEnv("STORAGE_BASE_URL", ""),
 			Region:      l.str("STORAGE_REGION", "auto"),
-			R2AccountID: utils.GetEnv("R2_ACCOUNT_ID", ""),
-			UseSSL:      utils.GetEnv("STORAGE_USE_SSL", false),
+			R2AccountID: gokit.GetEnv("R2_ACCOUNT_ID", ""),
+			UseSSL:      gokit.GetEnv("STORAGE_USE_SSL", false),
 		},
 		Auth: authkit.ConfigFromEnv(),
 	}
 
 	cfg.Redis = Redis{
-		URL:      utils.GetEnv("REDIS_URL", ""),
-		Host:     utils.GetEnv("REDIS_HOST", ""),
+		URL:      gokit.GetEnv("REDIS_URL", ""),
+		Host:     gokit.GetEnv("REDIS_HOST", ""),
 		Port:     l.str("REDIS_PORT", "6379"),
-		Password: utils.GetEnv("REDIS_PASSWORD", ""),
+		Password: gokit.GetEnv("REDIS_PASSWORD", ""),
 	}
 	cfg.Redis.DB, cfg.Redis.dbInvalid = redisDB()
 
@@ -152,7 +152,7 @@ func (l *loader) integer(key string, def int) int {
 // locationTimeout keeps the seconds form LOCATION_SERVICE_TIMEOUT_SECONDS has
 // always accepted; a non-positive value means the default.
 func locationTimeout() time.Duration {
-	sec := utils.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", defaultLocationTimeoutSeconds)
+	sec := gokit.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", defaultLocationTimeoutSeconds)
 	if sec <= 0 {
 		sec = defaultLocationTimeoutSeconds
 	}
@@ -162,7 +162,7 @@ func locationTimeout() time.Duration {
 // locationCacheTTL keeps every form LOCATION_CACHE_TTL has always accepted
 // (Go duration, plain seconds, "eod"); a non-positive value means the default.
 func locationCacheTTL() time.Duration {
-	ttl := utils.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
+	ttl := gokit.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
 	if ttl <= 0 {
 		return defaultLocationCacheTTL
 	}
@@ -175,15 +175,15 @@ func locationCacheTTL() time.Duration {
 // through the second result and read as unset.
 func smtpFromEnv() (s SMTP, portInvalid bool) {
 	s = SMTP{
-		Host:         utils.GetEnv("SMTP_HOST", ""),
-		User:         utils.GetEnv("SMTP_USER", ""),
-		Password:     utils.GetEnv("SMTP_PASS", ""),
-		From:         utils.GetEnv("SMTP_FROM", ""),
-		OTPSubject:   utils.GetEnv("SMTP_SUBJECT", ""),
-		ResetSubject: utils.GetEnv("RESET_SUBJECT", ""),
-		AppName:      utils.GetEnv("AUTH_EMAIL_APP_NAME", ""),
+		Host:         gokit.GetEnv("SMTP_HOST", ""),
+		User:         gokit.GetEnv("SMTP_USER", ""),
+		Password:     gokit.GetEnv("SMTP_PASS", ""),
+		From:         gokit.GetEnv("SMTP_FROM", ""),
+		OTPSubject:   gokit.GetEnv("SMTP_SUBJECT", ""),
+		ResetSubject: gokit.GetEnv("RESET_SUBJECT", ""),
+		AppName:      gokit.GetEnv("AUTH_EMAIL_APP_NAME", ""),
 	}
-	if raw := utils.GetEnv("SMTP_PORT", ""); raw != "" {
+	if raw := gokit.GetEnv("SMTP_PORT", ""); raw != "" {
 		if validPort(raw) {
 			s.Port, _ = strconv.Atoi(raw)
 		} else {

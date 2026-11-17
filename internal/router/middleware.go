@@ -1,12 +1,10 @@
 package router
 
 import (
+	"github.com/zazhedho/gokit"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zazhedho/gokit/messages"
-	"github.com/zazhedho/gokit/response"
-	"github.com/zazhedho/gokit/utils"
 )
 
 // bodyLimit caps request bodies. A declared Content-Length over the limit is
@@ -16,9 +14,9 @@ import (
 func bodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.ContentLength > maxBytes {
-			logID := utils.GenerateLogId(c)
+			logID := gokit.GenerateLogId(c)
 			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge,
-				response.ErrorResponse(http.StatusRequestEntityTooLarge, messages.InvalidRequest, logID, "request body too large"))
+				gokit.ErrorResponse(http.StatusRequestEntityTooLarge, gokit.MsgInvalidRequest, logID, "request body too large"))
 			return
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)

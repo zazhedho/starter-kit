@@ -34,7 +34,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/authkit/mailer"
 	"github.com/zazhedho/logus"
 	"gorm.io/gorm"
 
@@ -243,7 +242,7 @@ func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Confi
 		return authCfg
 	}
 	s := cfg.SMTP
-	sender, err := mailer.NewBrevoSender(mailer.BrevoConfig{
+	sender, err := authkit.NewBrevoMailer(authkit.BrevoConfig{
 		Host: s.Host, Port: s.Port, User: s.User, Pass: s.Password, From: s.From,
 		OTPSubject: s.OTPSubject, ResetSubject: s.ResetSubject, AppName: s.AppName,
 	})

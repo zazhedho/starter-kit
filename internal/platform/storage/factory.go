@@ -2,12 +2,12 @@ package storage
 
 import (
 	"fmt"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/gokit"
 )
 
 // NewStorageProvider creates a new storage provider based on the configuration
 func NewStorageProvider(config Config) (StorageProvider, error) {
-	provider := utils.NormalizeKey(config.Provider)
+	provider := gokit.NormalizeKey(config.Provider)
 
 	switch provider {
 	case "minio":

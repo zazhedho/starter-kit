@@ -5,11 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/zazhedho/authkit/authutil"
+	"github.com/zazhedho/authkit"
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/zazhedho/authkit/authscope"
 	"starter-kit/internal/dto"
 	servicelocation "starter-kit/internal/services/location"
 	"testing"
@@ -40,7 +39,7 @@ func (m *locationServiceTestDouble) GetVillage(ctx context.Context, districtCode
 }
 func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error) {
 	m.startReq = req
-	m.requested = authscope.FromContext(ctx).ActorUserID()
+	m.requested = authkit.ScopeFrom(ctx).ActorUserID()
 	return m.job, m.err
 }
 func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error) {
@@ -52,8 +51,9 @@ func performLocationRequest(method, routePath, requestPath string, body any, han
 	router := gin.New()
 	router.Handle(method, routePath, func(ctx *gin.Context) {
 		if authData != nil {
-			ctx.Set(authutil.CtxKeyAuthData, authData)
-			ctx.Request = ctx.Request.WithContext(authscope.WithContext(ctx.Request.Context(), authscope.NewFromClaims(authData, nil)))
+			userID, _ := authData["user_id"].(string)
+			role, _ := authData["role"].(string)
+			ctx.Request = ctx.Request.WithContext(authkit.WithScope(ctx.Request.Context(), authkit.NewScope(userID, "", role, nil)))
 		}
 		handler(ctx)
 	})

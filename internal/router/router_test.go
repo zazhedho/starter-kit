@@ -22,7 +22,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
-	domainuser "github.com/zazhedho/authkit/domain/user"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -376,7 +375,7 @@ func mediaDeps(t *testing.T) Deps {
 
 func uploadRequest(t *testing.T, d Deps, fileSize int) *http.Request {
 	t.Helper()
-	token, err := d.Kit.Tokens().Generate(&domainuser.Users{Id: "11111111-1111-1111-1111-111111111111", Role: "viewer"}, "test")
+	token, err := d.Kit.IssueAccessToken("11111111-1111-1111-1111-111111111111", "", "viewer")
 	if err != nil {
 		t.Fatalf("token: %v", err)
 	}

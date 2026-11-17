@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/gokit"
 	"io"
 	"net/http"
 	"net/url"
@@ -150,22 +150,22 @@ func mapVillages(rows []domainlocation.Village) []dto.Location {
 }
 
 func sortProvinces(items []domainlocation.Province) []domainlocation.Province {
-	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
 	return items
 }
 
 func sortCities(items []domainlocation.City) []domainlocation.City {
-	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
 	return items
 }
 
 func sortDistricts(items []domainlocation.District) []domainlocation.District {
-	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
 	return items
 }
 
 func sortVillages(items []domainlocation.Village) []domainlocation.Village {
-	sort.Slice(items, func(i, j int) bool { return utils.NormalizeKey(items[i].Name) < utils.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
 	return items
 }
 

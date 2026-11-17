@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/authkit/mailer"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -363,6 +363,21 @@ func TestNewWithoutRedisDoesNotDial(t *testing.T) {
 	}
 }
 
+// sender reads the exported fields of the Brevo sender behind authkit.Mailer;
+// its concrete type is internal to authkit, so reflection is the only way to
+// check what authConfig configured.
+type sender struct{ v reflect.Value }
+
+func brevoSender(m authkit.Mailer) (sender, bool) {
+	v := reflect.ValueOf(m)
+	if !v.IsValid() || v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct || v.Elem().Type().Name() != "BrevoSender" {
+		return sender{}, false
+	}
+	return sender{v: v.Elem()}, true
+}
+
+func (s sender) field(name string) any { return s.v.FieldByName(name).Interface() }
+
 func TestAuthConfigPassesAMailerOnlyWithRedisAndCompleteSMTP(t *testing.T) {
 	full := config.SMTP{
 		Host: "smtp.example.test", Port: 2525, User: "mailer", Password: "pw", From: "a@example.test",
@@ -398,24 +413,24 @@ func TestAuthConfigPassesAMailerOnlyWithRedisAndCompleteSMTP(t *testing.T) {
 	})
 	t.Run("redis and complete smtp build the sender from config", func(t *testing.T) {
 		got := build(full, rdb)
-		sender, ok := got.Mailer.(*mailer.BrevoSender)
+		sender, ok := brevoSender(got.Mailer)
 		if !ok {
-			t.Fatalf("Mailer = %T, want *mailer.BrevoSender", got.Mailer)
+			t.Fatalf("Mailer = %T, want the Brevo sender", got.Mailer)
 		}
-		if sender.Host != full.Host || sender.Port != full.Port || sender.User != full.User ||
-			sender.Pass != full.Password || sender.From != full.From || sender.Subject != full.OTPSubject ||
-			sender.ResetSubject != full.ResetSubject || sender.AppName != full.AppName {
-			t.Fatalf("sender = %+v, does not match the SMTP settings", *sender)
+		if sender.field("Host") != full.Host || sender.field("Port") != full.Port || sender.field("User") != full.User ||
+			sender.field("Pass") != full.Password || sender.field("From") != full.From || sender.field("Subject") != full.OTPSubject ||
+			sender.field("ResetSubject") != full.ResetSubject || sender.field("AppName") != full.AppName {
+			t.Fatalf("sender = %+v, does not match the SMTP settings", sender.v.Interface())
 		}
 	})
 	t.Run("empty optional values get the sender's defaults", func(t *testing.T) {
 		minimal := config.SMTP{Host: "smtp.example.test", Password: "pw", From: "a@example.test"}
-		sender, ok := build(minimal, rdb).Mailer.(*mailer.BrevoSender)
+		sender, ok := brevoSender(build(minimal, rdb).Mailer)
 		if !ok {
 			t.Fatal("no sender")
 		}
-		if sender.Port != 587 || sender.User != "apikey" {
-			t.Fatalf("defaults = port %d user %q, want 587 and apikey", sender.Port, sender.User)
+		if sender.field("Port") != 587 || sender.field("User") != "apikey" {
+			t.Fatalf("defaults = port %v user %q, want 587 and apikey", sender.field("Port"), sender.field("User"))
 		}
 	})
 }

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/zazhedho/authkit/authutil"
+	"github.com/zazhedho/authkit"
 	"io"
 	"mime/multipart"
 	"net/textproto"
@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/zazhedho/authkit/authscope"
 	domainmedia "starter-kit/internal/domain/media"
 	"starter-kit/internal/platform/storage"
 )
@@ -154,7 +153,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 		storageMock := &mediaStorageMock{}
 		service := NewMediaService(repo, storageMock, 1024, nil)
 
-		if _, err := service.Delete(context.Background(), authscope.New(ownerID, "owner", "viewer", nil), media.ID); err != nil {
+		if _, err := service.Delete(context.Background(), authkit.NewScope(ownerID, "owner", "viewer", nil), media.ID); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		if storageMock.deletedURL != media.URL || repo.deletedID != media.ID {
@@ -167,7 +166,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 		storageMock := &mediaStorageMock{}
 		service := NewMediaService(repo, storageMock, 1024, nil)
 
-		_, err := service.Delete(context.Background(), authscope.New(uuid.NewString(), "other", "viewer", nil), media.ID)
+		_, err := service.Delete(context.Background(), authkit.NewScope(uuid.NewString(), "other", "viewer", nil), media.ID)
 		if !errors.Is(err, domainmedia.ErrMediaForbidden) {
 			t.Fatalf("expected forbidden, got %v", err)
 		}
@@ -181,7 +180,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 		storageMock := &mediaStorageMock{}
 		service := NewMediaService(repo, storageMock, 1024, nil)
 
-		if _, err := service.Delete(context.Background(), authscope.New(uuid.NewString(), "root", authutil.RoleSuperAdmin, nil), media.ID); err != nil {
+		if _, err := service.Delete(context.Background(), authkit.NewScope(uuid.NewString(), "root", authkit.RoleSuperAdmin, nil), media.ID); err != nil {
 			t.Fatalf("delete as superadmin: %v", err)
 		}
 	})

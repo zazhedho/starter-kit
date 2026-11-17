@@ -6,12 +6,11 @@ package router
 import (
 	"database/sql"
 	"fmt"
+	"github.com/zazhedho/gokit"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
-	authmiddlewares "github.com/zazhedho/authkit/middlewares"
-	"github.com/zazhedho/gokit/middlewares"
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
@@ -77,10 +76,10 @@ func New(d Deps) (*gin.Engine, error) {
 
 	engine := gin.New()
 
-	engine.Use(middlewares.CORS())
-	engine.Use(gin.CustomRecovery(middlewares.ErrorHandler))
-	engine.Use(middlewares.SetContextId())
-	engine.Use(authmiddlewares.RequestLogger())
+	engine.Use(gokit.CORS())
+	engine.Use(gin.CustomRecovery(gokit.ErrorHandler))
+	engine.Use(gokit.SetContextId())
+	engine.Use(authkit.RequestLogger())
 	engine.Use(bodyLimit(d.Config.HTTP.MaxBodyBytes))
 
 	if err := mount(engine, rootRegistrars, d); err != nil {
