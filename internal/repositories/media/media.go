@@ -1,9 +1,9 @@
 package repositorymedia
 
 import (
+	repositorygeneric "github.com/zazhedho/gokit/repository/generic"
 	domainmedia "starter-kit/internal/domain/media"
 	interfacemedia "starter-kit/internal/interfaces/media"
-	repositorygeneric "starter-kit/internal/repositories/generic"
 
 	"gorm.io/gorm"
 )

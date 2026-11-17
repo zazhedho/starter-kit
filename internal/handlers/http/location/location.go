@@ -3,15 +3,15 @@ package handlerlocation
 import (
 	"errors"
 	"fmt"
+	"github.com/zazhedho/gokit/handlercommon"
+	"github.com/zazhedho/gokit/messages"
+	"github.com/zazhedho/gokit/response"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	"net/http"
 	"starter-kit/internal/dto"
-	handlercommon "starter-kit/internal/handlers/http/common"
 	interfacelocation "starter-kit/internal/interfaces/location"
 	servicelocation "starter-kit/internal/services/location"
-	"starter-kit/pkg/logger"
-	"starter-kit/pkg/messages"
-	"starter-kit/pkg/response"
-	"starter-kit/utils"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -32,7 +32,7 @@ func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 
 	data, err := h.Service.GetProvince(reqCtx)
 	if err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetProvince; Error: %+v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetProvince; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
@@ -57,7 +57,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 
 	data, err := h.Service.GetCity(reqCtx, provinceCode)
 	if err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetCity; Error: %+v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetCity; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
@@ -82,7 +82,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 
 	data, err := h.Service.GetDistrict(reqCtx, cityCode)
 	if err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetDistrict; Error: %+v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetDistrict; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
@@ -107,7 +107,7 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 
 	data, err := h.Service.GetVillage(reqCtx, districtCode)
 	if err != nil {
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetVillage; Error: %+v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetVillage; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
@@ -136,7 +136,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 			return
 		}
 
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
 		res := response.Response(http.StatusBadRequest, messages.MsgSomethingWrong, logId, nil)
 		res.Error = response.Errors{Code: http.StatusBadRequest, Message: err.Error()}
 		ctx.JSON(http.StatusBadRequest, res)
@@ -169,7 +169,7 @@ func (h *LocationHandler) GetSyncJob(ctx *gin.Context) {
 			return
 		}
 
-		logger.WriteLogWithContext(ctx, logger.LogLevelError, fmt.Sprintf("%s; Service.GetSyncJob; Error: %+v", logPrefix, err))
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetSyncJob; Error: %+v", logPrefix, err))
 		res := response.InternalServerError(logId)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return

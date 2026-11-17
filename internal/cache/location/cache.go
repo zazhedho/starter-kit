@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	"starter-kit/internal/dto"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -59,14 +59,14 @@ func Get(ctx context.Context, client *redis.Client, cacheKey string) ([]dto.Loca
 	cached, err := client.Get(ctx, cacheKey).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
-			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache get failed; key=%s; err=%v", cacheKey, err))
+			logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache get failed; key=%s; err=%v", cacheKey, err))
 		}
 		return nil, false
 	}
 
 	var locations []dto.Location
 	if err := json.Unmarshal([]byte(cached), &locations); err != nil {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache unmarshal failed; key=%s; err=%v", cacheKey, err))
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache unmarshal failed; key=%s; err=%v", cacheKey, err))
 		return nil, false
 	}
 
@@ -80,7 +80,7 @@ func Set(ctx context.Context, client *redis.Client, cacheKey string, locations [
 
 	payload, err := json.Marshal(locations)
 	if err != nil {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache marshal failed; key=%s; err=%v", cacheKey, err))
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache marshal failed; key=%s; err=%v", cacheKey, err))
 		return
 	}
 
@@ -88,7 +88,7 @@ func Set(ctx context.Context, client *redis.Client, cacheKey string, locations [
 	defer cancel()
 
 	if err := client.Set(ctx, cacheKey, payload, TTL()).Err(); err != nil {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache set failed; key=%s; err=%v", cacheKey, err))
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache set failed; key=%s; err=%v", cacheKey, err))
 	}
 }
 
@@ -105,7 +105,7 @@ func DeleteKeys(ctx context.Context, client *redis.Client, pattern string) {
 	for {
 		foundKeys, nextCursor, err := client.Scan(ctx, cursor, pattern+"*", scanCount).Result()
 		if err != nil {
-			logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache scan failed; pattern=%s; err=%v", pattern, err))
+			logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache scan failed; pattern=%s; err=%v", pattern, err))
 			return
 		}
 		keys = append(keys, foundKeys...)
@@ -119,6 +119,6 @@ func DeleteKeys(ctx context.Context, client *redis.Client, pattern string) {
 		return
 	}
 	if err := client.Del(ctx, keys...).Err(); err != nil {
-		logger.WriteLog(logger.LogLevelWarn, fmt.Sprintf("location cache delete failed; pattern=%s; err=%v", pattern, err))
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache delete failed; pattern=%s; err=%v", pattern, err))
 	}
 }

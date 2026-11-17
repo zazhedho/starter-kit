@@ -2,15 +2,15 @@ package media
 
 import (
 	"fmt"
-	"starter-kit/pkg/logger"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	"starter-kit/pkg/storage"
-	"starter-kit/utils"
 	"strconv"
 )
 
 // InitStorage initializes and returns a storage provider (MinIO or R2)
 func InitStorage() (storage.StorageProvider, error) {
-	logger.WriteLog(logger.LogLevelDebug, "InitStorage; Initializing storage provider...")
+	logus.WriteLog(logus.LogLevelDebug, "InitStorage; Initializing storage provider...")
 
 	provider := utils.NormalizeKey(utils.GetEnv("STORAGE_PROVIDER", "minio"))
 
@@ -30,11 +30,11 @@ func InitStorage() (storage.StorageProvider, error) {
 
 	storageProvider, err := storage.NewStorageProvider(config)
 	if err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("InitStorage; Failed to initialize storage provider: %s", err.Error()))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("InitStorage; Failed to initialize storage provider: %s", err.Error()))
 		return nil, fmt.Errorf("failed to initialize storage provider: %w", err)
 	}
 
-	logger.WriteLog(logger.LogLevelInfo, fmt.Sprintf("InitStorage; Storage provider initialized successfully. Provider: %s, Endpoint: %s, Bucket: %s",
+	logus.WriteLog(logus.LogLevelInfo, fmt.Sprintf("InitStorage; Storage provider initialized successfully. Provider: %s, Endpoint: %s, Bucket: %s",
 		provider, config.Endpoint, config.BucketName))
 
 	return storageProvider, nil

@@ -16,7 +16,6 @@ func TestValidateStartupConfigAcceptsRequiredOnly(t *testing.T) {
 
 func TestValidateStartupConfigAllowsDatabaseURLWithoutParts(t *testing.T) {
 	clearStartupEnv(t)
-	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/app?sslmode=disable")
 
 	if err := ValidateStartupConfig("8080"); err != nil {
@@ -33,9 +32,11 @@ func TestValidateStartupConfigRequiresCoreConfig(t *testing.T) {
 	}
 
 	message := err.Error()
+	if strings.Contains(strings.ToLower(message), "jwt") {
+		t.Fatalf("JWT key is validated by authkit.New, not startup config: %q", message)
+	}
 	for _, want := range []string{
 		"PORT is required",
-		"jwt key is not configured",
 		"DB_HOST is required when DATABASE_URL is empty",
 		"DB_PORT is required when DATABASE_URL is empty",
 		"DB_USERNAME is required when DATABASE_URL is empty",
@@ -138,7 +139,6 @@ func TestValidateStartupConfigRequiresStorageWhenMediaEnabled(t *testing.T) {
 
 func setRequiredStartupEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("JWT_KEY", "test-secret-must-be-at-least-32-bytes")
 	t.Setenv("DB_HOST", "localhost")
 	t.Setenv("DB_PORT", "5432")
 	t.Setenv("DB_USERNAME", "starter")

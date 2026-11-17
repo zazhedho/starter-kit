@@ -3,8 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"starter-kit/pkg/logger"
-	"starter-kit/utils"
+	"github.com/zazhedho/gokit/utils"
+	"github.com/zazhedho/logus"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -23,11 +23,11 @@ func ConnDb() (db *gorm.DB, sqlDB *sql.DB, err error) {
 			utils.GetEnv("DB_NAME", ""),
 			utils.GetEnv("DB_SSLMODE", "disable"))
 	}
-	logger.WriteLog(logger.LogLevelDebug, "ConnDb; Initialize db connection...")
+	logus.WriteLog(logus.LogLevelDebug, "ConnDb; Initialize db connection...")
 
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
 	if err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("ConnDb; %s Error: %s", dsn, err.Error()))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("ConnDb; %s Error: %s", dsn, err.Error()))
 		return
 	}
 
@@ -38,7 +38,7 @@ func ConnDb() (db *gorm.DB, sqlDB *sql.DB, err error) {
 
 	sqlDB, err = db.DB()
 	if err != nil {
-		logger.WriteLog(logger.LogLevelError, fmt.Sprintf("ConnDb.sqlDB; %s Error: %s", dsn, err.Error()))
+		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("ConnDb.sqlDB; %s Error: %s", dsn, err.Error()))
 		return
 	}
 

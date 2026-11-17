@@ -9,16 +9,11 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"starter-kit/utils"
+	"github.com/zazhedho/gokit/utils"
 )
 
 func ValidateStartupConfig(port string) error {
-	var problems []string
-
-	problems = append(problems, validateRequiredPort(port)...)
-	if err := utils.ValidateJWTKeyConfigured(); err != nil {
-		problems = append(problems, err.Error())
-	}
+	problems := validateRequiredPort(port)
 	problems = append(problems, validateDatabaseConfig()...)
 	problems = append(problems, validateOptionalRedisConfig()...)
 	problems = append(problems, validateOptionalSMTPConfig()...)

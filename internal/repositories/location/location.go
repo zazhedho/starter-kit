@@ -2,9 +2,9 @@ package repositorylocation
 
 import (
 	"context"
+	"github.com/zazhedho/gokit/utils"
 	domainlocation "starter-kit/internal/domain/location"
 	interfacelocation "starter-kit/internal/interfaces/location"
-	"starter-kit/utils"
 	"time"
 
 	"gorm.io/gorm"

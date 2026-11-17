@@ -39,22 +39,10 @@ linters:
       - linters:
           - misspell
         text: "`thn` is a misspelling of `then`"
-      - path: pkg/messages/message.go
-        linters:
-          - gosec
-        text: "G101: Potential hardcoded credentials"
-      - path: internal/repositories/session/
-        linters:
-          - gosec
-        text: "G117:"
       - path: internal/services/location/service.go
         linters:
           - gosec
         text: "G118:"
-      - path: internal/services/reset/reset_service_test.go
-        linters:
-          - gosec
-        text: "G101: Potential hardcoded credentials"
       - path: _test\.go
         linters:
           - noctx

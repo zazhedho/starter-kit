@@ -4,7 +4,7 @@ import (
 	"context"
 	"mime/multipart"
 
-	"starter-kit/internal/authscope"
+	"github.com/zazhedho/authkit/authscope"
 	domainmedia "starter-kit/internal/domain/media"
 )
 
