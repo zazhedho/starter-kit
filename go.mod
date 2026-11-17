@@ -79,9 +79,3 @@ require (
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
 )
-
-replace github.com/zazhedho/logus => /Users/zaqiakhana/Code/Project/logus
-
-replace github.com/zazhedho/gokit => /Users/zaqiakhana/Code/Project/gokit
-
-replace github.com/zazhedho/authkit => /Users/zaqiakhana/Code/Project/authkit

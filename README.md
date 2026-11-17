@@ -83,7 +83,7 @@ Implemented in this project:
 - Locations
 - Media upload and owner-controlled deletion when `MEDIA_ENABLED=true`
 
-Shared plumbing comes from [`gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils) and [`logus`](https://github.com/zazhedho/logus) (logging). Until these modules are published, `go.mod` points to them with local `replace` directives.
+Shared plumbing comes from [`gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils) and [`logus`](https://github.com/zazhedho/logus) (logging). All three modules are pinned to tagged versions in `go.mod`.
 
 ## Project Structure
 
@@ -173,9 +173,9 @@ go run .
 - A database whose `schema_migrations` version is 1 to 4 (it never reached 5)
   cannot be started with this version. Bring it to version 6 with the previous
   release first, then upgrade.
-- Docker and CI builds require the three modules (`authkit`, `gokit`, `logus`) to
-  be published. The `replace` directives in `go.mod` point at local directories
-  and are temporary.
+- The three modules (`authkit`, `gokit`, `logus`) are fetched as ordinary public
+  Go modules, so Docker and CI builds need no extra credentials. Upgrade them
+  deliberately with `go get <module>@<version>`.
 
 Default health check:
 
