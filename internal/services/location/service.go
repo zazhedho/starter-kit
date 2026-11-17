@@ -47,13 +47,22 @@ type syncProgress struct {
 	VillageCount  int
 }
 
+// defaultHTTPTimeout bounds outbound calls when Options.Timeout is not positive.
+const defaultHTTPTimeout = 20 * time.Second
+
 var ErrLocationSyncRunning = errors.New("location sync is already running")
 
 func NewLocationService(repo interfacelocation.RepoLocationInterface, opts Options) *LocationService {
+	// Zero would mean "no timeout" to http.Client; never allow that, so a
+	// project that builds Options by hand stays safe.
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultHTTPTimeout
+	}
 	service := &LocationService{
 		Repo:       repo,
 		Redis:      opts.Redis,
-		HTTPClient: &http.Client{Timeout: opts.Timeout},
+		HTTPClient: &http.Client{Timeout: timeout},
 		baseURL:    opts.BaseURL,
 		sourceYear: opts.SourceYear,
 		cacheTTL:   opts.CacheTTL,

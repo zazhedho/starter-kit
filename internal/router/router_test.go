@@ -2,8 +2,10 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"io/fs"
 	"mime/multipart"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,6 +28,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
+	"starter-kit/pkg/storage"
 )
 
 func newDryRunDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {
@@ -95,15 +99,146 @@ func TestNewRegistersHealthcheck(t *testing.T) {
 	}
 }
 
-func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
-	if got := len(engine.Handlers); got != 5 {
-		t.Fatalf("expected 5 global handlers (CORS, recovery, context id, request logger, body limit), got %d", got)
+// captureStdout collects what is written to the process stdout descriptor,
+// where the logger writes, until stop is called.
+func captureStdout(t *testing.T) (stop func() string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
+	saved, err := syscall.Dup(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Dup2(int(w.Fd()), 1); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(done)
+	}()
+	stopped := false
+	stop = func() string {
+		if stopped {
+			return ""
+		}
+		stopped = true
+		_ = syscall.Dup2(saved, 1)
+		_ = syscall.Close(saved)
+		_ = w.Close()
+		<-done
+		_ = r.Close()
+		return buf.String()
+	}
+	t.Cleanup(func() { stop() })
+	return stop
+}
+
+func accessLogLines(output string) []string {
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "[Request];") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// TestMiddlewareOrderAndSingleAccessLog proves the order through behavior:
+// the access-log line carries the request id, so the id was set before the
+// logger ran; an over-limit request still carries the CORS headers, so CORS
+// runs before the body limit; and each request is logged exactly once.
+func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
+	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
+	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
+
+	stop := captureStdout(t)
+	ok := httptest.NewRecorder()
+	okReq := httptest.NewRequest(http.MethodGet, "/healthcheck", nil)
+	okReq.Header.Set("X-Request-ID", requestID)
+	engine.ServeHTTP(ok, okReq)
+
+	big := httptest.NewRecorder()
+	bigReq := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(strings.Repeat("a", 4096)))
+	engine.ServeHTTP(big, bigReq)
+	lines := accessLogLines(stop())
+
+	if ok.Header().Get("X-Request-ID") != requestID {
+		t.Fatalf("X-Request-ID = %q", ok.Header().Get("X-Request-ID"))
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected exactly one access-log line per request (2), got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], requestID) {
+		t.Errorf("access log does not carry the request id, so the id was not set before the logger: %s", lines[0])
+	}
+	if big.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-limit status = %d", big.Code)
+	}
+	if big.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("over-limit response lacks CORS headers, so the body limit ran before CORS")
+	}
+	if !strings.Contains(lines[1], "status=413") {
+		t.Errorf("the rejected request was not logged with its status: %s", lines[1])
+	}
+}
+
+func TestGlobalBodyLimitCutsOffUndeclaredLengthBody(t *testing.T) {
+	const limit = 1024
+	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = limit }))
+
+	var read int64
+	var readErr error
+	engine.POST("/probe", func(c *gin.Context) {
+		read, readErr = io.Copy(io.Discard, c.Request.Body)
+		if readErr != nil {
+			c.Status(http.StatusRequestEntityTooLarge)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	// io.MultiReader hides the size, so the request has no Content-Length.
+	req := httptest.NewRequest(http.MethodPost, "/probe", io.MultiReader(strings.NewReader(strings.Repeat("a", 8*limit))))
+	req.ContentLength = -1
+	req.TransferEncoding = []string{"chunked"}
 	rec := httptest.NewRecorder()
-	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthcheck", nil))
-	if rec.Header().Get("X-Request-ID") == "" {
-		t.Fatal("expected X-Request-ID header")
+	engine.ServeHTTP(rec, req)
+
+	if read > limit {
+		t.Fatalf("handler read %d bytes, past the %d byte limit", read, limit)
+	}
+	var tooLarge *http.MaxBytesError
+	if !errors.As(readErr, &tooLarge) {
+		t.Fatalf("read error = %v, want *http.MaxBytesError", readErr)
+	}
+	if rec.Code/100 == 2 {
+		t.Fatalf("status = %d, want a non-2xx response", rec.Code)
+	}
+}
+
+func TestNewRejectsIncompleteDeps(t *testing.T) {
+	cases := map[string]func(*Deps){
+		"nil DB":    func(d *Deps) { d.DB = nil },
+		"nil SQLDB": func(d *Deps) { d.SQLDB = nil },
+		"nil Kit":   func(d *Deps) { d.Kit = nil },
+		"media enabled without storage": func(d *Deps) {
+			d.Config.Media.Enabled = true
+			d.Storage = nil
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := newTestDeps(t, nil)
+			mutate(&d)
+			engine, err := New(d)
+			if err == nil || engine != nil {
+				t.Fatalf("New = %v, %v; want an error and no engine", engine, err)
+			}
+		})
 	}
 }
 
@@ -220,29 +355,20 @@ func TestLocationRoutesProtection(t *testing.T) {
 	}
 }
 
-// fakeObjectStorage answers the bucket location and existence checks made when
-// the storage provider starts, and returns the storage settings pointing at it.
-func fakeObjectStorage(t *testing.T) config.Storage {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Has("location") {
-			w.Header().Set("Content-Type", "application/xml")
-			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">us-east-1</LocationConstraint>`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
+// fakeStorage is a storage provider that keeps nothing.
+type fakeStorage struct{}
 
-	return config.Storage{
-		Provider:  "minio",
-		Endpoint:  strings.TrimPrefix(srv.URL, "http://"),
-		BaseURL:   srv.URL,
-		Bucket:    "uploads",
-		AccessKey: "test-access",
-		SecretKey: "test-secret",
-		Region:    "auto",
-	}
+func (fakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (storage.FileInfo, error) {
+	return storage.FileInfo{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
+}
+
+func (fakeStorage) UploadFileFromBytes(context.Context, []byte, string, string, string) (storage.FileInfo, error) {
+	return storage.FileInfo{}, nil
+}
+func (fakeStorage) DeleteFile(context.Context, string) error { return nil }
+func (fakeStorage) GetFileURL(name string) string            { return name }
+func (fakeStorage) DownloadFile(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 func TestMediaRoutesProtection(t *testing.T) {
@@ -253,12 +379,20 @@ func TestMediaRoutesProtection(t *testing.T) {
 		}
 	})
 
+	t.Run("disabled registers nothing even when a provider is passed", func(t *testing.T) {
+		d := newTestDeps(t, func(c *config.Config) { c.Media.Enabled = false })
+		d.Storage = fakeStorage{}
+		for _, route := range newEngine(t, d).Routes() {
+			if strings.HasPrefix(route.Path, "/api/media") {
+				t.Fatalf("media route %s registered while media is disabled", route.Path)
+			}
+		}
+	})
+
 	t.Run("enabled", func(t *testing.T) {
-		storage := fakeObjectStorage(t)
-		engine := newEngine(t, newTestDeps(t, func(c *config.Config) {
-			c.Media.Enabled = true
-			c.Storage = storage
-		}))
+		d := newTestDeps(t, func(c *config.Config) { c.Media.Enabled = true })
+		d.Storage = fakeStorage{}
+		engine := newEngine(t, d)
 		if got := serve(engine, http.MethodPost, "/api/media"); got != http.StatusUnauthorized {
 			t.Fatalf("POST /api/media without token: expected 401, got %d", got)
 		}
@@ -270,13 +404,13 @@ func TestMediaRoutesProtection(t *testing.T) {
 
 func mediaDeps(t *testing.T) Deps {
 	t.Helper()
-	storage := fakeObjectStorage(t)
-	return newTestDeps(t, func(c *config.Config) {
+	d := newTestDeps(t, func(c *config.Config) {
 		c.Media.Enabled = true
 		c.Media.MaxFileSizeBytes = 64 << 10
 		c.HTTP.MaxBodyBytes = 1 << 20
-		c.Storage = storage
 	})
+	d.Storage = fakeStorage{}
+	return d
 }
 
 func uploadRequest(t *testing.T, d Deps, fileSize int) *http.Request {
@@ -310,8 +444,8 @@ func TestMediaUploadAtMaxSizeIsAccepted(t *testing.T) {
 	engine := newEngine(t, d)
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, uploadRequest(t, d, 64<<10))
-	if rec.Code == http.StatusRequestEntityTooLarge || rec.Code == http.StatusUnauthorized {
-		t.Fatalf("upload at max size must pass the limits and auth, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload at max size: expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

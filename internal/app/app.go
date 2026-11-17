@@ -25,9 +25,11 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/infrastructure/database"
+	"starter-kit/infrastructure/media"
 	"starter-kit/internal/config"
 	"starter-kit/internal/router"
 	appconfig "starter-kit/pkg/config"
+	"starter-kit/pkg/storage"
 )
 
 // App holds the open connections and the HTTP server of one running service.
@@ -50,10 +52,11 @@ type App struct {
 // deps lets tests replace the pieces that need a real database or a fixed
 // port. The zero value is production behavior.
 type deps struct {
-	openDB   func(config.Database, string) (*gorm.DB, *sql.DB, error)
-	listener net.Listener
-	routes   func(*gin.Engine)
-	migrate  func(ctx context.Context) error
+	openDB      func(config.Database, string) (*gorm.DB, *sql.DB, error)
+	listener    net.Listener
+	initStorage func(config.Storage) (storage.StorageProvider, error)
+	routes      func(*gin.Engine)
+	migrate     func(ctx context.Context) error
 }
 
 // Run is the whole program: it loads configuration, builds the App, migrates
@@ -187,6 +190,19 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		logus.WriteLog(logus.LogLevelInfo, "Redis initialized, session management enabled")
 	}
 
+	// The storage provider exists only when media is enabled; a failure to
+	// start it is a startup failure, not a missing route.
+	var storageProvider storage.StorageProvider
+	if cfg.Media.Enabled {
+		initStorage := d.initStorage
+		if initStorage == nil {
+			initStorage = media.InitStorage
+		}
+		if storageProvider, err = initStorage(cfg.Storage); err != nil {
+			return fail(fmt.Errorf("initialize storage: %w", err))
+		}
+	}
+
 	authCfg := cfg.Auth
 	authCfg.DB = a.db
 	if a.redis != nil {
@@ -204,7 +220,7 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		return fail(fmt.Errorf("initialize authkit: %w", err))
 	}
 
-	if a.engine, err = router.New(router.Deps{Config: cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit}); err != nil {
+	if a.engine, err = router.New(router.Deps{Config: cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: storageProvider}); err != nil {
 		return fail(fmt.Errorf("initialize routes: %w", err))
 	}
 	if d.routes != nil {

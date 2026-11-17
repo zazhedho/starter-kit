@@ -25,6 +25,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
+	"starter-kit/pkg/storage"
 )
 
 const testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"
@@ -350,6 +351,80 @@ func TestNewFailsOnInvalidAuthConfig(t *testing.T) {
 	if err == nil {
 		_ = a.Close()
 		t.Fatal("newApp accepted a short JWT key")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("database was left open: %v", err)
+	}
+}
+
+type nopStorage struct{ storage.StorageProvider }
+
+func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
+	mediaRoutes := func(a *App) int {
+		n := 0
+		for _, r := range a.engine.Routes() {
+			if strings.HasPrefix(r.Path, "/api/media") {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("disabled", func(t *testing.T) {
+		mock, _, open := mockDB(t)
+		mock.ExpectClose()
+		a, err := newApp(context.Background(), testConfig(), deps{
+			openDB: open,
+			initStorage: func(config.Storage) (storage.StorageProvider, error) {
+				t.Error("storage was initialized although media is disabled")
+				return nil, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = a.Close() }()
+		if mediaRoutes(a) != 0 {
+			t.Fatal("media routes registered while media is disabled")
+		}
+	})
+
+	t.Run("enabled", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.Media.Enabled = true
+		cfg.Media.MaxFileSizeBytes = 1 << 20
+		mock, _, open := mockDB(t)
+		mock.ExpectClose()
+		a, err := newApp(context.Background(), cfg, deps{
+			openDB:      open,
+			initStorage: func(config.Storage) (storage.StorageProvider, error) { return nopStorage{}, nil },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = a.Close() }()
+		if mediaRoutes(a) == 0 {
+			t.Fatal("media routes missing although media is enabled")
+		}
+	})
+}
+
+func TestNewClosesDatabaseWhenStorageFails(t *testing.T) {
+	cfg := testConfig()
+	cfg.Media.Enabled = true
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	boom := errors.New("boom")
+
+	a, err := newApp(context.Background(), cfg, deps{
+		openDB:      open,
+		initStorage: func(config.Storage) (storage.StorageProvider, error) { return nil, boom },
+	})
+	if !errors.Is(err, boom) {
+		if a != nil {
+			_ = a.Close()
+		}
+		t.Fatalf("newApp = %v, want the storage error", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("database was left open: %v", err)
