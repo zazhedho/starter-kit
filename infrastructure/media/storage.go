@@ -2,40 +2,35 @@ package media
 
 import (
 	"fmt"
-	"github.com/zazhedho/gokit/utils"
+
 	"github.com/zazhedho/logus"
+
+	"starter-kit/internal/config"
 	"starter-kit/pkg/storage"
-	"strconv"
 )
 
-// InitStorage initializes and returns a storage provider (MinIO or R2)
-func InitStorage() (storage.StorageProvider, error) {
+// InitStorage starts the storage provider (MinIO or R2) from explicit settings.
+func InitStorage(cfg config.Storage) (storage.StorageProvider, error) {
 	logus.WriteLog(logus.LogLevelDebug, "InitStorage; Initializing storage provider...")
 
-	provider := utils.NormalizeKey(utils.GetEnv("STORAGE_PROVIDER", "minio"))
-
-	useSSL, _ := strconv.ParseBool(utils.GetEnv("STORAGE_USE_SSL", "false"))
-
-	config := storage.Config{
-		Provider:        provider,
-		Endpoint:        utils.GetEnv("STORAGE_ENDPOINT", "localhost:9000"),
-		AccessKeyID:     utils.GetEnv("STORAGE_ACCESS_KEY", "minioadmin"),
-		SecretAccessKey: utils.GetEnv("STORAGE_SECRET_KEY", "minioadmin"),
-		BucketName:      utils.GetEnv("STORAGE_BUCKET_NAME", "uploads"),
-		UseSSL:          useSSL,
-		BaseURL:         utils.GetEnv("STORAGE_BASE_URL", "http://localhost:9000"),
-		Region:          utils.GetEnv("STORAGE_REGION", "auto"),
-		AccountID:       utils.GetEnv("R2_ACCOUNT_ID", ""),
-	}
-
-	storageProvider, err := storage.NewStorageProvider(config)
+	provider, err := storage.NewStorageProvider(storage.Config{
+		Provider:        cfg.Provider,
+		Endpoint:        cfg.Endpoint,
+		AccessKeyID:     cfg.AccessKey,
+		SecretAccessKey: cfg.SecretKey,
+		BucketName:      cfg.Bucket,
+		UseSSL:          cfg.UseSSL,
+		BaseURL:         cfg.BaseURL,
+		Region:          cfg.Region,
+		AccountID:       cfg.R2AccountID,
+	})
 	if err != nil {
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("InitStorage; Failed to initialize storage provider: %s", err.Error()))
 		return nil, fmt.Errorf("failed to initialize storage provider: %w", err)
 	}
 
 	logus.WriteLog(logus.LogLevelInfo, fmt.Sprintf("InitStorage; Storage provider initialized successfully. Provider: %s, Endpoint: %s, Bucket: %s",
-		provider, config.Endpoint, config.BucketName))
+		cfg.Provider, cfg.Endpoint, cfg.Bucket))
 
-	return storageProvider, nil
+	return provider, nil
 }

@@ -165,7 +165,7 @@ func TestGetProvinceMapsRepositoryRows(t *testing.T) {
 			{Code: "11", Name: "Aceh"},
 			{Code: "12", Name: "Sumatera Utara"},
 		},
-	})
+	}, Options{})
 
 	got, err := svc.GetProvince(context.Background())
 	if err != nil {
@@ -197,7 +197,7 @@ func TestLocationServiceReadMethodsMapRepositoryRows(t *testing.T) {
 			CreatedAt: now,
 			UpdatedAt: &now,
 		},
-	})
+	}, Options{})
 
 	if got, err := svc.GetCity(context.Background(), "31"); err != nil || len(got) != 1 || got[0].Code != "3171" {
 		t.Fatalf("get city: got=%+v err=%v", got, err)
@@ -214,7 +214,7 @@ func TestLocationServiceReadMethodsMapRepositoryRows(t *testing.T) {
 }
 
 func TestLocationServiceReadMethodsReturnRepositoryErrors(t *testing.T) {
-	svc := NewLocationService(&locationRepoTestDouble{listErr: errors.New("database down")})
+	svc := NewLocationService(&locationRepoTestDouble{listErr: errors.New("database down")}, Options{})
 	ctx := context.Background()
 
 	if _, err := svc.GetProvince(ctx); err == nil {
@@ -295,7 +295,7 @@ func TestLocationServiceGetVillageFallsBackToLocationService(t *testing.T) {
 }
 
 func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
-	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound})
+	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound}, Options{})
 
 	_, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "city"})
 	if err == nil || err.Error() != "province_code is required for city sync" {
@@ -330,7 +330,7 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 			CreatedAt: now,
 			UpdatedAt: &now,
 		},
-	})
+	}, Options{})
 
 	got, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2025"})
 	if !errors.Is(err, ErrLocationSyncRunning) {
@@ -342,9 +342,8 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 }
 
 func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
-	t.Setenv("LOCATION_SOURCE_YEAR", "2026")
 	repo := &locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound}
-	svc := NewLocationService(repo)
+	svc := NewLocationService(repo, Options{SourceYear: "2026"})
 
 	got, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "province"})
 	if err != nil {
@@ -363,12 +362,12 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 }
 
 func TestStartSyncRepositoryErrors(t *testing.T) {
-	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: errors.New("database down")})
+	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: errors.New("database down")}, Options{})
 	if _, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2026"}); err == nil {
 		t.Fatal("expected active job lookup error")
 	}
 
-	svc = NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound, createSyncJobErr: errors.New("database down")})
+	svc = NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound, createSyncJobErr: errors.New("database down")}, Options{})
 	if _, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2026"}); err == nil {
 		t.Fatal("expected create sync job error")
 	}

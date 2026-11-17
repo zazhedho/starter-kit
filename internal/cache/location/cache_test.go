@@ -3,17 +3,14 @@ package locationcache
 import (
 	"context"
 	"testing"
+	"time"
 
 	"starter-kit/internal/dto"
 
 	redismock "github.com/go-redis/redismock/v9"
 )
 
-func TestTTLAndKeys(t *testing.T) {
-	t.Setenv("LOCATION_CACHE_TTL", "-1s")
-	if TTL() != defaultTTL {
-		t.Fatal("expected invalid cache ttl to fall back to default")
-	}
+func TestKeys(t *testing.T) {
 	if ProvinceKey() != "location:province" {
 		t.Fatalf("unexpected province cache key")
 	}
@@ -35,8 +32,9 @@ func TestGetSetDeleteUseRedis(t *testing.T) {
 		t.Fatalf("expected cached locations, ok=%v got=%+v", ok, got)
 	}
 
-	mock.Regexp().ExpectSet("location:province", `.+`, defaultTTL).SetVal("OK")
-	Set(ctx, client, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}})
+	ttl := 3 * time.Hour
+	mock.Regexp().ExpectSet("location:province", `.+`, ttl).SetVal("OK")
+	Set(ctx, client, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}}, ttl)
 
 	mock.ExpectScan(0, "location:*", 100).SetVal([]string{"location:province", "location:city:11"}, 0)
 	mock.ExpectDel("location:province", "location:city:11").SetVal(2)
@@ -54,6 +52,6 @@ func TestNilClientMissAndNoop(t *testing.T) {
 		t.Fatalf("expected cache miss, got %+v", got)
 	}
 
-	Set(ctx, nil, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}})
+	Set(ctx, nil, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}}, time.Hour)
 	DeleteKeys(ctx, nil, "location:")
 }

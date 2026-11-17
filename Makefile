@@ -16,10 +16,10 @@ lint-install:
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 run:
-	@go run main.go
+	@go run ./cmd/api
 
 debug: lint
-	@go run main.go
+	@go run ./cmd/api
 
 hook-install:
 	@git config core.hooksPath .githooks

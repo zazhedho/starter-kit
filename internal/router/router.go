@@ -1,109 +1,107 @@
+// Package router builds the HTTP engine: global middleware, health checks and
+// every module's routes, from explicit configuration and connections. It
+// opens nothing; the caller passes in every connection and provider.
 package router
 
 import (
-	"net/http"
-	"strings"
-	"time"
+	"database/sql"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
 	authmiddlewares "github.com/zazhedho/authkit/middlewares"
 	"github.com/zazhedho/gokit/middlewares"
-	"github.com/zazhedho/gokit/utils"
-	"github.com/zazhedho/logus"
 	"gorm.io/gorm"
 
-	"starter-kit/infrastructure/database"
-	mediaInfrastructure "starter-kit/infrastructure/media"
-	locationHandler "starter-kit/internal/handlers/http/location"
-	mediaHandler "starter-kit/internal/handlers/http/media"
-	locationRepo "starter-kit/internal/repositories/location"
-	mediaRepo "starter-kit/internal/repositories/media"
-	locationSvc "starter-kit/internal/services/location"
-	mediaSvc "starter-kit/internal/services/media"
+	"starter-kit/internal/config"
+	"starter-kit/pkg/storage"
 )
 
-type Routes struct {
-	App *gin.Engine
-	DB  *gorm.DB
-	Kit *authkit.Kit
+// Deps is everything the routes need. Redis is nil when Redis is not used;
+// Storage is nil when media is disabled.
+type Deps struct {
+	Config  config.Config
+	DB      *gorm.DB
+	SQLDB   *sql.DB
+	Redis   *redis.Client
+	Kit     *authkit.Kit
+	Storage storage.StorageProvider
 }
 
-func NewRoutes() *Routes {
-	app := gin.Default()
-
-	app.Use(middlewares.CORS())
-	app.Use(gin.CustomRecovery(middlewares.ErrorHandler))
-	app.Use(middlewares.SetContextId())
-	app.Use(authmiddlewares.RequestLogger())
-
-	app.GET("/healthcheck", func(ctx *gin.Context) {
-		logus.WriteLogWithContext(ctx, logus.LogLevelDebug, "ClientIP: "+ctx.ClientIP())
-		ctx.JSON(http.StatusOK, gin.H{
-			"message": "OK!!",
-		})
-	})
-
-	return &Routes{
-		App: app,
-	}
+// registrar mounts one module's routes. Module registrars take the /api group
+// and use paths relative to it.
+type registrar struct {
+	name     string
+	register func(r gin.IRouter, d Deps) error
 }
 
-// MountAuthKit registers the users, auth, RBAC, menu, config and audit routes
-// provided by authkit under /api. Kit must be set first.
-func (r *Routes) MountAuthKit() {
-	r.Kit.Mount(r.App.Group("/api"))
+// rootRegistrars are mounted on the engine itself (probes live outside /api).
+var rootRegistrars = []registrar{
+	{"health", registerHealth},
 }
 
-func (r *Routes) LocationRoutes() {
-	repo := locationRepo.NewLocationRepo(r.DB)
-	svc := locationSvc.NewLocationService(repo, database.GetRedisClient())
-	h := locationHandler.NewLocationHandler(svc)
-
-	location := r.App.Group("/api/location")
-	{
-		location.GET("/province", h.GetProvince)
-		location.GET("/city", h.GetCity)
-		location.GET("/district", h.GetDistrict)
-		location.GET("/village", h.GetVillage)
-	}
-
-	locationPriv := r.App.Group("/api/location").Use(r.Kit.Auth())
-	{
-		locationPriv.POST("/sync", r.Kit.Can("locations", "sync"), h.Sync)
-		locationPriv.GET("/sync/:id", r.Kit.Can("locations", "sync"), h.GetSyncJob)
-	}
+// apiRegistrars are mounted under /api, after authkit's own routes. A new
+// module's routes must also be added to the expected list in routes_test.go
+// (ownRoutesWithoutMedia), or TestRouteTable fails.
+var apiRegistrars = []registrar{
+	{"location", registerLocation},
+	{"media", registerMedia},
 }
 
-func (r *Routes) MediaRoutes() error {
-	if !utils.GetEnv("MEDIA_ENABLED", false) {
-		logus.WriteLog(logus.LogLevelDebug, "Media routes disabled")
-		return nil
+func (d Deps) validate() error {
+	var missing []string
+	if d.DB == nil {
+		missing = append(missing, "DB")
+	}
+	if d.SQLDB == nil {
+		missing = append(missing, "SQLDB")
+	}
+	if d.Kit == nil {
+		missing = append(missing, "Kit")
+	}
+	if d.Config.Media.Enabled && d.Storage == nil {
+		missing = append(missing, "Storage (media is enabled)")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("router deps incomplete: %v", missing)
+	}
+	return nil
+}
+
+// New builds the engine with its global middleware and all routes.
+func New(d Deps) (*gin.Engine, error) {
+	if err := d.validate(); err != nil {
+		return nil, err
 	}
 
-	storageProvider, err := mediaInfrastructure.InitStorage()
-	if err != nil {
-		return err
+	engine := gin.New()
+
+	engine.Use(middlewares.CORS())
+	engine.Use(gin.CustomRecovery(middlewares.ErrorHandler))
+	engine.Use(middlewares.SetContextId())
+	engine.Use(authmiddlewares.RequestLogger())
+	engine.Use(bodyLimit(d.Config.HTTP.MaxBodyBytes))
+
+	if err := mount(engine, rootRegistrars, d); err != nil {
+		return nil, err
 	}
 
-	maxFileSize := int64(utils.GetEnv("MEDIA_MAX_FILE_SIZE_MB", 5)) << 20
-	allowedContentTypes := strings.Split(utils.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", "image/jpeg,image/png,image/webp,image/gif,application/pdf"), ",")
-	repo := mediaRepo.NewMediaRepo(r.DB)
-	svc := mediaSvc.NewMediaService(repo, storageProvider, maxFileSize, allowedContentTypes)
-	h := mediaHandler.NewMediaHandler(svc, r.Kit.Audit())
-
-	media := r.App.Group("/api/media").Use(r.Kit.Auth())
-	{
-		uploadLimiter := middlewares.IPRateLimitMiddleware(
-			database.GetRedisClient(),
-			"media_upload",
-			utils.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
-			time.Duration(utils.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60))*time.Second,
-		)
-		media.POST("", uploadLimiter, h.Upload)
-		media.DELETE("/:id", h.Delete)
+	api := engine.Group("/api")
+	d.Kit.Mount(api)
+	if err := mount(api, apiRegistrars, d); err != nil {
+		return nil, err
 	}
 
-	logus.WriteLog(logus.LogLevelInfo, "Media routes registered")
+	return engine, nil
+}
+
+// mount runs the registrars in order and stops at the first error.
+func mount(r gin.IRouter, registrars []registrar, d Deps) error {
+	for _, reg := range registrars {
+		if err := reg.register(r, d); err != nil {
+			return fmt.Errorf("register %s routes: %w", reg.name, err)
+		}
+	}
 	return nil
 }

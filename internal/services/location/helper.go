@@ -14,8 +14,6 @@ import (
 	"starter-kit/internal/dto"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 type locationServiceEnvelope struct {
@@ -28,16 +26,8 @@ type locationServiceItem struct {
 	Name     string `json:"name"`
 }
 
-func locationServiceTimeout() time.Duration {
-	timeoutSec := utils.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", 20)
-	if timeoutSec <= 0 {
-		timeoutSec = 20
-	}
-	return time.Duration(timeoutSec) * time.Second
-}
-
 func (s *LocationService) locationServiceURL(path string, query map[string]string) string {
-	baseURL := strings.TrimRight(utils.GetEnv("LOCATION_SERVICE_BASE_URL", defaultLocationServiceBaseURL), "/")
+	baseURL := strings.TrimRight(s.baseURL, "/")
 	endpoint := strings.TrimLeft(path, "/")
 	rawURL := baseURL + "/" + endpoint
 	if len(query) == 0 {
@@ -91,11 +81,12 @@ func (s *LocationService) fetchLocationMap(ctx context.Context, url, entity stri
 	return dataMap, nil
 }
 
-func setLocationCache(ctx context.Context, client *redis.Client, cacheKey string, locations []dto.Location) {
-	if len(locations) == 0 {
+func (s *LocationService) setLocationCache(ctx context.Context, cacheKey string, locations []dto.Location) {
+	// A non-positive TTL would store the entry without expiry; skip instead.
+	if len(locations) == 0 || s.cacheTTL <= 0 {
 		return
 	}
-	locationcache.Set(ctx, client, cacheKey, locations)
+	locationcache.Set(ctx, s.Redis, cacheKey, locations, s.cacheTTL)
 }
 
 func decodeLocationMap(body []byte) (map[string]string, error) {

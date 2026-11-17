@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -24,20 +25,29 @@ import (
 const multipartOverhead = int64(1 << 20)
 
 type MediaHandler struct {
-	Service interfacemedia.ServiceMediaInterface
+	Service       interfacemedia.ServiceMediaInterface
+	uploadTimeout time.Duration
 	auditwriter.AuditWriter
 }
 
-func NewMediaHandler(service interfacemedia.ServiceMediaInterface, auditService interfaceaudit.ServiceAuditInterface) *MediaHandler {
+func NewMediaHandler(service interfacemedia.ServiceMediaInterface, auditService interfaceaudit.ServiceAuditInterface, uploadTimeout time.Duration) *MediaHandler {
 	return &MediaHandler{
-		Service:     service,
-		AuditWriter: auditwriter.NewAuditWriter(auditService, "MediaHandler"),
+		Service:       service,
+		uploadTimeout: uploadTimeout,
+		AuditWriter:   auditwriter.NewAuditWriter(auditService, "MediaHandler"),
 	}
 }
 
 func (h *MediaHandler) Upload(ctx *gin.Context) {
 	logID := utils.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Upload]"
+	// Uploads may need longer than the server-wide read timeout.
+	if h.uploadTimeout > 0 {
+		rc := http.NewResponseController(ctx.Writer)
+		if err := rc.SetReadDeadline(time.Now().Add(h.uploadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; SetReadDeadline; Error: %v", logPrefix, err))
+		}
+	}
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, h.Service.MaxFileSize()+multipartOverhead)
 
 	file, header, err := ctx.Request.FormFile("file")

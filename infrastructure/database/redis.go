@@ -2,23 +2,34 @@ package database
 
 import (
 	"context"
-	"fmt"
-	"github.com/zazhedho/gokit/utils"
-	"github.com/zazhedho/logus"
+	"errors"
+	"net"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zazhedho/logus"
+
+	"starter-kit/internal/config"
 )
 
-var RedisClient *redis.Client
-
-func InitRedis() (*redis.Client, error) {
-	opt, _ := redis.ParseURL(utils.GetEnv("REDIS_URL", ""))
-	if opt == nil {
+// OpenRedis connects to Redis and checks it with PING (5 second limit). On
+// failure nothing is left open. The caller owns, and must close, the client.
+func OpenRedis(ctx context.Context, cfg config.Redis) (*redis.Client, error) {
+	var opt *redis.Options
+	if cfg.URL != "" {
+		parsed, err := redis.ParseURL(cfg.URL)
+		if err != nil {
+			// The parse error quotes the URL, which may carry a password.
+			return nil, errors.New("REDIS_URL is invalid")
+		}
+		opt = parsed
+	} else {
 		opt = &redis.Options{
-			Addr:         fmt.Sprintf("%s:%s", utils.GetEnv("REDIS_HOST", "localhost"), utils.GetEnv("REDIS_PORT", "6379")),
-			Password:     utils.GetEnv("REDIS_PASSWORD", ""),
-			DB:           utils.GetEnv("REDIS_DB", 0),
+			Addr:         net.JoinHostPort(cfg.Host, cfg.Port),
+			Password:     cfg.Password,
+			DB:           cfg.DB,
 			DialTimeout:  10 * time.Second,
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
@@ -28,27 +39,30 @@ func InitRedis() (*redis.Client, error) {
 	}
 	client := redis.NewClient(opt)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-
-	_, err := client.Ping(ctx).Result()
-	if err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("Failed to connect to Redis: %v", err))
-		return nil, err
+	if err := client.Ping(pingCtx).Err(); err != nil {
+		_ = client.Close()
+		return nil, failed("ping redis: "+classifyRedis(err), "OpenRedis; ")
 	}
 
-	logus.WriteLog(logus.LogLevelInfo, fmt.Sprintf("Connected to Redis at %s:%s", utils.GetEnv("REDIS_HOST", "localhost"), utils.GetEnv("REDIS_PORT", "6379")))
-	RedisClient = client
+	logus.WriteLog(logus.LogLevelInfo, "OpenRedis; connected to Redis at "+client.Options().Addr)
 	return client, nil
 }
 
-func CloseRedis() error {
-	if RedisClient != nil {
-		return RedisClient.Close()
+// classifyRedis names the kind of failure without using the client's text,
+// which can quote addresses and credentials.
+func classifyRedis(err error) string {
+	var netErr net.Error
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "WRONGPASS") || strings.HasPrefix(msg, "NOAUTH") || strings.Contains(msg, "AUTH"):
+		return "authentication failed"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):
+		return "timed out"
+	default:
+		return "unavailable"
 	}
-	return nil
-}
-
-func GetRedisClient() *redis.Client {
-	return RedisClient
 }

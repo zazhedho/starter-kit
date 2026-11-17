@@ -15,7 +15,7 @@ func TestGetAppConfReturnsDefaultWhenConfigMissing(t *testing.T) {
 	t.Setenv("APP_CONFIG", t.TempDir())
 	t.Setenv("APP_ENV", "test")
 
-	if got := GetAppConf("MISSING_VALUE", "fallback", nil); got != "fallback" {
+	if got := getAppConf("MISSING_VALUE", "fallback", nil); got != "fallback" {
 		t.Fatalf("expected fallback value, got %v", got)
 	}
 }
@@ -32,7 +32,7 @@ func TestGetAppConfLoadsLocalEnvFileAndExportsValues(t *testing.T) {
 	t.Setenv("APP_ENV", "test")
 	t.Setenv("CONFIG_ID", "old-config")
 
-	if got := GetAppConf("FEATURE_FLAG", "fallback", nil); got != "enabled" {
+	if got := getAppConf("FEATURE_FLAG", "fallback", nil); got != "enabled" {
 		t.Fatalf("expected value from config file, got %v", got)
 	}
 	if got := os.Getenv("FEATURE_INT"); got != "42" {
@@ -50,7 +50,7 @@ func TestGetAppConfUsesCachedConsulConfig(t *testing.T) {
 	t.Setenv("CONFIG_ID", "old-config")
 
 	mock.ExpectGet("cache:config:app").SetVal(`{"config_id":"cached-config","feature_flag":"cached"}`)
-	if got := GetAppConf("FEATURE_FLAG", "fallback", client); got != "cached" {
+	if got := getAppConf("FEATURE_FLAG", "fallback", client); got != "cached" {
 		t.Fatalf("expected cached config value, got %v", got)
 	}
 	if got := os.Getenv("CONFIG_ID"); got != "cached-config" {
@@ -58,5 +58,26 @@ func TestGetAppConfUsesCachedConsulConfig(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("redis expectations: %v", err)
+	}
+}
+
+func TestLoadRemoteExportsTheConfigFile(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "app.env"), []byte("CONFIG_ID=remote-file\nREMOTE_FLAG=on\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("CONSUL", "")
+	t.Setenv("APP_CONFIG", dir)
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("CONFIG_ID", "old-config")
+
+	LoadRemote()
+
+	if got := os.Getenv("REMOTE_FLAG"); got != "on" {
+		t.Fatalf("REMOTE_FLAG = %q, want the config file value exported", got)
+	}
+	if got := os.Getenv("CONFIG_ID"); got != "remote-file" {
+		t.Fatalf("CONFIG_ID = %q", got)
 	}
 }
