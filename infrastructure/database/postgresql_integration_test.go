@@ -125,9 +125,9 @@ func TestIntegrationPasswordsWithSpecialCharacters(t *testing.T) {
 		const wrong = `wr ong'p\ass@:/-SECRET`
 		cfg := admin
 		cfg.Username, cfg.Password = role, wrong
-		stop := captureOutput(t)
+		mark := logs.Mark()
 		_, sqlDB, err := Open(cfg, integrationTimezone)
-		output := stop()
+		output := logs.Since(mark)
 		if err == nil {
 			_ = sqlDB.Close()
 			t.Fatal("a wrong password was accepted")

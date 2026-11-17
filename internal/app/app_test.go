@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -272,6 +274,9 @@ func TestServerTimeoutsComeFromConfig(t *testing.T) {
 	}
 }
 
+// TestCloseIsIdempotent holds a Redis client, because closing a go-redis
+// client twice returns an error: without the guard in Close the second call
+// would report "redis: client is closed".
 func TestCloseIsIdempotent(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectClose()
@@ -279,10 +284,16 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mr := miniredis.RunT(t)
+	a.redis = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
 	for i := 0; i < 2; i++ {
 		if err := a.Close(); err != nil {
 			t.Fatalf("Close #%d = %v", i+1, err)
 		}
+	}
+	if err := a.redis.Close(); err == nil {
+		t.Fatal("the Redis client was not closed by App.Close")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

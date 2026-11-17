@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -99,44 +98,6 @@ func TestNewRegistersHealthcheck(t *testing.T) {
 	}
 }
 
-// captureStdout collects what is written to the process stdout descriptor,
-// where the logger writes, until stop is called.
-func captureStdout(t *testing.T) (stop func() string) {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := syscall.Dup(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Dup2(int(w.Fd()), 1); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&buf, r)
-		close(done)
-	}()
-	stopped := false
-	stop = func() string {
-		if stopped {
-			return ""
-		}
-		stopped = true
-		_ = syscall.Dup2(saved, 1)
-		_ = syscall.Close(saved)
-		_ = w.Close()
-		<-done
-		_ = r.Close()
-		return buf.String()
-	}
-	t.Cleanup(func() { stop() })
-	return stop
-}
-
 func accessLogLines(output string) []string {
 	var lines []string
 	for _, line := range strings.Split(output, "\n") {
@@ -155,7 +116,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
 
-	stop := captureStdout(t)
+	mark := logs.Mark()
 	ok := httptest.NewRecorder()
 	okReq := httptest.NewRequest(http.MethodGet, "/healthcheck", nil)
 	okReq.Header.Set("X-Request-ID", requestID)
@@ -164,7 +125,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	big := httptest.NewRecorder()
 	bigReq := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(strings.Repeat("a", 4096)))
 	engine.ServeHTTP(big, bigReq)
-	lines := accessLogLines(stop())
+	lines := accessLogLines(logs.Since(mark))
 
 	if ok.Header().Get("X-Request-ID") != requestID {
 		t.Fatalf("X-Request-ID = %q", ok.Header().Get("X-Request-ID"))
