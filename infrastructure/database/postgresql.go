@@ -37,13 +37,21 @@ func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
 		connCfg.RuntimeParams["TimeZone"] = timezone
 	}
 
-	sqlDB := stdlib.OpenDB(*connCfg)
+	return attach(stdlib.OpenDB(*connCfg), cfg)
+}
+
+// attach wraps an existing pool in gorm, checks the connection, and applies
+// the pool limits. On failure the pool is closed and only an error returned.
+func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
 		TranslateError: true,
 		// gorm would print the raw driver error, DSN included, before we see it.
 		Logger: gormlogger.Discard,
 	})
 	if err != nil {
+		// gorm closes the pool when its own check fails; closing again is
+		// harmless and keeps this guarantee independent of gorm's internals.
+		_ = sqlDB.Close()
 		return nil, nil, failed("connect to database: "+classify(err), "database.Open; ")
 	}
 

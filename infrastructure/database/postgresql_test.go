@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"starter-kit/internal/config"
@@ -91,5 +92,27 @@ func TestClassifyDistinguishesRejectionFromUnreachable(t *testing.T) {
 				t.Fatalf("classify = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// TestAttachClosesThePoolWhenTheConnectionCheckFails: the pool exists before
+// the first connection is tried, so a failure must not leave it open.
+func TestAttachClosesThePoolWhenTheConnectionCheckFails(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectPing().WillReturnError(&pgconn.PgError{Code: "28P01", Message: "password authentication failed for user x-SECRET"})
+	mock.ExpectClose()
+
+	db, pool, err := attach(sqlDB, config.Database{MaxOpenConns: 1})
+	if err == nil || db != nil || pool != nil {
+		t.Fatalf("attach = %v, %v, %v; want only an error", db, pool, err)
+	}
+	if !strings.Contains(err.Error(), "authentication failed") || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("error = %q", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the pool was left open: %v", err)
 	}
 }
