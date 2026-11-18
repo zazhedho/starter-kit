@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -74,5 +75,18 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a hanging recovery was not bounded")
+	}
+}
+
+func TestRegisterLocationRegistersAShutdownHook(t *testing.T) {
+	d := newTestDeps(t, nil)
+	if err := registerLocation(gin.New(), d); err != nil {
+		t.Fatalf("registerLocation: %v", err)
+	}
+	if got := d.Lifecycle.Len(); got != 1 {
+		t.Fatalf("registerLocation registered %d shutdown hooks, want 1", got)
+	}
+	if err := d.Lifecycle.Close(context.Background()); err != nil {
+		t.Fatalf("Lifecycle.Close = %v", err)
 	}
 }

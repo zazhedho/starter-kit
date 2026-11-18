@@ -3,31 +3,20 @@
 package router
 
 import (
-	"database/sql"
 	"fmt"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
-	"gorm.io/gorm"
 
-	"starter-kit/internal/config"
-	servicemedia "starter-kit/internal/services/media"
+	"starter-kit/internal/router/module"
 )
 
-// Deps is everything the routes need. Redis is nil when unused, Storage when media
-// is disabled; the caller closes Lifecycle.
-type Deps struct {
-	Config  config.Config
-	DB      *gorm.DB
-	SQLDB   *sql.DB
-	Redis   *redis.Client
-	Kit     *authkit.Kit
-	Storage servicemedia.Storage
-
-	Lifecycle *Lifecycle
-}
+// Deps and Lifecycle are temporary aliases while the modules move out.
+type (
+	Deps      = module.Deps
+	Lifecycle = module.Lifecycle
+)
 
 // registrar mounts one module's routes. Module registrars take the /api group
 // and use paths relative to it.
@@ -48,7 +37,7 @@ var apiRegistrars = []registrar{
 	{"media", registerMedia},
 }
 
-func (d Deps) validate() error {
+func validate(d Deps) error {
 	var missing []string
 	if d.DB == nil {
 		missing = append(missing, "DB")
@@ -74,7 +63,7 @@ func (d Deps) validate() error {
 // New returns the engine, or an error when Deps is incomplete or a registrar
 // fails.
 func New(d Deps) (*gin.Engine, error) {
-	if err := d.validate(); err != nil {
+	if err := validate(d); err != nil {
 		return nil, err
 	}
 

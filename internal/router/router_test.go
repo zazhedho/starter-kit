@@ -318,7 +318,19 @@ func (fakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.
 	return domainmedia.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
 }
 
+func (fakeStorage) UploadFileFromBytes(_ context.Context, _ []byte, filename, folder, _ string) (domainmedia.StoredFile, error) {
+	return domainmedia.StoredFile{ObjectName: folder + "/" + filename, URL: "https://files.example.test/" + folder + "/" + filename}, nil
+}
+
 func (fakeStorage) DeleteFile(context.Context, string) error { return nil }
+
+func (fakeStorage) GetFileURL(objectName string) string {
+	return "https://files.example.test/" + objectName
+}
+
+func (fakeStorage) DownloadFile(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
 
 func TestMediaRoutesProtection(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
