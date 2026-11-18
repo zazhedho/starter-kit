@@ -4,7 +4,6 @@
 *.dll
 *.so
 *.dylib
-team-leader-development-program
 
 # Test binary
 *.test
@@ -14,6 +13,7 @@ team-leader-development-program
 
 # Dependency directories
 vendor/
+docs/superpowers/
 
 # IDE
 .idea/
