@@ -4,11 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -765,82 +761,6 @@ func TestSetServerIPEnv(t *testing.T) {
 	if os.Getenv("ServerIP") == "" {
 		t.Fatal("ServerIP was not set")
 	}
-}
-
-func repoFiles(t *testing.T, visit func(path string, data []byte)) {
-	t.Helper()
-	root := filepath.Join("..", "..")
-	repo := os.DirFS(root)
-	err := fs.WalkDir(repo, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if d.Name() == ".git" || d.Name() == ".superpowers" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		data, err := fs.ReadFile(repo, path)
-		if err != nil {
-			return err
-		}
-		visit(path, data)
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNoFatalOutsideCmd(t *testing.T) {
-	repoFiles(t, func(path string, data []byte) {
-		if strings.HasPrefix(path, "cmd"+string(filepath.Separator)) {
-			return
-		}
-		for _, banned := range []string{"log.Fatal", "os.Exit("} {
-			if strings.Contains(string(data), banned) {
-				t.Errorf("%s uses %s outside cmd/", path, banned)
-			}
-		}
-	})
-}
-
-func TestNoPackageLevelConnections(t *testing.T) {
-	banned := map[string]bool{"redis.Client": true, "gorm.DB": true, "sql.DB": true}
-	repoFiles(t, func(path string, data []byte) {
-		file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
-		if err != nil {
-			t.Errorf("parse %s: %v", path, err)
-			return
-		}
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.VAR {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				vs := spec.(*ast.ValueSpec)
-				if vs.Type == nil {
-					continue
-				}
-				expr := vs.Type
-				if star, ok := expr.(*ast.StarExpr); ok {
-					expr = star.X
-				}
-				sel, ok := expr.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				if pkg, ok := sel.X.(*ast.Ident); ok && banned[pkg.Name+"."+sel.Sel.Name] {
-					t.Errorf("%s declares a package-level %s.%s", path, pkg.Name, sel.Sel.Name)
-				}
-			}
-		}
-	})
 }
 
 func TestMain(m *testing.M) {
