@@ -26,7 +26,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/internal/infrastructure/storage"
+	domainmedia "starter-kit/internal/domain/media"
 )
 
 func newDryRunDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {
@@ -318,18 +318,11 @@ func TestLocationRoutesProtection(t *testing.T) {
 // fakeStorage is a storage provider that keeps nothing.
 type fakeStorage struct{}
 
-func (fakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (storage.FileInfo, error) {
-	return storage.FileInfo{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
+func (fakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
+	return domainmedia.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
 }
 
-func (fakeStorage) UploadFileFromBytes(context.Context, []byte, string, string, string) (storage.FileInfo, error) {
-	return storage.FileInfo{}, nil
-}
 func (fakeStorage) DeleteFile(context.Context, string) error { return nil }
-func (fakeStorage) GetFileURL(name string) string            { return name }
-func (fakeStorage) DownloadFile(context.Context, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
-}
 
 func TestMediaRoutesProtection(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {

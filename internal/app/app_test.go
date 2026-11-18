@@ -454,7 +454,7 @@ func TestNewFailsOnInvalidAuthConfig(t *testing.T) {
 	}
 }
 
-type nopStorage struct{ storage.StorageProvider }
+type nopStorage struct{ storage.Provider }
 
 func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 	mediaRoutes := func(a *App) int {
@@ -472,7 +472,7 @@ func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 		mock.ExpectClose()
 		a, err := newApp(context.Background(), testConfig(), deps{
 			openDB: open,
-			initStorage: func(config.Storage) (storage.StorageProvider, error) {
+			initStorage: func(config.Storage) (storage.Provider, error) {
 				t.Error("storage was initialized although media is disabled")
 				return nil, nil
 			},
@@ -497,7 +497,7 @@ func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 		mock.ExpectClose()
 		a, err := newApp(context.Background(), cfg, deps{
 			openDB:      open,
-			initStorage: func(config.Storage) (storage.StorageProvider, error) { return nopStorage{}, nil },
+			initStorage: func(config.Storage) (storage.Provider, error) { return nopStorage{}, nil },
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -521,7 +521,7 @@ func TestNewClosesDatabaseWhenStorageFails(t *testing.T) {
 
 	a, err := newApp(context.Background(), cfg, deps{
 		openDB:      open,
-		initStorage: func(config.Storage) (storage.StorageProvider, error) { return nil, boom },
+		initStorage: func(config.Storage) (storage.Provider, error) { return nil, boom },
 	})
 	if !errors.Is(err, boom) {
 		if a != nil {

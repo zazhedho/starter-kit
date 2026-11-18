@@ -4,15 +4,19 @@ import (
 	"context"
 	"io"
 	"mime/multipart"
+
+	domainmedia "starter-kit/internal/domain/media"
 )
 
-// StorageProvider defines the interface for object storage operations
-type StorageProvider interface {
+// Provider is the full set of operations the storage adapters offer. The media
+// service depends only on the two-method servicemedia.Storage port, which
+// Provider satisfies.
+type Provider interface {
 	// UploadFile uploads a file from multipart form and returns its storage metadata.
-	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (FileInfo, error)
+	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error)
 
 	// UploadFileFromBytes uploads file from byte array and returns its storage metadata.
-	UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (FileInfo, error)
+	UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (domainmedia.StoredFile, error)
 
 	// DeleteFile deletes a file using its URL
 	DeleteFile(ctx context.Context, fileURL string) error
@@ -22,11 +26,6 @@ type StorageProvider interface {
 
 	// DownloadFile downloads a file and returns a ReadCloser
 	DownloadFile(ctx context.Context, objectName string) (io.ReadCloser, error)
-}
-
-type FileInfo struct {
-	ObjectName string
-	URL        string
 }
 
 // Config holds the configuration for storage providers

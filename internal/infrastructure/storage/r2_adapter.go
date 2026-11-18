@@ -9,9 +9,11 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	domainmedia "starter-kit/internal/domain/media"
 )
 
-// R2Adapter implements StorageProvider for Cloudflare R2
+// R2Adapter implements Provider for Cloudflare R2
 type R2Adapter struct {
 	client     *minio.Client
 	bucketName string
@@ -20,7 +22,7 @@ type R2Adapter struct {
 }
 
 // NewR2Adapter creates a new Cloudflare R2 storage adapter
-func NewR2Adapter(config Config) (StorageProvider, error) {
+func NewR2Adapter(config Config) (*R2Adapter, error) {
 	endpoint := config.Endpoint
 
 	endpoint = strings.TrimPrefix(endpoint, "https://")
@@ -51,7 +53,7 @@ func NewR2Adapter(config Config) (StorageProvider, error) {
 	}, nil
 }
 
-func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (FileInfo, error) {
+func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
 	objectName := buildObjectName(fileHeader.Filename, folder)
 
 	fileSize := fileHeader.Size
@@ -65,13 +67,13 @@ func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHea
 		ContentType: contentType,
 	})
 	if err != nil {
-		return FileInfo{}, fmt.Errorf("failed to upload file to R2: %w", err)
+		return domainmedia.StoredFile{}, fmt.Errorf("failed to upload file to R2: %w", err)
 	}
 
-	return FileInfo{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
+	return domainmedia.StoredFile{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
 }
 
-func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (FileInfo, error) {
+func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (domainmedia.StoredFile, error) {
 	objectName := buildObjectName(filename, folder)
 
 	if contentType == "" {
@@ -83,10 +85,10 @@ func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filena
 		ContentType: contentType,
 	})
 	if err != nil {
-		return FileInfo{}, fmt.Errorf("failed to upload file to R2: %w", err)
+		return domainmedia.StoredFile{}, fmt.Errorf("failed to upload file to R2: %w", err)
 	}
 
-	return FileInfo{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
+	return domainmedia.StoredFile{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
 }
 
 func (r *R2Adapter) DeleteFile(ctx context.Context, fileURL string) error {

@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
-	"starter-kit/internal/infrastructure/storage"
 	interfacemedia "starter-kit/internal/interfaces/media"
 )
 
@@ -35,12 +34,12 @@ var defaultContentTypes = []string{
 
 type MediaService struct {
 	repo                interfacemedia.RepoMediaInterface
-	storage             storage.StorageProvider
+	storage             Storage
 	maxFileSize         int64
 	allowedContentTypes map[string]struct{}
 }
 
-func NewMediaService(repo interfacemedia.RepoMediaInterface, storageProvider storage.StorageProvider, maxFileSize int64, allowedContentTypes []string) *MediaService {
+func NewMediaService(repo interfacemedia.RepoMediaInterface, storageProvider Storage, maxFileSize int64, allowedContentTypes []string) *MediaService {
 	if maxFileSize <= 0 {
 		maxFileSize = defaultMaxFileSize
 	}

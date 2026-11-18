@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/internal/infrastructure/storage"
+	servicemedia "starter-kit/internal/services/media"
 )
 
 // Deps is everything the routes need. Redis is nil when Redis is not used;
@@ -25,7 +25,7 @@ type Deps struct {
 	SQLDB   *sql.DB
 	Redis   *redis.Client
 	Kit     *authkit.Kit
-	Storage storage.StorageProvider
+	Storage servicemedia.Storage
 }
 
 // registrar mounts one module's routes. Module registrars take the /api group

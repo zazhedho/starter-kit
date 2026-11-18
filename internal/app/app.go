@@ -53,8 +53,8 @@ type App struct {
 	engine *gin.Engine  // nil until buildRoutes has run
 	server *http.Server // nil until buildRoutes has run
 
-	storage storage.StorageProvider // nil unless media is enabled
-	routes  func(*gin.Engine)       // extra routes added by tests
+	storage storage.Provider  // nil unless media is enabled
+	routes  func(*gin.Engine) // extra routes added by tests
 
 	listener net.Listener                    // nil: Serve listens on server.Addr
 	migrate  func(ctx context.Context) error // replaces the real migrations in tests
@@ -68,7 +68,7 @@ type App struct {
 type deps struct {
 	openDB      func(config.Database, string) (*gorm.DB, *sql.DB, error)
 	listener    net.Listener
-	initStorage func(config.Storage) (storage.StorageProvider, error)
+	initStorage func(config.Storage) (storage.Provider, error)
 	routes      func(*gin.Engine)
 	migrate     func(ctx context.Context) error
 }

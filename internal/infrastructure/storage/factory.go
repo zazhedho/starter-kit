@@ -6,14 +6,22 @@ import (
 )
 
 // NewStorageProvider creates a new storage provider based on the configuration
-func NewStorageProvider(config Config) (StorageProvider, error) {
+func NewStorageProvider(config Config) (Provider, error) {
 	provider := gokit.NormalizeKey(config.Provider)
 
 	switch provider {
 	case "minio":
-		return NewMinIOAdapter(config)
+		adapter, err := NewMinIOAdapter(config)
+		if err != nil {
+			return nil, err
+		}
+		return adapter, nil
 	case "r2", "cloudflare", "cloudflare-r2":
-		return NewR2Adapter(config)
+		adapter, err := NewR2Adapter(config)
+		if err != nil {
+			return nil, err
+		}
+		return adapter, nil
 	default:
 		return nil, fmt.Errorf("unsupported storage provider: %s (supported: minio, r2)", config.Provider)
 	}

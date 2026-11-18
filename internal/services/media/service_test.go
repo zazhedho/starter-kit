@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"github.com/zazhedho/authkit"
-	"io"
 	"mime/multipart"
 	"net/textproto"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
-	"starter-kit/internal/infrastructure/storage"
 )
 
 type mediaTestFile struct {
@@ -47,30 +45,20 @@ func (m *mediaRepoMock) Delete(_ context.Context, id string) error {
 
 type mediaStorageMock struct {
 	uploadedHeader *multipart.FileHeader
-	uploadResult   storage.FileInfo
+	uploadResult   domainmedia.StoredFile
 	uploadErr      error
 	deletedURL     string
 	deleteErr      error
 }
 
-func (m *mediaStorageMock) UploadFile(_ context.Context, _ multipart.File, header *multipart.FileHeader, _ string) (storage.FileInfo, error) {
+func (m *mediaStorageMock) UploadFile(_ context.Context, _ multipart.File, header *multipart.FileHeader, _ string) (domainmedia.StoredFile, error) {
 	m.uploadedHeader = header
 	return m.uploadResult, m.uploadErr
-}
-
-func (m *mediaStorageMock) UploadFileFromBytes(context.Context, []byte, string, string, string) (storage.FileInfo, error) {
-	return storage.FileInfo{}, errors.New("not implemented")
 }
 
 func (m *mediaStorageMock) DeleteFile(_ context.Context, fileURL string) error {
 	m.deletedURL = fileURL
 	return m.deleteErr
-}
-
-func (m *mediaStorageMock) GetFileURL(objectName string) string { return objectName }
-
-func (m *mediaStorageMock) DownloadFile(context.Context, string) (io.ReadCloser, error) {
-	return nil, errors.New("not implemented")
 }
 
 func newMediaHeader(filename string, size int64) *multipart.FileHeader {
@@ -80,7 +68,7 @@ func newMediaHeader(filename string, size int64) *multipart.FileHeader {
 func TestUploadDetectsContentAndStoresMetadata(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repo := &mediaRepoMock{}
-	storageMock := &mediaStorageMock{uploadResult: storage.FileInfo{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
+	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
 	service := NewMediaService(repo, storageMock, 1024, nil)
 	ownerID := uuid.NewString()
 
@@ -132,7 +120,7 @@ func TestUploadDeletesObjectWhenMetadataStoreFails(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repoErr := errors.New("database unavailable")
 	repo := &mediaRepoMock{storeErr: repoErr}
-	storageMock := &mediaStorageMock{uploadResult: storage.FileInfo{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
+	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
 	service := NewMediaService(repo, storageMock, 1024, nil)
 
 	_, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("avatar.png", int64(len(png))))

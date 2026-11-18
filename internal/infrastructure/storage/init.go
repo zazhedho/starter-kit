@@ -9,7 +9,7 @@ import (
 )
 
 // InitStorage starts the storage provider (MinIO or R2) from explicit settings.
-func InitStorage(cfg config.Storage) (StorageProvider, error) {
+func InitStorage(cfg config.Storage) (Provider, error) {
 	logus.WriteLog(logus.LogLevelDebug, "InitStorage; Initializing storage provider...")
 
 	provider, err := NewStorageProvider(Config{

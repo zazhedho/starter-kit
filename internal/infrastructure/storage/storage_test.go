@@ -201,3 +201,19 @@ func TestStorageAdaptersReturnErrorsWithCanceledContext(t *testing.T) {
 		_ = r2Object.Close()
 	}
 }
+
+func TestNewStorageProviderReturnsNilInterfaceOnError(t *testing.T) {
+	provider, err := NewStorageProvider(Config{
+		Provider:        "minio",
+		Endpoint:        "://bad-endpoint",
+		AccessKeyID:     "access",
+		SecretAccessKey: "secret",
+		BucketName:      "bucket",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if provider != nil {
+		t.Fatalf("expected a nil Provider on error, got %#v", provider)
+	}
+}
