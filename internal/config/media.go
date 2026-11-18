@@ -36,23 +36,23 @@ func (s Storage) String() string {
 // GoString keeps %#v from printing the raw fields.
 func (s Storage) GoString() string { return s.String() }
 
-func mediaFromEnv(l *loader) (Media, Storage) {
+func mediaFromEnv() (Media, Storage) {
 	media := Media{
 		Enabled:             gokit.GetEnv("MEDIA_ENABLED", false),
-		MaxFileSizeBytes:    l.megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
-		AllowedContentTypes: splitList(l.str("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
+		MaxFileSizeBytes:    megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
+		AllowedContentTypes: splitList(gokit.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
 		UploadRateLimit:     gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
 		UploadRateWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
-		UploadTimeout:       l.duration("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
+		UploadTimeout:       gokit.GetEnv("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
 	}
 	storage := Storage{
-		Provider:    gokit.NormalizeKey(l.str("STORAGE_PROVIDER", "minio")),
+		Provider:    gokit.NormalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio")),
 		Endpoint:    gokit.GetEnv("STORAGE_ENDPOINT", ""),
 		AccessKey:   gokit.GetEnv("STORAGE_ACCESS_KEY", ""),
 		SecretKey:   gokit.GetEnv("STORAGE_SECRET_KEY", ""),
 		Bucket:      gokit.GetEnv("STORAGE_BUCKET_NAME", ""),
 		BaseURL:     gokit.GetEnv("STORAGE_BASE_URL", ""),
-		Region:      l.str("STORAGE_REGION", "auto"),
+		Region:      gokit.GetEnv("STORAGE_REGION", "auto"),
 		R2AccountID: gokit.GetEnv("R2_ACCOUNT_ID", ""),
 		UseSSL:      gokit.GetEnv("STORAGE_USE_SSL", false),
 	}
@@ -68,6 +68,9 @@ func (c Config) validateMedia() []string {
 	}
 	if c.Media.UploadTimeout <= 0 {
 		problems = append(problems, "MEDIA_UPLOAD_TIMEOUT must be greater than zero")
+	}
+	if c.Media.MaxFileSizeBytes <= 0 {
+		problems = append(problems, "MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024")
 	}
 	problems = append(problems, c.validateStorage()...)
 	problems = append(problems, c.validateMediaRate()...)
@@ -108,9 +111,6 @@ func (c Config) validateStorage() []string {
 		if _, err := url.ParseRequestURI(s.BaseURL); err != nil {
 			problems = append(problems, "STORAGE_BASE_URL must be a valid URL")
 		}
-	}
-	if size := c.Media.MaxFileSizeBytes; size <= 0 || size > maxSizeMB<<20 {
-		problems = append(problems, "MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024")
 	}
 	return problems
 }

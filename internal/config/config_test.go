@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/zazhedho/gokit"
 )
 
 var managedEnv = []string{
@@ -28,8 +29,12 @@ var managedEnv = []string{
 
 // clearEnv unsets every variable the config reads; t.Setenv registers the
 // restore of the original value before it is removed.
+// It also clears gokit's recorded parse errors, before and after the test, so
+// invalid values never leak between tests.
 func clearEnv(t *testing.T) {
 	t.Helper()
+	gokit.ResetEnvErrors()
+	t.Cleanup(gokit.ResetEnvErrors)
 	for _, key := range managedEnv {
 		t.Setenv(key, "")
 		if err := os.Unsetenv(key); err != nil {
@@ -335,7 +340,7 @@ func TestValidate(t *testing.T) {
 		t.Setenv("SMTP_FROM", "not-an-email")
 		wantInError(t, validateFromEnv(t),
 			"SMTP_PASS is required when SMTP is configured",
-			"SMTP_PORT must be a number between 1 and 65535",
+			"SMTP_PORT must be a valid int",
 			"SMTP_FROM must be a valid email address",
 		)
 	})
@@ -376,7 +381,7 @@ func TestValidate(t *testing.T) {
 		t.Setenv("REDIS_DB", "abc")
 		wantInError(t, validateFromEnv(t),
 			"REDIS_URL is invalid",
-			"REDIS_DB must be a non-negative integer",
+			"REDIS_DB must be a valid int",
 		)
 	})
 
@@ -408,6 +413,49 @@ func TestValidate(t *testing.T) {
 		wantInError(t, cfg.Validate(),
 			"HTTP_READ_TIMEOUT", "MEDIA_UPLOAD_TIMEOUT", "DB_CONN_MAX_LIFETIME", "DB_MAX_OPEN_CONNS", "HTTP_MAX_BODY_MB",
 		)
+	})
+
+	t.Run("a blank variable uses the default", func(t *testing.T) {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("DB_SSLMODE", "")
+		t.Setenv("HTTP_READ_TIMEOUT", "  ")
+		cfg := FromEnv()
+		if cfg.Database.SSLMode != "disable" || cfg.HTTP.ReadTimeout != 30*time.Second {
+			t.Fatalf("blank values must use defaults: %q %v", cfg.Database.SSLMode, cfg.HTTP.ReadTimeout)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("blank values must not be errors, got %v", err)
+		}
+	})
+
+	t.Run("durations accept bare seconds and Go syntax", func(t *testing.T) {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HTTP_READ_TIMEOUT", "60")
+		t.Setenv("HTTP_WRITE_TIMEOUT", "30s")
+		t.Setenv("HTTP_IDLE_TIMEOUT", "1m")
+		t.Setenv("HTTP_SHUTDOWN_TIMEOUT", "1h")
+		cfg := FromEnv()
+		if cfg.HTTP.ReadTimeout != 60*time.Second || cfg.HTTP.WriteTimeout != 30*time.Second ||
+			cfg.HTTP.IdleTimeout != time.Minute || cfg.HTTP.ShutdownTimeout != time.Hour {
+			t.Fatalf("durations not parsed: %+v", cfg.HTTP)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("every invalid variable is reported, named, and never echoed", func(t *testing.T) {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HTTP_READ_TIMEOUT", "3os-SECRET")
+		t.Setenv("REDIS_DB", "x-SECRET")
+		err := validateFromEnv(t)
+		wantInError(t, err, "HTTP_READ_TIMEOUT must be a valid", "REDIS_DB must be a valid")
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Fatalf("error echoes a value: %q", err.Error())
+		}
 	})
 
 	t.Run("database pool limits", func(t *testing.T) {
