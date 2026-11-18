@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
+	"github.com/zazhedho/logus"
 
 	domainlocation "starter-kit/internal/domain/location"
 	dtolocation "starter-kit/internal/dto/location"
@@ -251,4 +252,18 @@ func jsonEqual(t *testing.T, a, b []byte) bool {
 		t.Fatal(err)
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+func TestLocationSyncValidationErrorIsLoggedAtDebug(t *testing.T) {
+	prev := logus.GetLevel()
+	logus.SetLevel(logus.LogLevelDebug)
+	t.Cleanup(func() { logus.SetLevel(prev) })
+	handler := New(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("province_code is required for city sync")})
+	mark := logs.Mark()
+	performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "city"}, handler.Sync, nil)
+
+	out := logs.Since(mark)
+	if !strings.Contains(out, "province_code is required for city sync") || !strings.Contains(out, `"level":"DEBUG"`) {
+		t.Fatalf("expected a debug log line with the validation error, got:\n%s", out)
+	}
 }

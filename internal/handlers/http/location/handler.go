@@ -134,6 +134,7 @@ func (h *Handler) Sync(ctx *gin.Context) {
 		}
 
 		if errors.Is(err, domainlocation.ErrInvalidSync) {
+			logus.WriteLogWithContext(ctx, logus.LogLevelDebug, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
 			res := gokit.Response(http.StatusBadRequest, gokit.MsgSomethingWrong, logId, nil)
 			res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: err.Error()}
 			ctx.JSON(http.StatusBadRequest, res)

@@ -34,6 +34,9 @@ type Service struct {
 	mu      sync.Mutex
 	closed  bool
 	jobs    sync.WaitGroup
+	// settleBy is the deadline Close was given: the final state write of a
+	// canceled job must end by then. Zero until Close is called with one.
+	settleBy time.Time
 }
 
 // NewService builds the service. It performs no I/O: call RecoverInterruptedJobs

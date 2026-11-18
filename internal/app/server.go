@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/zazhedho/logus"
 )
@@ -16,7 +17,8 @@ var ErrShutdownTimeout = errors.New("app: shutdown timed out with requests still
 
 // Serve builds the routes if that has not happened yet, then handles requests
 // until ctx is canceled, stops accepting connections, and waits up to
-// HTTP_SHUTDOWN_TIMEOUT for running requests. It closes the App on every path
+// HTTP_SHUTDOWN_TIMEOUT for running requests and background work together (one
+// deadline, counted from when shutdown starts). It closes the App on every path
 // and returns nil after a clean shutdown, ErrShutdownTimeout when requests
 // were cut off, or the build/listen/serve error.
 func (a *App) Serve(ctx context.Context) error {
@@ -46,8 +48,11 @@ func (a *App) Serve(ctx context.Context) error {
 	}
 
 	logus.WriteLog(logus.LogLevelInfo, "Shutdown started")
-	// The caller's ctx is already canceled; the shutdown limit is its own.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.cfg.HTTP.ShutdownTimeout)
+	// One deadline for the whole shutdown: the HTTP drain, the lifecycle hooks
+	// and the final writes of the jobs they stop all end by it. The caller's
+	// ctx is already canceled; the limit is its own.
+	deadline := time.Now().Add(a.cfg.HTTP.ShutdownTimeout)
+	shutdownCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 
 	err := a.server.Shutdown(shutdownCtx)
@@ -61,7 +66,9 @@ func (a *App) Serve(ctx context.Context) error {
 	}
 	<-serveErr // Serve has returned http.ErrServerClosed by now
 
-	err = a.closeAfter(err)
+	if closeErr := a.closeBy(deadline); closeErr != nil {
+		err = errors.Join(err, closeErr)
+	}
 	if err == nil {
 		logus.WriteLog(logus.LogLevelInfo, "Shutdown complete")
 	}

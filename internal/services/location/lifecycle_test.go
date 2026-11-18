@@ -175,3 +175,81 @@ func TestRecoverInterruptedJobsFailsActiveJobs(t *testing.T) {
 		t.Fatalf("RecoverInterruptedJobs = %v, want it to wrap the repository error", err)
 	}
 }
+
+// deadlineRepo records the deadline of the context each settle write
+// received.
+type deadlineRepo struct {
+	*locationRepoTestDouble
+	updateDeadlines []time.Time
+}
+
+func (r *deadlineRepo) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
+	dl, _ := ctx.Deadline()
+	r.updateDeadlines = append(r.updateDeadlines, dl)
+	return r.locationRepoTestDouble.UpdateSyncJob(ctx, job)
+}
+
+func stuckJobService(t *testing.T, rt http.RoundTripper) (*Service, *deadlineRepo) {
+	t.Helper()
+	repo := &deadlineRepo{locationRepoTestDouble: &locationRepoTestDouble{
+		activeJobErr: domainlocation.ErrNotFound,
+		syncJob:      domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: time.Now()},
+	}}
+	svc := NewService(repo, Options{NewID: func() string { return "job-1" }})
+	svc.httpClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	return svc, repo
+}
+
+func TestSettleWriteUsesWhatRemainsOfTheCloseDeadline(t *testing.T) {
+	started := make(chan struct{})
+	svc, repo := stuckJobService(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		close(started)
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}))
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+		t.Fatalf("StartSync = %v", err)
+	}
+	<-started
+
+	deadline := time.Now().Add(2 * time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	if err := svc.Close(ctx); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if len(repo.updateDeadlines) == 0 {
+		t.Fatal("the job recorded no final state")
+	}
+	for _, dl := range repo.updateDeadlines {
+		if dl.After(deadline) {
+			t.Fatalf("settle write deadline %s is past the Close deadline %s", dl, deadline)
+		}
+	}
+}
+
+func TestSettleWriteIsSkippedOnceTheCloseDeadlineHasPassed(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	svc, repo := stuckJobService(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		close(started)
+		<-release // ignores cancellation until after Close gave up
+		return nil, req.Context().Err()
+	}))
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+		t.Fatalf("StartSync = %v", err)
+	}
+	<-started
+	before := len(repo.updatedJobs) // the job's own progress writes, before shutdown
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := svc.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close = %v, want the deadline error", err)
+	}
+	close(release)
+	_ = svc.Close(context.Background()) // joins the job
+	if n := len(repo.updatedJobs) - before; n != 0 {
+		t.Fatalf("the job wrote %d updates after the shutdown deadline", n)
+	}
+}

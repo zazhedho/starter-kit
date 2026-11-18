@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zazhedho/gokit"
@@ -12,6 +13,10 @@ import (
 	repositorylocation "starter-kit/internal/repositories/location"
 	servicelocation "starter-kit/internal/services/location"
 )
+
+// recoveryTimeout bounds the startup recovery of interrupted sync jobs. A
+// variable so tests can shorten it.
+var recoveryTimeout = 10 * time.Second
 
 func registerLocation(r gin.IRouter, d Deps) error {
 	loc := d.Config.Location
@@ -27,7 +32,9 @@ func registerLocation(r gin.IRouter, d Deps) error {
 	// A sync job left queued or running by a previous process will never
 	// finish: fail it now, then let the application stop this process's job at
 	// shutdown.
-	if err := svc.RecoverInterruptedJobs(context.Background()); err != nil {
+	recoverCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
+	defer cancel()
+	if err := svc.RecoverInterruptedJobs(recoverCtx); err != nil {
 		return fmt.Errorf("recover location sync jobs: %w", err)
 	}
 	d.Lifecycle.OnClose("location sync", svc.Close)

@@ -34,11 +34,16 @@ func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
 }
 
 // Close stops the running sync job, if any, and waits for it to record its
-// final state, or for ctx to end. It is safe to call more than once; after the
+// final state, or for ctx to end. The job's final write must end by ctx's
+// deadline, so it is never still writing after the caller has moved on to
+// close the database. It is safe to call more than once; after the
 // first call StartSync fails with ErrClosed.
 func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true
+	if dl, ok := ctx.Deadline(); ok && (s.settleBy.IsZero() || dl.Before(s.settleBy)) {
+		s.settleBy = dl
+	}
 	s.mu.Unlock()
 	s.cancel()
 
@@ -67,9 +72,23 @@ func (s *Service) startJob() bool {
 }
 
 // settleContext returns a bounded context that survives cancellation of the
-// lifecycle context, for the writes that record a job's final state.
-func (s *Service) settleContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(s.baseCtx), settleTimeout)
+// lifecycle context, for the writes that record a job's final state. It lasts
+// settleTimeout at most, and never past the deadline Close was given; when that
+// deadline has passed it reports false and the write must be skipped.
+func (s *Service) settleContext() (context.Context, context.CancelFunc, bool) {
+	s.mu.Lock()
+	by := s.settleBy
+	s.mu.Unlock()
+
+	deadline := time.Now().Add(settleTimeout)
+	if !by.IsZero() && by.Before(deadline) {
+		deadline = by
+	}
+	if !deadline.After(time.Now()) {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(s.baseCtx), deadline)
+	return ctx, cancel, true
 }
 
 // markIfInterrupted records the interrupted state when ctx was canceled, so a

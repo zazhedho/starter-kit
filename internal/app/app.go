@@ -307,6 +307,13 @@ func (a *App) Handler() http.Handler {
 // then closes Redis and the database. It is safe to call more than once; only
 // the first call does anything and reports errors.
 func (a *App) Close() error {
+	return a.closeBy(time.Now().Add(a.cfg.HTTP.ShutdownTimeout))
+}
+
+// closeBy is Close with an explicit shutdown deadline, so that Serve can make
+// the HTTP drain, the lifecycle hooks and the jobs' final writes share the one
+// deadline it computed when shutdown started.
+func (a *App) closeBy(deadline time.Time) error {
 	a.closeMu.Lock()
 	defer a.closeMu.Unlock()
 	if a.closed {
@@ -315,10 +322,12 @@ func (a *App) Close() error {
 	a.closed = true
 
 	var errs []error
-	stopCtx, cancel := context.WithTimeout(context.Background(), a.cfg.HTTP.ShutdownTimeout)
-	defer cancel()
-	if err := a.lifecycle.Close(stopCtx); err != nil {
-		errs = append(errs, fmt.Errorf("stop background work: %w", err))
+	if a.lifecycle != nil {
+		stopCtx, cancel := context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+		if err := a.lifecycle.Close(stopCtx); err != nil {
+			errs = append(errs, fmt.Errorf("stop background work: %w", err))
+		}
 	}
 	if a.redis != nil {
 		if err := a.redis.Close(); err != nil {

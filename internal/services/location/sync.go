@@ -70,7 +70,11 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	}
 
 	// The job finished; record it even if shutdown began a moment ago.
-	ctx, cancel := s.settleContext()
+	ctx, cancel, ok := s.settleContext()
+	if !ok {
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location sync job %s finished after the shutdown deadline; its final state is not recorded", job.ID))
+		return
+	}
 	defer cancel()
 	s.applySyncProgress(&job, result)
 	finishedAt := time.Now()
@@ -95,7 +99,11 @@ func (s *Service) markSyncJobInterrupted(jobID string) {
 }
 
 func (s *Service) finishFailed(jobID, message, errorMessage string) {
-	ctx, cancel := s.settleContext()
+	ctx, cancel, ok := s.settleContext()
+	if !ok {
+		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location sync job %s ended after the shutdown deadline; its final state is not recorded", jobID))
+		return
+	}
 	defer cancel()
 	job, err := s.repo.GetSyncJobByID(ctx, jobID)
 	if err != nil {

@@ -820,3 +820,62 @@ func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 	os.Exit(m.Run())
 }
+
+func TestCloseWithoutLifecycleDoesNotPanic(t *testing.T) {
+	a := &App{cfg: testConfig()}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+}
+
+// TestShutdownSharesOneDeadline: the drain and the lifecycle hooks spend the
+// same HTTP_SHUTDOWN_TIMEOUT, counted from the moment shutdown starts.
+func TestShutdownSharesOneDeadline(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 300 * time.Millisecond
+	started := make(chan struct{})
+	a, ln := newTestApp(t, cfg, func(e *gin.Engine) {
+		e.GET("/stuck", func(c *gin.Context) {
+			close(started)
+			select {
+			case <-time.After(5 * time.Second):
+			case <-c.Request.Context().Done():
+			}
+		})
+	})
+	deadlines := make(chan time.Time, 1)
+	a.lifecycle.OnClose("slow job", func(ctx context.Context) error {
+		dl, _ := ctx.Deadline()
+		deadlines <- dl
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := serveAsync(ctx, a)
+	go func() {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+ln.Addr().String()+"/stuck", nil)
+		if err != nil {
+			return
+		}
+		if resp, err := noKeepAlive.Do(req); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-started
+	begin := time.Now()
+	cancel()
+
+	err := waitServe(t, done, 3*time.Second)
+	elapsed := time.Since(begin)
+	if !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("Serve = %v, want ErrShutdownTimeout", err)
+	}
+	dl := <-deadlines
+	if limit := begin.Add(cfg.HTTP.ShutdownTimeout + cfg.HTTP.ShutdownTimeout/2); dl.After(limit) {
+		t.Fatalf("hooks got a deadline %s after shutdown began, want about one timeout (%s)", dl.Sub(begin), cfg.HTTP.ShutdownTimeout)
+	}
+	if elapsed > cfg.HTTP.ShutdownTimeout+cfg.HTTP.ShutdownTimeout/2 {
+		t.Fatalf("shutdown took %s, want about one timeout (%s)", elapsed, cfg.HTTP.ShutdownTimeout)
+	}
+}

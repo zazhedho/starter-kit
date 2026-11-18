@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
@@ -51,5 +52,27 @@ func TestRegisterLocationReturnsTheRecoveryError(t *testing.T) {
 
 	if err := registerLocation(gin.New(), d); !errors.Is(err, boom) {
 		t.Fatalf("registerLocation = %v, want it to wrap the recovery error", err)
+	}
+}
+
+func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
+	old := recoveryTimeout
+	recoveryTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { recoveryTimeout = old })
+
+	d := newTestDeps(t, nil)
+	db, mock := newExecDB(t)
+	d.DB = db
+	mock.ExpectExec("UPDATE .location_sync_jobs. SET").WillDelayFor(time.Hour).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	done := make(chan error, 1)
+	go func() { done <- registerLocation(gin.New(), d) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("registerLocation succeeded although recovery did not finish")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hanging recovery was not bounded")
 	}
 }
