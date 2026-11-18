@@ -229,20 +229,3 @@ func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
 		t.Fatal("expected the rest of the user routes to be registered")
 	}
 }
-
-func TestLocationRoutesProtection(t *testing.T) {
-	engine := newEngine(t, routertest.NewDeps(t, nil))
-
-	switch got := routertest.Serve(engine, http.MethodGet, "/api/location/province"); got {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-		t.Fatalf("GET /api/location/province must be public, got %d", got)
-	}
-	for _, c := range []struct{ method, path string }{
-		{http.MethodPost, "/api/location/sync"},
-		{http.MethodGet, "/api/location/sync/abc"},
-	} {
-		if got := routertest.Serve(engine, c.method, c.path); got != http.StatusUnauthorized {
-			t.Fatalf("%s %s without token: expected 401, got %d", c.method, c.path, got)
-		}
-	}
-}

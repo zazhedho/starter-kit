@@ -9,6 +9,7 @@ import (
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 
+	routerlocation "starter-kit/internal/router/location"
 	routermedia "starter-kit/internal/router/media"
 	"starter-kit/internal/router/module"
 )
@@ -34,7 +35,7 @@ var rootRegistrars = []registrar{
 // apiRegistrars mount under /api after authkit's routes; a new module must also be
 // added to the router tests' expected route list.
 var apiRegistrars = []registrar{
-	{"location", registerLocation},
+	{"location", routerlocation.Register},
 	{"media", routermedia.Register},
 }
 
