@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 type LocationService struct {
@@ -210,7 +209,7 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 	switch {
 	case err == nil:
 		return mapSyncJob(activeJob), ErrLocationSyncRunning
-	case !errors.Is(err, gorm.ErrRecordNotFound):
+	case !errors.Is(err, domainlocation.ErrNotFound):
 		return dto.LocationSyncJob{}, err
 	}
 

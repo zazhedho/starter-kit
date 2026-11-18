@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	servicelocation "starter-kit/internal/services/location"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type locationServiceTestDouble struct {
@@ -158,7 +158,7 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 }
 
 func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
-	handler := NewLocationHandler(&locationServiceTestDouble{err: gorm.ErrRecordNotFound})
+	handler := NewLocationHandler(&locationServiceTestDouble{err: domainlocation.ErrNotFound})
 	rec := performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())

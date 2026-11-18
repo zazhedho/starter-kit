@@ -2,6 +2,7 @@ package repositorylocation
 
 import (
 	"context"
+	"errors"
 	"github.com/zazhedho/gokit"
 	domainlocation "starter-kit/internal/domain/location"
 	interfacelocation "starter-kit/internal/interfaces/location"
@@ -59,7 +60,16 @@ func (r *repo) GetDistrictByCode(ctx context.Context, code string) (ret domainlo
 func getByCode[T any](ctx context.Context, db *gorm.DB, code string) (T, error) {
 	var ret T
 	err := db.WithContext(ctx).Where(locationCodeFilter, code).First(&ret).Error
-	return ret, err
+	return ret, translateNotFound(err)
+}
+
+// translateNotFound maps the ORM's missing-row error to the domain sentinel so
+// callers never import the ORM to recognize it.
+func translateNotFound(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domainlocation.ErrNotFound
+	}
+	return err
 }
 
 func (r *repo) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
@@ -88,7 +98,7 @@ func (r *repo) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) e
 
 func (r *repo) GetSyncJobByID(ctx context.Context, id string) (ret domainlocation.SyncJob, err error) {
 	err = r.DB.WithContext(ctx).Where("id = ?", id).First(&ret).Error
-	return
+	return ret, translateNotFound(err)
 }
 
 func (r *repo) GetActiveSyncJob(ctx context.Context) (ret domainlocation.SyncJob, err error) {
@@ -96,7 +106,7 @@ func (r *repo) GetActiveSyncJob(ctx context.Context) (ret domainlocation.SyncJob
 		Where("status IN ?", []string{"queued", "running"}).
 		Order("created_at ASC").
 		First(&ret).Error
-	return
+	return ret, translateNotFound(err)
 }
 
 func (r *repo) FailActiveSyncJobs(ctx context.Context, message string) error {

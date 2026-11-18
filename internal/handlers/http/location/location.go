@@ -6,12 +6,12 @@ import (
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	"net/http"
+	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	interfacelocation "starter-kit/internal/interfaces/location"
 	servicelocation "starter-kit/internal/services/location"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type LocationHandler struct {
@@ -159,7 +159,7 @@ func (h *LocationHandler) GetSyncJob(ctx *gin.Context) {
 
 	data, err := h.Service.GetSyncJob(reqCtx, jobID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, domainlocation.ErrNotFound) {
 			res := gokit.Response(http.StatusNotFound, gokit.MsgNotFound, logId, nil)
 			res.Error = gokit.Errors{Code: http.StatusNotFound, Message: "location sync job not found"}
 			ctx.JSON(http.StatusNotFound, res)

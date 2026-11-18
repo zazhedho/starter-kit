@@ -2,7 +2,9 @@ package repositorylocation
 
 import (
 	"context"
+	"errors"
 	domainlocation "starter-kit/internal/domain/location"
+	interfacelocation "starter-kit/internal/interfaces/location"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -97,5 +99,65 @@ func TestLocationRepositoryUpsertIgnoresUnknownType(t *testing.T) {
 	repo := NewLocationRepo(newDryRunDB(t)).(*repo)
 	if err := repo.upsert(context.Background(), "code", []string{"unsupported"}); err != nil {
 		t.Fatalf("unsupported upsert should be ignored: %v", err)
+	}
+}
+
+func newNoRowsRepo(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{SkipDefaultTransaction: true})
+	if err != nil {
+		t.Fatalf("open gorm: %v", err)
+	}
+	return db, mock
+}
+
+func TestLocationRepositoryTranslatesNotFound(t *testing.T) {
+	ctx := context.Background()
+	lookups := map[string]func(r interfacelocation.RepoLocationInterface) error{
+		"province": func(r interfacelocation.RepoLocationInterface) error {
+			_, err := r.GetProvinceByCode(ctx, "99")
+			return err
+		},
+		"city": func(r interfacelocation.RepoLocationInterface) error {
+			_, err := r.GetCityByCode(ctx, "9999")
+			return err
+		},
+		"district": func(r interfacelocation.RepoLocationInterface) error {
+			_, err := r.GetDistrictByCode(ctx, "999999")
+			return err
+		},
+		"job": func(r interfacelocation.RepoLocationInterface) error {
+			_, err := r.GetSyncJobByID(ctx, "missing")
+			return err
+		},
+		"active": func(r interfacelocation.RepoLocationInterface) error { _, err := r.GetActiveSyncJob(ctx); return err },
+	}
+	for name, lookup := range lookups {
+		t.Run(name, func(t *testing.T) {
+			db, mock := newNoRowsRepo(t)
+			mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			err := lookup(NewLocationRepo(db))
+			if !errors.Is(err, domainlocation.ErrNotFound) {
+				t.Fatalf("expected domainlocation.ErrNotFound, got %v", err)
+			}
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("gorm error must not leak: %v", err)
+			}
+		})
+	}
+}
+
+func TestLocationRepositoryKeepsOtherErrors(t *testing.T) {
+	db, mock := newNoRowsRepo(t)
+	boom := errors.New("connection reset")
+	mock.ExpectQuery("SELECT").WillReturnError(boom)
+	_, err := NewLocationRepo(db).GetProvinceByCode(context.Background(), "31")
+	if !errors.Is(err, boom) || errors.Is(err, domainlocation.ErrNotFound) {
+		t.Fatalf("expected the original error, got %v", err)
 	}
 }

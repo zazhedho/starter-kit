@@ -167,9 +167,6 @@ var rules = []rule{
 // that is not listed and on any listed edge that no longer exists, so the map
 // can only shrink. Each refactoring step deletes its entries.
 var knownViolations = map[string]string{
-	"internal/handlers/http/location -> gorm.io/gorm":                           "step 3: persistence not-found leaks into the handler",
-	"internal/handlers/http/media -> gorm.io/gorm":                              "step 3: persistence not-found leaks into the handler",
-	"internal/services/location -> gorm.io/gorm":                                "step 3: persistence not-found leaks into the service",
 	"internal/handlers/http/location -> starter-kit/internal/services/location": "step 4: handler imports the concrete service for an error",
 	"internal/services/media -> starter-kit/internal/infrastructure/storage":    "step 5: storage port must live in services/media",
 	"internal/services/location -> github.com/redis/go-redis/v9":                "step 6: cache port",

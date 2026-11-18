@@ -13,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type locationRepoTestDouble struct {
@@ -89,7 +87,7 @@ func (m *locationRepoTestDouble) GetCityByCode(ctx context.Context, code string)
 			return city, nil
 		}
 	}
-	return domainlocation.City{}, gorm.ErrRecordNotFound
+	return domainlocation.City{}, domainlocation.ErrNotFound
 }
 func (m *locationRepoTestDouble) GetDistrictByCode(ctx context.Context, code string) (domainlocation.District, error) {
 	if m.district.Code != "" {
@@ -100,7 +98,7 @@ func (m *locationRepoTestDouble) GetDistrictByCode(ctx context.Context, code str
 			return district, nil
 		}
 	}
-	return domainlocation.District{}, gorm.ErrRecordNotFound
+	return domainlocation.District{}, domainlocation.ErrNotFound
 }
 func (m *locationRepoTestDouble) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
 	if m.upsertProvinceErr != nil {
@@ -295,7 +293,7 @@ func TestLocationServiceGetVillageFallsBackToLocationService(t *testing.T) {
 }
 
 func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
-	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound}, Options{})
+	svc := NewLocationService(&locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}, Options{})
 
 	_, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "city"})
 	if err == nil || err.Error() != "province_code is required for city sync" {
@@ -342,7 +340,7 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 }
 
 func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
-	repo := &locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound}
+	repo := &locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}
 	svc := NewLocationService(repo, Options{SourceYear: "2026"})
 
 	got, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "province"})
@@ -367,7 +365,7 @@ func TestStartSyncRepositoryErrors(t *testing.T) {
 		t.Fatal("expected active job lookup error")
 	}
 
-	svc = NewLocationService(&locationRepoTestDouble{activeJobErr: gorm.ErrRecordNotFound, createSyncJobErr: errors.New("database down")}, Options{})
+	svc = NewLocationService(&locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound, createSyncJobErr: errors.New("database down")}, Options{})
 	if _, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2026"}); err == nil {
 		t.Fatal("expected create sync job error")
 	}

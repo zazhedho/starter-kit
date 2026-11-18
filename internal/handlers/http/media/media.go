@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
@@ -139,7 +138,7 @@ func mediaErrorResponse(err error) (int, string) {
 	case errors.Is(err, domainmedia.ErrMediaForbidden):
 		// Avoid disclosing whether another user's media ID exists.
 		return http.StatusNotFound, "media not found"
-	case errors.Is(err, gorm.ErrRecordNotFound):
+	case errors.Is(err, domainmedia.ErrNotFound):
 		return http.StatusNotFound, "media not found"
 	default:
 		return http.StatusInternalServerError, gokit.MsgSomethingWrong
