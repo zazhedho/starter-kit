@@ -2,8 +2,6 @@ package router
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -14,61 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"github.com/zazhedho/authkit"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	domainmedia "starter-kit/internal/domain/media"
+	"starter-kit/internal/testutil/routertest"
 )
-
-func newDryRunDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{
-		DryRun:                 true,
-		DisableAutomaticPing:   true,
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Fatalf("open gorm: %v", err)
-	}
-	return db, sqlDB, mock
-}
-
-func newTestDepsWithMock(t *testing.T, mutate func(*config.Config)) (Deps, sqlmock.Sqlmock) {
-	t.Helper()
-	db, sqlDB, mock := newDryRunDB(t)
-	cfg := config.FromEnv()
-	cfg.Media.Enabled = false
-	if mutate != nil {
-		mutate(&cfg)
-	}
-	kit, err := authkit.New(authkit.Config{
-		DB:      db,
-		AppName: "starter-kit-test",
-		JWTKey:  "test-jwt-key-that-is-at-least-32-characters-long",
-	})
-	if err != nil {
-		t.Fatalf("authkit.New: %v", err)
-	}
-	return Deps{Config: cfg, DB: db, SQLDB: sqlDB, Kit: kit, Lifecycle: &Lifecycle{}}, mock
-}
-
-func newTestDeps(t *testing.T, mutate func(*config.Config)) Deps {
-	t.Helper()
-	d, _ := newTestDepsWithMock(t, mutate)
-	return d
-}
 
 func newEngine(t *testing.T, d Deps) *gin.Engine {
 	t.Helper()
@@ -79,14 +29,8 @@ func newEngine(t *testing.T, d Deps) *gin.Engine {
 	return engine
 }
 
-func serve(engine http.Handler, method, path string) int {
-	rec := httptest.NewRecorder()
-	engine.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
-	return rec.Code
-}
-
 func TestNewRegistersHealthcheck(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
+	engine := newEngine(t, routertest.NewDeps(t, nil))
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthcheck", nil))
 	if rec.Code != http.StatusOK {
@@ -107,7 +51,7 @@ func accessLogLines(output string) []string {
 // TestMiddlewareOrderAndSingleAccessLog checks that the request id precedes the
 // logger, CORS precedes the body limit, and each request is logged once.
 func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
+	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
 
 	mark := logs.Mark()
@@ -143,7 +87,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 
 func TestGlobalBodyLimitCutsOffUndeclaredLengthBody(t *testing.T) {
 	const limit = 1024
-	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = limit }))
+	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = limit }))
 
 	var read int64
 	var readErr error
@@ -188,7 +132,7 @@ func TestNewRejectsIncompleteDeps(t *testing.T) {
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			d := newTestDeps(t, nil)
+			d := routertest.NewDeps(t, nil)
 			mutate(&d)
 			engine, err := New(d)
 			if err == nil || engine != nil {
@@ -199,7 +143,7 @@ func TestNewRejectsIncompleteDeps(t *testing.T) {
 }
 
 func TestGlobalBodyLimitReturns413(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
+	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	body := `{"email":"` + strings.Repeat("a", 4096) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -219,7 +163,7 @@ func TestReadyz(t *testing.T) {
 	compact := func(rec *httptest.ResponseRecorder) string { return strings.TrimSpace(rec.Body.String()) }
 
 	t.Run("database ok, redis absent", func(t *testing.T) {
-		d, mock := newTestDepsWithMock(t, nil)
+		d, mock := routertest.NewDepsWithMock(t, nil)
 		mock.ExpectPing()
 		rec := get(newEngine(t, d))
 		if rec.Code != http.StatusOK || compact(rec) != `{"status":"ok"}` {
@@ -228,7 +172,7 @@ func TestReadyz(t *testing.T) {
 	})
 
 	t.Run("database ping fails", func(t *testing.T) {
-		d, mock := newTestDepsWithMock(t, nil)
+		d, mock := routertest.NewDepsWithMock(t, nil)
 		mock.ExpectPing().WillReturnError(errors.New("boom-secret-detail"))
 		rec := get(newEngine(t, d))
 		if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
@@ -243,7 +187,7 @@ func TestReadyz(t *testing.T) {
 		mr := miniredis.RunT(t)
 		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 		t.Cleanup(func() { _ = client.Close() })
-		d, mock := newTestDepsWithMock(t, nil)
+		d, mock := routertest.NewDepsWithMock(t, nil)
 		d.Redis = client
 		engine := newEngine(t, d)
 
@@ -261,17 +205,17 @@ func TestReadyz(t *testing.T) {
 }
 
 func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
-	if got := serve(engine, http.MethodGet, "/api/users"); got != http.StatusUnauthorized {
+	engine := newEngine(t, routertest.NewDeps(t, nil))
+	if got := routertest.Serve(engine, http.MethodGet, "/api/users"); got != http.StatusUnauthorized {
 		t.Fatalf("GET /api/users without token: expected 401, got %d", got)
 	}
-	if got := serve(engine, http.MethodGet, "/api/user/register/status"); got == http.StatusNotFound {
+	if got := routertest.Serve(engine, http.MethodGet, "/api/user/register/status"); got == http.StatusNotFound {
 		t.Fatalf("GET /api/user/register/status: route not registered")
 	}
 }
 
 func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
+	engine := newEngine(t, routertest.NewDeps(t, nil))
 
 	// GET /api/user/sessions itself answers 401 without Redis because the
 	// authenticated GET /api/user/:id route matches "sessions", so assert on the
@@ -295,9 +239,9 @@ func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
 }
 
 func TestLocationRoutesProtection(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
+	engine := newEngine(t, routertest.NewDeps(t, nil))
 
-	switch got := serve(engine, http.MethodGet, "/api/location/province"); got {
+	switch got := routertest.Serve(engine, http.MethodGet, "/api/location/province"); got {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
 		t.Fatalf("GET /api/location/province must be public, got %d", got)
 	}
@@ -305,44 +249,23 @@ func TestLocationRoutesProtection(t *testing.T) {
 		{http.MethodPost, "/api/location/sync"},
 		{http.MethodGet, "/api/location/sync/abc"},
 	} {
-		if got := serve(engine, c.method, c.path); got != http.StatusUnauthorized {
+		if got := routertest.Serve(engine, c.method, c.path); got != http.StatusUnauthorized {
 			t.Fatalf("%s %s without token: expected 401, got %d", c.method, c.path, got)
 		}
 	}
 }
 
-// fakeStorage is a storage provider that keeps nothing.
-type fakeStorage struct{}
-
-func (fakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
-	return domainmedia.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
-}
-
-func (fakeStorage) UploadFileFromBytes(_ context.Context, _ []byte, filename, folder, _ string) (domainmedia.StoredFile, error) {
-	return domainmedia.StoredFile{ObjectName: folder + "/" + filename, URL: "https://files.example.test/" + folder + "/" + filename}, nil
-}
-
-func (fakeStorage) DeleteFile(context.Context, string) error { return nil }
-
-func (fakeStorage) GetFileURL(objectName string) string {
-	return "https://files.example.test/" + objectName
-}
-
-func (fakeStorage) DownloadFile(context.Context, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
-}
-
 func TestMediaRoutesProtection(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
-		engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.Media.Enabled = false }))
-		if got := serve(engine, http.MethodPost, "/api/media"); got != http.StatusNotFound {
+		engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.Media.Enabled = false }))
+		if got := routertest.Serve(engine, http.MethodPost, "/api/media"); got != http.StatusNotFound {
 			t.Fatalf("expected 404 when media disabled, got %d", got)
 		}
 	})
 
 	t.Run("disabled registers nothing even when a provider is passed", func(t *testing.T) {
-		d := newTestDeps(t, func(c *config.Config) { c.Media.Enabled = false })
-		d.Storage = fakeStorage{}
+		d := routertest.NewDeps(t, func(c *config.Config) { c.Media.Enabled = false })
+		d.Storage = routertest.FakeStorage{}
 		for _, route := range newEngine(t, d).Routes() {
 			if strings.HasPrefix(route.Path, "/api/media") {
 				t.Fatalf("media route %s registered while media is disabled", route.Path)
@@ -351,13 +274,13 @@ func TestMediaRoutesProtection(t *testing.T) {
 	})
 
 	t.Run("enabled", func(t *testing.T) {
-		d := newTestDeps(t, func(c *config.Config) { c.Media.Enabled = true })
-		d.Storage = fakeStorage{}
+		d := routertest.NewDeps(t, func(c *config.Config) { c.Media.Enabled = true })
+		d.Storage = routertest.FakeStorage{}
 		engine := newEngine(t, d)
-		if got := serve(engine, http.MethodPost, "/api/media"); got != http.StatusUnauthorized {
+		if got := routertest.Serve(engine, http.MethodPost, "/api/media"); got != http.StatusUnauthorized {
 			t.Fatalf("POST /api/media without token: expected 401, got %d", got)
 		}
-		if got := serve(engine, http.MethodDelete, "/api/media/abc"); got != http.StatusUnauthorized {
+		if got := routertest.Serve(engine, http.MethodDelete, "/api/media/abc"); got != http.StatusUnauthorized {
 			t.Fatalf("DELETE /api/media/abc without token: expected 401, got %d", got)
 		}
 	})
@@ -365,12 +288,12 @@ func TestMediaRoutesProtection(t *testing.T) {
 
 func mediaDeps(t *testing.T) Deps {
 	t.Helper()
-	d := newTestDeps(t, func(c *config.Config) {
+	d := routertest.NewDeps(t, func(c *config.Config) {
 		c.Media.Enabled = true
 		c.Media.MaxFileSizeBytes = 64 << 10
 		c.HTTP.MaxBodyBytes = 1 << 20
 	})
-	d.Storage = fakeStorage{}
+	d.Storage = routertest.FakeStorage{}
 	return d
 }
 

@@ -4,36 +4,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
 	"starter-kit/internal/config"
+	"starter-kit/internal/testutil/routertest"
 )
-
-func routeSet(engine *gin.Engine) map[string]bool {
-	set := map[string]bool{}
-	for _, r := range engine.Routes() {
-		set[r.Method+" "+r.Path] = true
-	}
-	return set
-}
-
-func sortedKeys(set map[string]bool) []string {
-	keys := make([]string, 0, len(set))
-	for k := range set {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// authkitRoutes is what authkit mounts under /api on its own, with the same
-// dependencies as the service under test (no Redis).
-func authkitRoutes(t *testing.T, d Deps) map[string]bool {
-	t.Helper()
-	engine := gin.New()
-	d.Kit.Mount(engine.Group("/api"))
-	return routeSet(engine)
-}
 
 // ownRoutesWithMedia and ownRoutesWithoutMedia are written by hand from the
 // registrars. A new route must be added here on purpose; an accidental one fails the test.
@@ -86,12 +59,12 @@ func TestRouteTable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			d := newTestDeps(t, func(cfg *config.Config) { cfg.Media.Enabled = c.media })
+			d := routertest.NewDeps(t, func(cfg *config.Config) { cfg.Media.Enabled = c.media })
 			if c.media {
-				d.Storage = fakeStorage{}
+				d.Storage = routertest.FakeStorage{}
 			}
-			all := routeSet(newEngine(t, d))
-			kit := authkitRoutes(t, d)
+			all := routertest.RouteSet(newEngine(t, d))
+			kit := routertest.AuthkitRoutes(t, d)
 
 			own := map[string]bool{}
 			for route := range all {
@@ -99,7 +72,7 @@ func TestRouteTable(t *testing.T) {
 					own[route] = true
 				}
 			}
-			if got := sortedKeys(own); !equalLists(got, c.want) {
+			if got := routertest.SortedKeys(own); !equalLists(got, c.want) {
 				t.Errorf("this service's routes are\n  %v\nwant\n  %v", got, c.want)
 			}
 			for route := range kit {

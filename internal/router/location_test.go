@@ -8,31 +8,13 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+
+	"starter-kit/internal/testutil/routertest"
 )
 
-// newExecDB returns a gorm database that really sends statements to sqlmock.
-func newExecDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{
-		DisableAutomaticPing:   true,
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Fatalf("open gorm: %v", err)
-	}
-	return db, mock
-}
-
 func TestRegisterLocationRecoversInterruptedJobs(t *testing.T) {
-	d := newTestDeps(t, nil)
-	db, mock := newExecDB(t)
+	d := routertest.NewDeps(t, nil)
+	db, mock := routertest.NewExecDB(t)
 	d.DB = db
 	mock.ExpectExec("UPDATE .location_sync_jobs. SET").WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -45,8 +27,8 @@ func TestRegisterLocationRecoversInterruptedJobs(t *testing.T) {
 }
 
 func TestRegisterLocationReturnsTheRecoveryError(t *testing.T) {
-	d := newTestDeps(t, nil)
-	db, mock := newExecDB(t)
+	d := routertest.NewDeps(t, nil)
+	db, mock := routertest.NewExecDB(t)
 	d.DB = db
 	boom := errors.New("database down")
 	mock.ExpectExec("UPDATE .location_sync_jobs. SET").WillReturnError(boom)
@@ -61,8 +43,8 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 	recoveryTimeout = 50 * time.Millisecond
 	t.Cleanup(func() { recoveryTimeout = old })
 
-	d := newTestDeps(t, nil)
-	db, mock := newExecDB(t)
+	d := routertest.NewDeps(t, nil)
+	db, mock := routertest.NewExecDB(t)
 	d.DB = db
 	mock.ExpectExec("UPDATE .location_sync_jobs. SET").WillDelayFor(time.Hour).WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -79,7 +61,7 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 }
 
 func TestRegisterLocationRegistersAShutdownHook(t *testing.T) {
-	d := newTestDeps(t, nil)
+	d := routertest.NewDeps(t, nil)
 	if err := registerLocation(gin.New(), d); err != nil {
 		t.Fatalf("registerLocation: %v", err)
 	}
