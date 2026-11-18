@@ -1,4 +1,4 @@
-package servicemedia
+package media
 
 import (
 	"context"
@@ -31,14 +31,14 @@ var defaultContentTypes = []string{
 	"image/webp",
 }
 
-type MediaService struct {
+type Service struct {
 	repo                Repository
 	storage             Storage
 	maxFileSize         int64
 	allowedContentTypes map[string]struct{}
 }
 
-func NewMediaService(repo Repository, storageProvider Storage, maxFileSize int64, allowedContentTypes []string) *MediaService {
+func NewService(repo Repository, storageProvider Storage, maxFileSize int64, allowedContentTypes []string) *Service {
 	if maxFileSize <= 0 {
 		maxFileSize = defaultMaxFileSize
 	}
@@ -53,7 +53,7 @@ func NewMediaService(repo Repository, storageProvider Storage, maxFileSize int64
 		}
 	}
 
-	return &MediaService{
+	return &Service{
 		repo:                repo,
 		storage:             storageProvider,
 		maxFileSize:         maxFileSize,
@@ -61,11 +61,11 @@ func NewMediaService(repo Repository, storageProvider Storage, maxFileSize int64
 	}
 }
 
-func (s *MediaService) MaxFileSize() int64 {
+func (s *Service) MaxFileSize() int64 {
 	return s.maxFileSize
 }
 
-func (s *MediaService) Upload(ctx context.Context, ownerUserID string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error) {
+func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	if _, err := uuid.Parse(ownerUserID); err != nil {
 		return domainmedia.Media{}, domainmedia.ErrMediaForbidden
@@ -113,7 +113,7 @@ func (s *MediaService) Upload(ctx context.Context, ownerUserID string, file mult
 	return media, nil
 }
 
-func (s *MediaService) Delete(ctx context.Context, scope authkit.Scope, id string) (domainmedia.Media, error) {
+func (s *Service) Delete(ctx context.Context, scope authkit.Scope, id string) (domainmedia.Media, error) {
 	media, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return domainmedia.Media{}, err

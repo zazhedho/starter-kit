@@ -1,4 +1,4 @@
-package servicemedia
+package media
 
 import (
 	"context"

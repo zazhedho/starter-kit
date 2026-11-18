@@ -1,21 +1,21 @@
-package servicelocation
+package location
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 func TestNewLocationServiceNeverDisablesTheHTTPTimeout(t *testing.T) {
 	for _, timeout := range []time.Duration{0, -time.Second} {
-		svc := NewLocationService(&locationRepoTestDouble{}, Options{Timeout: timeout})
+		svc := NewService(&locationRepoTestDouble{}, Options{Timeout: timeout})
 		if svc.httpClient.Timeout != defaultHTTPTimeout {
 			t.Errorf("Timeout %v: client timeout = %v, want %v", timeout, svc.httpClient.Timeout, defaultHTTPTimeout)
 		}
 	}
-	svc := NewLocationService(&locationRepoTestDouble{}, Options{Timeout: 3 * time.Second})
+	svc := NewService(&locationRepoTestDouble{}, Options{Timeout: 3 * time.Second})
 	if svc.httpClient.Timeout != 3*time.Second {
 		t.Errorf("explicit timeout not kept: %v", svc.httpClient.Timeout)
 	}
@@ -28,25 +28,25 @@ type fakeCache struct {
 
 func newFakeCache() *fakeCache { return &fakeCache{entries: map[string]time.Duration{}} }
 
-func (f *fakeCache) Get(context.Context, string) ([]dto.Location, bool) { return nil, false }
-func (f *fakeCache) Set(_ context.Context, key string, _ []dto.Location, ttl time.Duration) {
+func (f *fakeCache) Get(context.Context, string) ([]dtolocation.Location, bool) { return nil, false }
+func (f *fakeCache) Set(_ context.Context, key string, _ []dtolocation.Location, ttl time.Duration) {
 	f.entries[key] = ttl
 }
 func (f *fakeCache) DeleteKeys(context.Context, string) {}
 
 func TestLocationCacheIsSkippedWithoutPositiveTTL(t *testing.T) {
 	cache := newFakeCache()
-	locations := []dto.Location{{Code: "11", Name: "Aceh"}}
+	locations := []dtolocation.Location{{Code: "11", Name: "Aceh"}}
 
 	for _, ttl := range []time.Duration{0, -time.Minute} {
-		svc := NewLocationService(&locationRepoTestDouble{}, Options{Cache: cache, CacheTTL: ttl})
+		svc := NewService(&locationRepoTestDouble{}, Options{Cache: cache, CacheTTL: ttl})
 		svc.setLocationCache(context.Background(), "location:province", locations)
 		if _, ok := cache.entries["location:province"]; ok {
 			t.Fatalf("CacheTTL %v: an entry was written to the cache", ttl)
 		}
 	}
 
-	svc := NewLocationService(&locationRepoTestDouble{}, Options{Cache: cache, CacheTTL: time.Minute})
+	svc := NewService(&locationRepoTestDouble{}, Options{Cache: cache, CacheTTL: time.Minute})
 	svc.setLocationCache(context.Background(), "location:province", locations)
 	if ttl, ok := cache.entries["location:province"]; !ok {
 		t.Fatal("a positive TTL must cache")
@@ -56,8 +56,8 @@ func TestLocationCacheIsSkippedWithoutPositiveTTL(t *testing.T) {
 }
 
 func TestNewLocationServiceWithoutCacheAlwaysMisses(t *testing.T) {
-	svc := NewLocationService(&locationRepoTestDouble{}, Options{CacheTTL: time.Minute})
-	svc.setLocationCache(context.Background(), "location:province", []dto.Location{{Code: "11", Name: "Aceh"}})
+	svc := NewService(&locationRepoTestDouble{}, Options{CacheTTL: time.Minute})
+	svc.setLocationCache(context.Background(), "location:province", []dtolocation.Location{{Code: "11", Name: "Aceh"}})
 	if _, ok := svc.cacheOrNoop().Get(context.Background(), "location:province"); ok {
 		t.Fatal("a service without a cache must always miss")
 	}

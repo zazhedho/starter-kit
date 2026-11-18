@@ -1,11 +1,11 @@
-package locationcache
+package location
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 
 	"github.com/alicebob/miniredis/v2"
 	redismock "github.com/go-redis/redismock/v9"
@@ -24,7 +24,7 @@ func TestGetSetDeleteUseRedis(t *testing.T) {
 
 	ttl := 3 * time.Hour
 	mock.Regexp().ExpectSet("location:province", `.+`, ttl).SetVal("OK")
-	New(client).Set(ctx, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}}, ttl)
+	New(client).Set(ctx, "location:province", []dtolocation.Location{{Code: "11", Name: "Aceh"}}, ttl)
 
 	mock.ExpectScan(0, "location:*", 100).SetVal([]string{"location:province", "location:city:11"}, 0)
 	mock.ExpectDel("location:province", "location:city:11").SetVal(2)
@@ -42,7 +42,7 @@ func TestNilClientMissAndNoop(t *testing.T) {
 		t.Fatalf("expected cache miss, got %+v", got)
 	}
 
-	New(nil).Set(ctx, "location:province", []dto.Location{{Code: "11", Name: "Aceh"}}, time.Hour)
+	New(nil).Set(ctx, "location:province", []dtolocation.Location{{Code: "11", Name: "Aceh"}}, time.Hour)
 	New(nil).DeleteKeys(ctx, "location:")
 }
 
@@ -54,7 +54,7 @@ func TestRedisKeysStoredAsGiven(t *testing.T) {
 	ctx := context.Background()
 
 	for _, key := range []string{"location:province", "location:city:11", "location:district:1101", "location:village:110101"} {
-		cache.Set(ctx, key, []dto.Location{{Code: "11", Name: "Aceh"}}, time.Hour)
+		cache.Set(ctx, key, []dtolocation.Location{{Code: "11", Name: "Aceh"}}, time.Hour)
 		if !mr.Exists(key) {
 			t.Fatalf("key %q was not stored verbatim", key)
 		}

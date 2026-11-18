@@ -1,4 +1,4 @@
-package locationcache
+package location
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/zazhedho/logus"
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -25,7 +25,7 @@ func New(client *redis.Client) *Cache {
 	return &Cache{client: client}
 }
 
-func (c *Cache) Get(ctx context.Context, cacheKey string) ([]dto.Location, bool) {
+func (c *Cache) Get(ctx context.Context, cacheKey string) ([]dtolocation.Location, bool) {
 	if c.client == nil {
 		return nil, false
 	}
@@ -41,7 +41,7 @@ func (c *Cache) Get(ctx context.Context, cacheKey string) ([]dto.Location, bool)
 		return nil, false
 	}
 
-	var locations []dto.Location
+	var locations []dtolocation.Location
 	if err := json.Unmarshal([]byte(cached), &locations); err != nil {
 		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location cache unmarshal failed; key=%s; err=%v", cacheKey, err))
 		return nil, false
@@ -50,7 +50,7 @@ func (c *Cache) Get(ctx context.Context, cacheKey string) ([]dto.Location, bool)
 	return locations, true
 }
 
-func (c *Cache) Set(ctx context.Context, cacheKey string, locations []dto.Location, ttl time.Duration) {
+func (c *Cache) Set(ctx context.Context, cacheKey string, locations []dtolocation.Location, ttl time.Duration) {
 	if c.client == nil {
 		return
 	}

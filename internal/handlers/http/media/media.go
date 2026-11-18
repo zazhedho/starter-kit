@@ -1,4 +1,4 @@
-package handlermedia
+package media
 
 import (
 	"errors"
@@ -16,21 +16,21 @@ import (
 
 const multipartOverhead = int64(1 << 20)
 
-type MediaHandler struct {
+type Handler struct {
 	service       Service
 	uploadTimeout time.Duration
 	authkit.AuditWriter
 }
 
-func NewMediaHandler(service Service, auditService authkit.AuditService, uploadTimeout time.Duration) *MediaHandler {
-	return &MediaHandler{
+func New(service Service, auditService authkit.AuditService, uploadTimeout time.Duration) *Handler {
+	return &Handler{
 		service:       service,
 		uploadTimeout: uploadTimeout,
 		AuditWriter:   authkit.NewAuditWriter(auditService, "MediaHandler"),
 	}
 }
 
-func (h *MediaHandler) Upload(ctx *gin.Context) {
+func (h *Handler) Upload(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Upload]"
 	// Uploads may need longer than the server-wide read timeout.
@@ -92,7 +92,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
 }
 
-func (h *MediaHandler) Delete(ctx *gin.Context) {
+func (h *Handler) Delete(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Delete]"
 	id, err := gokit.ValidateUUIDParam(ctx, logID)

@@ -1,11 +1,11 @@
-package dto
+package location
 
 type Location struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
 }
 
-type SyncLocationRequest struct {
+type SyncRequest struct {
 	Year         string `json:"year" binding:"omitempty"`
 	Level        string `json:"level" binding:"omitempty,oneof=all province city district village"`
 	ProvinceCode string `json:"province_code" binding:"omitempty"`
@@ -13,7 +13,7 @@ type SyncLocationRequest struct {
 	DistrictCode string `json:"district_code" binding:"omitempty"`
 }
 
-type LocationSyncJob struct {
+type SyncJob struct {
 	ID            string `json:"id"`
 	Status        string `json:"status"`
 	Level         string `json:"level"`

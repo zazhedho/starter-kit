@@ -1,4 +1,4 @@
-package servicemedia
+package media
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func TestUploadDetectsContentAndStoresMetadata(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repo := &mediaRepoMock{}
 	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
-	service := NewMediaService(repo, storageMock, 1024, nil)
+	service := NewService(repo, storageMock, 1024, nil)
 	ownerID := uuid.NewString()
 
 	media, err := service.Upload(context.Background(), ownerID, mediaTestFile{bytes.NewReader(png)}, newMediaHeader("../avatar.exe", int64(len(png))))
@@ -104,7 +104,7 @@ func TestUploadRejectsInvalidFilesBeforeStorage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			storageMock := &mediaStorageMock{}
-			service := NewMediaService(&mediaRepoMock{}, storageMock, tt.maxSize, nil)
+			service := NewService(&mediaRepoMock{}, storageMock, tt.maxSize, nil)
 			_, err := service.Upload(context.Background(), ownerID, mediaTestFile{bytes.NewReader(tt.data)}, tt.header)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("expected %v, got %v", tt.wantErr, err)
@@ -121,7 +121,7 @@ func TestUploadDeletesObjectWhenMetadataStoreFails(t *testing.T) {
 	repoErr := errors.New("database unavailable")
 	repo := &mediaRepoMock{storeErr: repoErr}
 	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
-	service := NewMediaService(repo, storageMock, 1024, nil)
+	service := NewService(repo, storageMock, 1024, nil)
 
 	_, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("avatar.png", int64(len(png))))
 	if !errors.Is(err, repoErr) {
@@ -139,7 +139,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 	t.Run("owner", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
-		service := NewMediaService(repo, storageMock, 1024, nil)
+		service := NewService(repo, storageMock, 1024, nil)
 
 		if _, err := service.Delete(context.Background(), authkit.NewScope(ownerID, "owner", "viewer", nil), media.ID); err != nil {
 			t.Fatalf("delete: %v", err)
@@ -152,7 +152,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 	t.Run("other user", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
-		service := NewMediaService(repo, storageMock, 1024, nil)
+		service := NewService(repo, storageMock, 1024, nil)
 
 		_, err := service.Delete(context.Background(), authkit.NewScope(uuid.NewString(), "other", "viewer", nil), media.ID)
 		if !errors.Is(err, domainmedia.ErrMediaForbidden) {
@@ -166,7 +166,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 	t.Run("superadmin", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
-		service := NewMediaService(repo, storageMock, 1024, nil)
+		service := NewService(repo, storageMock, 1024, nil)
 
 		if _, err := service.Delete(context.Background(), authkit.NewScope(uuid.NewString(), "root", authkit.RoleSuperAdmin, nil), media.ID); err != nil {
 			t.Fatalf("delete as superadmin: %v", err)

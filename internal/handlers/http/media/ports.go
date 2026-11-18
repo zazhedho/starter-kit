@@ -1,4 +1,4 @@
-package handlermedia
+package media
 
 import (
 	"context"

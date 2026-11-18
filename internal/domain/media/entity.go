@@ -1,4 +1,4 @@
-package domainmedia
+package media
 
 import (
 	"errors"

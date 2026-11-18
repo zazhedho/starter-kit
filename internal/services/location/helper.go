@@ -1,4 +1,4 @@
-package servicelocation
+package location
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"sort"
 	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 	"strings"
 	"time"
 )
@@ -25,7 +25,7 @@ type locationServiceItem struct {
 	Name     string `json:"name"`
 }
 
-func (s *LocationService) locationServiceURL(path string, query map[string]string) string {
+func (s *Service) locationServiceURL(path string, query map[string]string) string {
 	baseURL := strings.TrimRight(s.baseURL, "/")
 	endpoint := strings.TrimLeft(path, "/")
 	rawURL := baseURL + "/" + endpoint
@@ -46,7 +46,7 @@ func (s *LocationService) locationServiceURL(path string, query map[string]strin
 	return rawURL
 }
 
-func (s *LocationService) fetchLocationMap(ctx context.Context, url, entity string) (map[string]string, error) {
+func (s *Service) fetchLocationMap(ctx context.Context, url, entity string) (map[string]string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare %s request: %w", entity, err)
@@ -80,7 +80,7 @@ func (s *LocationService) fetchLocationMap(ctx context.Context, url, entity stri
 	return dataMap, nil
 }
 
-func (s *LocationService) setLocationCache(ctx context.Context, cacheKey string, locations []dto.Location) {
+func (s *Service) setLocationCache(ctx context.Context, cacheKey string, locations []dtolocation.Location) {
 	// A non-positive TTL would store the entry without expiry; skip instead.
 	if len(locations) == 0 || s.cacheTTL <= 0 {
 		return
@@ -116,34 +116,34 @@ func decodeLocationMap(body []byte) (map[string]string, error) {
 	return dataMap, nil
 }
 
-func mapProvinces(rows []domainlocation.Province) []dto.Location {
-	locations := make([]dto.Location, 0, len(rows))
+func mapProvinces(rows []domainlocation.Province) []dtolocation.Location {
+	locations := make([]dtolocation.Location, 0, len(rows))
 	for _, row := range rows {
-		locations = append(locations, dto.Location{Code: row.Code, Name: row.Name})
+		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
 	}
 	return locations
 }
 
-func mapCities(rows []domainlocation.City) []dto.Location {
-	locations := make([]dto.Location, 0, len(rows))
+func mapCities(rows []domainlocation.City) []dtolocation.Location {
+	locations := make([]dtolocation.Location, 0, len(rows))
 	for _, row := range rows {
-		locations = append(locations, dto.Location{Code: row.Code, Name: row.Name})
+		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
 	}
 	return locations
 }
 
-func mapDistricts(rows []domainlocation.District) []dto.Location {
-	locations := make([]dto.Location, 0, len(rows))
+func mapDistricts(rows []domainlocation.District) []dtolocation.Location {
+	locations := make([]dtolocation.Location, 0, len(rows))
 	for _, row := range rows {
-		locations = append(locations, dto.Location{Code: row.Code, Name: row.Name})
+		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
 	}
 	return locations
 }
 
-func mapVillages(rows []domainlocation.Village) []dto.Location {
-	locations := make([]dto.Location, 0, len(rows))
+func mapVillages(rows []domainlocation.Village) []dtolocation.Location {
+	locations := make([]dtolocation.Location, 0, len(rows))
 	for _, row := range rows {
-		locations = append(locations, dto.Location{Code: row.Code, Name: row.Name})
+		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
 	}
 	return locations
 }
@@ -168,8 +168,8 @@ func sortVillages(items []domainlocation.Village) []domainlocation.Village {
 	return items
 }
 
-func mapSyncJob(job domainlocation.SyncJob) dto.LocationSyncJob {
-	return dto.LocationSyncJob{
+func mapSyncJob(job domainlocation.SyncJob) dtolocation.SyncJob {
+	return dtolocation.SyncJob{
 		ID:            job.ID,
 		Status:        job.Status,
 		Level:         job.Level,

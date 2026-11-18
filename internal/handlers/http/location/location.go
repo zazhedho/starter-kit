@@ -1,4 +1,4 @@
-package handlerlocation
+package location
 
 import (
 	"errors"
@@ -7,20 +7,20 @@ import (
 	"github.com/zazhedho/logus"
 	"net/http"
 	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 
 	"github.com/gin-gonic/gin"
 )
 
-type LocationHandler struct {
+type Handler struct {
 	service Service
 }
 
-func NewLocationHandler(s Service) *LocationHandler {
-	return &LocationHandler{service: s}
+func New(s Service) *Handler {
+	return &Handler{service: s}
 }
 
-func (h *LocationHandler) GetProvince(ctx *gin.Context) {
+func (h *Handler) GetProvince(ctx *gin.Context) {
 	logId := gokit.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetProvince]"
 	reqCtx := ctx.Request.Context()
@@ -37,7 +37,7 @@ func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
-func (h *LocationHandler) GetCity(ctx *gin.Context) {
+func (h *Handler) GetCity(ctx *gin.Context) {
 	logId := gokit.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetCity]"
 	reqCtx := ctx.Request.Context()
@@ -62,7 +62,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
-func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
+func (h *Handler) GetDistrict(ctx *gin.Context) {
 	logId := gokit.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetDistrict]"
 	reqCtx := ctx.Request.Context()
@@ -87,7 +87,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
-func (h *LocationHandler) GetVillage(ctx *gin.Context) {
+func (h *Handler) GetVillage(ctx *gin.Context) {
 	logId := gokit.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetVillage]"
 	reqCtx := ctx.Request.Context()
@@ -112,12 +112,12 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
-func (h *LocationHandler) Sync(ctx *gin.Context) {
+func (h *Handler) Sync(ctx *gin.Context) {
 	logId := gokit.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][Sync]"
 	reqCtx := ctx.Request.Context()
 
-	var req dto.SyncLocationRequest
+	var req dtolocation.SyncRequest
 	if !gokit.BindJSON(ctx, logId, logPrefix, &req) {
 		return
 	}
@@ -148,7 +148,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 	ctx.JSON(http.StatusAccepted, res)
 }
 
-func (h *LocationHandler) GetSyncJob(ctx *gin.Context) {
+func (h *Handler) GetSyncJob(ctx *gin.Context) {
 	logId := gokit.GenerateLogId(ctx)
 	logPrefix := "[LocationHandler][GetSyncJob]"
 	reqCtx := ctx.Request.Context()

@@ -344,3 +344,120 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 		}
 	})
 }
+
+// moduleAliasPrefix maps a package tree that holds one package per module to
+// the import-alias prefix every importer must use: the alias is the prefix
+// followed by the module name, for example domainlocation or httpmedia. The
+// handler prefix is "http" (the transport) because handlers/<transport>/<module>
+// leaves room for other transports.
+var moduleAliasPrefix = map[string]string{
+	"internal/domain":               "domain",
+	"internal/dto":                  "dto",
+	"internal/services":             "service",
+	"internal/repositories":         "repository",
+	"internal/handlers/http":        "http",
+	"internal/infrastructure/cache": "cache",
+}
+
+// expectedAlias returns the alias the import convention demands for importPath,
+// or "" when importPath is not a module package.
+func expectedAlias(importPath string) string {
+	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
+	if !ok {
+		return ""
+	}
+	dir, module := path.Split(internal)
+	prefix, ok := moduleAliasPrefix[strings.TrimSuffix(dir, "/")]
+	if !ok || module == "" {
+		return ""
+	}
+	return prefix + module
+}
+
+// goFiles calls visit for every .go file (tests included) of the module,
+// parsed with imports only.
+func goFiles(t *testing.T, visit func(p string, file *ast.File)) {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	err := fs.WalkDir(os.DirFS(root), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == ".superpowers" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, p), nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		visit(p, file)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestImportAliasConvention(t *testing.T) {
+	goFiles(t, func(p string, file *ast.File) {
+		for _, imp := range file.Imports {
+			ip, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Errorf("%s: %v", p, err)
+				continue
+			}
+			want := expectedAlias(ip)
+			if want == "" {
+				continue
+			}
+			got := ""
+			if imp.Name != nil {
+				got = imp.Name.Name
+			}
+			if got != want {
+				t.Errorf("%s imports %s as %q; the convention is the alias %q", p, ip, got, want)
+			}
+		}
+	})
+}
+
+func TestExpectedAlias(t *testing.T) {
+	cases := map[string]string{
+		"starter-kit/internal/domain/location":               "domainlocation",
+		"starter-kit/internal/dto/location":                  "dtolocation",
+		"starter-kit/internal/services/media":                "servicemedia",
+		"starter-kit/internal/repositories/media":            "repositorymedia",
+		"starter-kit/internal/handlers/http/location":        "httplocation",
+		"starter-kit/internal/infrastructure/cache/location": "cachelocation",
+		"starter-kit/internal/infrastructure/storage":        "",
+		"starter-kit/internal/config":                        "",
+		"github.com/gin-gonic/gin":                           "",
+		"starter-kit/internal/handlers/http":                 "",
+	}
+	for ip, want := range cases {
+		if got := expectedAlias(ip); got != want {
+			t.Errorf("expectedAlias(%q) = %q, want %q", ip, got, want)
+		}
+	}
+}
+
+// TestPackageNameMatchesDirectory enforces the Go convention that a package is
+// named after its directory (an external test package may add _test).
+func TestPackageNameMatchesDirectory(t *testing.T) {
+	goFiles(t, func(p string, file *ast.File) {
+		if strings.HasPrefix(p, "cmd/") {
+			return
+		}
+		want := path.Base(path.Dir(p))
+		got := strings.TrimSuffix(file.Name.Name, "_test")
+		if got != want {
+			t.Errorf("%s declares package %s; the directory name is %s", p, file.Name.Name, want)
+		}
+	})
+}

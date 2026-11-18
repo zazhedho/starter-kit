@@ -3,23 +3,23 @@ package router
 import (
 	"github.com/gin-gonic/gin"
 
-	locationHandler "starter-kit/internal/handlers/http/location"
+	httplocation "starter-kit/internal/handlers/http/location"
 	cachelocation "starter-kit/internal/infrastructure/cache/location"
-	locationRepo "starter-kit/internal/repositories/location"
-	locationSvc "starter-kit/internal/services/location"
+	repositorylocation "starter-kit/internal/repositories/location"
+	servicelocation "starter-kit/internal/services/location"
 )
 
 func registerLocation(r gin.IRouter, d Deps) error {
 	loc := d.Config.Location
-	repo := locationRepo.NewRepository(d.DB)
-	svc := locationSvc.NewLocationService(repo, locationSvc.Options{
+	repo := repositorylocation.NewRepository(d.DB)
+	svc := servicelocation.NewService(repo, servicelocation.Options{
 		Cache:      cachelocation.New(d.Redis),
 		BaseURL:    loc.ServiceBaseURL,
 		SourceYear: loc.SourceYear,
 		Timeout:    loc.ServiceTimeout,
 		CacheTTL:   loc.CacheTTL,
 	})
-	h := locationHandler.NewLocationHandler(svc)
+	h := httplocation.New(svc)
 
 	location := r.Group("/location")
 	{

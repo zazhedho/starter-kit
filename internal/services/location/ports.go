@@ -1,11 +1,11 @@
-package servicelocation
+package location
 
 import (
 	"context"
 	"time"
 
 	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 // Repository is the persistence the location service needs. The GORM adapter
@@ -35,8 +35,8 @@ type Repository interface {
 // (Get) or a no-op (Set, DeleteKeys): the cache is an optimisation, never a
 // dependency.
 type Cache interface {
-	Get(ctx context.Context, key string) ([]dto.Location, bool)
-	Set(ctx context.Context, key string, locations []dto.Location, ttl time.Duration)
+	Get(ctx context.Context, key string) ([]dtolocation.Location, bool)
+	Set(ctx context.Context, key string, locations []dtolocation.Location, ttl time.Duration)
 	// DeleteKeys removes every key that starts with prefix.
 	DeleteKeys(ctx context.Context, prefix string)
 }
@@ -44,11 +44,11 @@ type Cache interface {
 // noopCache stands in when no Cache is configured: every lookup misses.
 type noopCache struct{}
 
-func (noopCache) Get(context.Context, string) ([]dto.Location, bool)         { return nil, false }
-func (noopCache) Set(context.Context, string, []dto.Location, time.Duration) {}
-func (noopCache) DeleteKeys(context.Context, string)                         {}
+func (noopCache) Get(context.Context, string) ([]dtolocation.Location, bool)         { return nil, false }
+func (noopCache) Set(context.Context, string, []dtolocation.Location, time.Duration) {}
+func (noopCache) DeleteKeys(context.Context, string)                                 {}
 
-func (s *LocationService) cacheOrNoop() Cache {
+func (s *Service) cacheOrNoop() Cache {
 	if s.cache == nil {
 		return noopCache{}
 	}

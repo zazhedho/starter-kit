@@ -1,4 +1,4 @@
-package handlerlocation
+package location
 
 import (
 	"bytes"
@@ -15,38 +15,38 @@ import (
 	"strings"
 
 	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 )
 
 type locationServiceTestDouble struct {
-	locations []dto.Location
-	job       dto.LocationSyncJob
+	locations []dtolocation.Location
+	job       dtolocation.SyncJob
 	err       error
-	startReq  dto.SyncLocationRequest
+	startReq  dtolocation.SyncRequest
 	requested string
 }
 
-func (m *locationServiceTestDouble) GetProvince(ctx context.Context) ([]dto.Location, error) {
+func (m *locationServiceTestDouble) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
 	return m.locations, m.err
 }
-func (m *locationServiceTestDouble) GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error) {
+func (m *locationServiceTestDouble) GetCity(ctx context.Context, provinceCode string) ([]dtolocation.Location, error) {
 	return m.locations, m.err
 }
-func (m *locationServiceTestDouble) GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error) {
+func (m *locationServiceTestDouble) GetDistrict(ctx context.Context, cityCode string) ([]dtolocation.Location, error) {
 	return m.locations, m.err
 }
-func (m *locationServiceTestDouble) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
+func (m *locationServiceTestDouble) GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error) {
 	return m.locations, m.err
 }
-func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error) {
+func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dtolocation.SyncRequest) (dtolocation.SyncJob, error) {
 	m.startReq = req
 	m.requested = authkit.ScopeFrom(ctx).ActorUserID()
 	return m.job, m.err
 }
-func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error) {
+func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error) {
 	return m.job, m.err
 }
 
@@ -78,7 +78,7 @@ func performLocationRequest(method, routePath, requestPath string, body any, han
 }
 
 func TestLocationListHandlersValidateRequiredQueries(t *testing.T) {
-	handler := NewLocationHandler(&locationServiceTestDouble{locations: []dto.Location{{Code: "11", Name: "Aceh"}}})
+	handler := New(&locationServiceTestDouble{locations: []dtolocation.Location{{Code: "11", Name: "Aceh"}}})
 
 	if rec := performLocationRequest(http.MethodGet, "/province", "/province", nil, handler.GetProvince, nil); rec.Code != http.StatusOK {
 		t.Fatalf("expected province 200, got %d", rec.Code)
@@ -105,7 +105,7 @@ func TestLocationListHandlersValidateRequiredQueries(t *testing.T) {
 }
 
 func TestLocationListHandlersMapServiceErrors(t *testing.T) {
-	handler := NewLocationHandler(&locationServiceTestDouble{err: errors.New("database down")})
+	handler := New(&locationServiceTestDouble{err: errors.New("database down")})
 
 	tests := []struct {
 		name      string
@@ -130,9 +130,9 @@ func TestLocationListHandlersMapServiceErrors(t *testing.T) {
 }
 
 func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
-	service := &locationServiceTestDouble{job: dto.LocationSyncJob{ID: "job-1", Status: "queued"}}
-	handler := NewLocationHandler(service)
-	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, map[string]any{
+	service := &locationServiceTestDouble{job: dtolocation.SyncJob{ID: "job-1", Status: "queued"}}
+	handler := New(service)
+	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "province"}, handler.Sync, map[string]any{
 		"user_id": "user-1",
 		"role":    "admin",
 	})
@@ -143,14 +143,14 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 		t.Fatalf("expected actor user id, got %q", service.requested)
 	}
 
-	handler = NewLocationHandler(&locationServiceTestDouble{err: domainlocation.ErrSyncRunning, job: dto.LocationSyncJob{ID: "job-1"}})
-	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, nil)
+	handler = New(&locationServiceTestDouble{err: domainlocation.ErrSyncRunning, job: dtolocation.SyncJob{ID: "job-1"}})
+	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "province"}, handler.Sync, nil)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", rec.Code)
 	}
 
-	handler = NewLocationHandler(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("invalid sync level")})
-	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, nil)
+	handler = New(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("invalid sync level")})
+	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "province"}, handler.Sync, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -162,19 +162,19 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 }
 
 func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
-	handler := NewLocationHandler(&locationServiceTestDouble{err: domainlocation.ErrNotFound})
+	handler := New(&locationServiceTestDouble{err: domainlocation.ErrNotFound})
 	rec := performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	handler = NewLocationHandler(&locationServiceTestDouble{job: dto.LocationSyncJob{ID: "job-1", Status: "done"}})
+	handler = New(&locationServiceTestDouble{job: dtolocation.SyncJob{ID: "job-1", Status: "done"}})
 	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	handler = NewLocationHandler(&locationServiceTestDouble{err: errors.New("database down")})
+	handler = New(&locationServiceTestDouble{err: errors.New("database down")})
 	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
@@ -187,7 +187,7 @@ func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
 }
 
 func TestLocationSyncMapsStartErrors(t *testing.T) {
-	req := dto.SyncLocationRequest{Level: "province"}
+	req := dtolocation.SyncRequest{Level: "province"}
 	cases := []struct {
 		name       string
 		err        error
@@ -200,7 +200,7 @@ func TestLocationSyncMapsStartErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			handler := NewLocationHandler(&locationServiceTestDouble{err: c.err})
+			handler := New(&locationServiceTestDouble{err: c.err})
 			rec := performLocationRequest(http.MethodPost, "/sync", "/sync", req, handler.Sync, nil)
 			if rec.Code != c.wantStatus {
 				t.Fatalf("expected %d, got %d: %s", c.wantStatus, rec.Code, rec.Body.String())
@@ -210,8 +210,8 @@ func TestLocationSyncMapsStartErrors(t *testing.T) {
 }
 
 func TestLocationSyncUnexpectedErrorUsesGenericResponse(t *testing.T) {
-	handler := NewLocationHandler(&locationServiceTestDouble{err: errors.New("pq: connection refused")})
-	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, nil)
+	handler := New(&locationServiceTestDouble{err: errors.New("pq: connection refused")})
+	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "province"}, handler.Sync, nil)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -234,8 +234,8 @@ func TestLocationSyncUnexpectedErrorUsesGenericResponse(t *testing.T) {
 }
 
 func TestLocationSyncValidationEchoesMessage(t *testing.T) {
-	handler := NewLocationHandler(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("province_code is required for city sync")})
-	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "city"}, handler.Sync, nil)
+	handler := New(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("province_code is required for city sync")})
+	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "city"}, handler.Sync, nil)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "province_code is required for city sync") {
 		t.Fatalf("expected 400 with the validation message, got %d: %s", rec.Code, rec.Body.String())
 	}

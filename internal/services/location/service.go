@@ -1,4 +1,4 @@
-package servicelocation
+package location
 
 import (
 	"context"
@@ -10,12 +10,12 @@ import (
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
+	dtolocation "starter-kit/internal/dto/location"
 	"sync/atomic"
 	"time"
 )
 
-type LocationService struct {
+type Service struct {
 	repo       Repository
 	cache      Cache
 	httpClient *http.Client
@@ -46,14 +46,14 @@ type syncProgress struct {
 // defaultHTTPTimeout bounds outbound calls when Options.Timeout is not positive.
 const defaultHTTPTimeout = 20 * time.Second
 
-func NewLocationService(repo Repository, opts Options) *LocationService {
+func NewService(repo Repository, opts Options) *Service {
 	// Zero would mean "no timeout" to http.Client; never allow that, so a
 	// project that builds Options by hand stays safe.
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = defaultHTTPTimeout
 	}
-	service := &LocationService{
+	service := &Service{
 		repo:       repo,
 		cache:      opts.Cache,
 		httpClient: &http.Client{Timeout: timeout},
@@ -69,7 +69,7 @@ func NewLocationService(repo Repository, opts Options) *LocationService {
 	return service
 }
 
-func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, error) {
+func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
 	cacheKey := provinceKey()
 	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
@@ -97,7 +97,7 @@ func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, erro
 	return locations, nil
 }
 
-func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error) {
+func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocation.Location, error) {
 	cacheKey := cityKey(provinceCode)
 	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
@@ -125,7 +125,7 @@ func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]d
 	return locations, nil
 }
 
-func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error) {
+func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocation.Location, error) {
 	cacheKey := districtKey(cityCode)
 	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
@@ -157,7 +157,7 @@ func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]d
 	return locations, nil
 }
 
-func (s *LocationService) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
+func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error) {
 	cacheKey := villageKey(districtCode)
 	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
@@ -193,10 +193,10 @@ func (s *LocationService) GetVillage(ctx context.Context, districtCode string) (
 	return locations, nil
 }
 
-func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error) {
+func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest) (dtolocation.SyncJob, error) {
 	normalizedReq, err := s.normalizeAndValidateRequest(req)
 	if err != nil {
-		return dto.LocationSyncJob{}, err
+		return dtolocation.SyncJob{}, err
 	}
 	requestedByUserID := authkit.ScopeFrom(ctx).ActorUserID()
 
@@ -205,7 +205,7 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 	case err == nil:
 		return mapSyncJob(activeJob), domainlocation.ErrSyncRunning
 	case !errors.Is(err, domainlocation.ErrNotFound):
-		return dto.LocationSyncJob{}, err
+		return dtolocation.SyncJob{}, err
 	}
 
 	now := time.Now()
@@ -224,7 +224,7 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 	}
 
 	if err := s.repo.CreateSyncJob(ctx, &job); err != nil {
-		return dto.LocationSyncJob{}, err
+		return dtolocation.SyncJob{}, err
 	}
 
 	go s.runSyncJob(job.ID, normalizedReq)
@@ -232,16 +232,16 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 	return mapSyncJob(job), nil
 }
 
-func (s *LocationService) GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error) {
+func (s *Service) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error) {
 	job, err := s.repo.GetSyncJobByID(ctx, id)
 	if err != nil {
-		return dto.LocationSyncJob{}, err
+		return dtolocation.SyncJob{}, err
 	}
 
 	return mapSyncJob(job), nil
 }
 
-func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationRequest) (dto.SyncLocationRequest, error) {
+func (s *Service) normalizeAndValidateRequest(req dtolocation.SyncRequest) (dtolocation.SyncRequest, error) {
 	req.Level = normalizeSyncLevel(req.Level)
 	req.Year = s.normalizeSyncYear(req.Year)
 
@@ -250,27 +250,27 @@ func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationReques
 		return req, nil
 	case "city":
 		if req.ProvinceCode == "" {
-			return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("province_code is required for city sync")
+			return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("province_code is required for city sync")
 		}
 		return req, nil
 	case "district":
 		if req.ProvinceCode == "" || req.CityCode == "" {
-			return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("province_code and city_code are required for district sync")
+			return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("province_code and city_code are required for district sync")
 		}
 		return req, nil
 	case "village":
 		if req.ProvinceCode == "" || req.CityCode == "" || req.DistrictCode == "" {
-			return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("province_code, city_code, and district_code are required for village sync")
+			return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("province_code, city_code, and district_code are required for village sync")
 		}
 		return req, nil
 	case "all":
 		return req, nil
 	default:
-		return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("invalid sync level")
+		return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("invalid sync level")
 	}
 }
 
-func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) {
+func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	jobCtx := context.Background()
 	if !s.syncing.CompareAndSwap(false, true) {
 		s.markSyncJobFailed(jobCtx, jobID, "Another location sync is already running in this service instance.")
@@ -317,7 +317,7 @@ func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) 
 	}
 }
 
-func (s *LocationService) markSyncJobFailed(ctx context.Context, jobID, errorMessage string) {
+func (s *Service) markSyncJobFailed(ctx context.Context, jobID, errorMessage string) {
 	job, err := s.repo.GetSyncJobByID(ctx, jobID)
 	if err != nil {
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
@@ -335,7 +335,7 @@ func (s *LocationService) markSyncJobFailed(ctx context.Context, jobID, errorMes
 	}
 }
 
-func (s *LocationService) applySyncProgress(job *domainlocation.SyncJob, progress syncProgress) {
+func (s *Service) applySyncProgress(job *domainlocation.SyncJob, progress syncProgress) {
 	job.Message = progress.Message
 	job.ProvinceCount = progress.ProvinceCount
 	job.CityCount = progress.CityCount
@@ -344,7 +344,7 @@ func (s *LocationService) applySyncProgress(job *domainlocation.SyncJob, progres
 	job.UpdatedAt = new(time.Now())
 }
 
-func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest, progress func(syncProgress)) (syncProgress, error) {
+func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progress func(syncProgress)) (syncProgress, error) {
 	switch req.Level {
 	case "province":
 		progress(syncProgress{Message: "Fetching provinces"})
@@ -409,7 +409,7 @@ func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest,
 	}
 }
 
-func (s *LocationService) syncAll(ctx context.Context, year string, progress func(syncProgress)) (syncProgress, error) {
+func (s *Service) syncAll(ctx context.Context, year string, progress func(syncProgress)) (syncProgress, error) {
 	progress(syncProgress{Message: "Fetching provinces"})
 	provinces, err := s.fetchProvinces(ctx, year)
 	if err != nil {
@@ -442,7 +442,7 @@ func (s *LocationService) syncAll(ctx context.Context, year string, progress fun
 	}, nil
 }
 
-func (s *LocationService) syncProvince(ctx context.Context, year string, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
+func (s *Service) syncProvince(ctx context.Context, year string, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
 	cities, err := s.fetchCities(ctx, year, province.Code)
 	if err != nil {
 		return err
@@ -477,7 +477,7 @@ func (s *LocationService) syncProvince(ctx context.Context, year string, provinc
 	return nil
 }
 
-func (s *LocationService) syncCity(ctx context.Context, year string, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
+func (s *Service) syncCity(ctx context.Context, year string, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
 	districts, err := s.fetchDistricts(ctx, year, province.Code, city.Code)
 	if err != nil {
 		return err
@@ -506,7 +506,7 @@ func (s *LocationService) syncCity(ctx context.Context, year string, province do
 	return nil
 }
 
-func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
+func (s *Service) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
 	_ = year
 	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/provinces", nil), "province")
 	if err != nil {
@@ -526,7 +526,7 @@ func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]do
 	return sortProvinces(items), nil
 }
 
-func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
+func (s *Service) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
 	_ = year
 	cleanProvinceCode := normalizeCodeSegment(provinceCode)
 	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/regencies", map[string]string{
@@ -551,7 +551,7 @@ func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode st
 	return sortCities(items), nil
 }
 
-func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
+func (s *Service) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
 	_ = year
 	cleanProvinceCode := normalizeCodeSegment(provinceCode)
 	cleanCityCode := normalizeCodeSegment(cityCode)
@@ -579,7 +579,7 @@ func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode
 	return sortDistricts(items), nil
 }
 
-func (s *LocationService) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
+func (s *Service) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
 	_ = year
 	cleanProvinceCode := normalizeCodeSegment(provinceCode)
 	cleanCityCode := normalizeCodeSegment(cityCode)
@@ -619,7 +619,7 @@ func normalizeSyncLevel(level string) string {
 	}
 }
 
-func (s *LocationService) normalizeSyncYear(year string) string {
+func (s *Service) normalizeSyncYear(year string) string {
 	if year != "" {
 		return year
 	}

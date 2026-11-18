@@ -1,4 +1,4 @@
-package servicelocation
+package location
 
 import "fmt"
 
