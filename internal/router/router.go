@@ -18,7 +18,8 @@ import (
 )
 
 // Deps is everything the routes need. Redis is nil when Redis is not used;
-// Storage is nil when media is disabled.
+// Storage is nil when media is disabled. Lifecycle collects the shutdown hooks
+// of background work the modules start; the caller closes it.
 type Deps struct {
 	Config  config.Config
 	DB      *gorm.DB
@@ -26,6 +27,8 @@ type Deps struct {
 	Redis   *redis.Client
 	Kit     *authkit.Kit
 	Storage servicemedia.Storage
+
+	Lifecycle *Lifecycle
 }
 
 // registrar mounts one module's routes. Module registrars take the /api group
@@ -58,6 +61,9 @@ func (d Deps) validate() error {
 	}
 	if d.Kit == nil {
 		missing = append(missing, "Kit")
+	}
+	if d.Lifecycle == nil {
+		missing = append(missing, "Lifecycle")
 	}
 	if d.Config.Media.Enabled && d.Storage == nil {
 		missing = append(missing, "Storage (media is enabled)")

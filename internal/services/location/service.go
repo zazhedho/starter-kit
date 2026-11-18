@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,10 +16,24 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// restartedMessage is recorded on a job a previous process left unfinished.
-const restartedMessage = "Service restarted before the previous location sync completed."
+// ErrClosed is returned by StartSync after Close: the service no longer starts
+// background work.
+var ErrClosed = errors.New("location service is closed")
 
-// Service holds the location use cases. Build it with NewService.
+// Messages recorded on a job that did not run to completion. Both end in the
+// state FailActiveSyncJobs leaves behind: status failed, message "Location sync
+// interrupted".
+const (
+	restartedMessage = "Service restarted before the previous location sync completed."
+	shutdownMessage  = "Application shut down before the location sync completed."
+
+	// settleTimeout bounds the final database write of a canceled job, which
+	// must not use the canceled context.
+	settleTimeout = 10 * time.Second
+)
+
+// Service holds the location use cases. Build it with NewService; a running
+// sync belongs to the Service until Close.
 type Service struct {
 	repo       Repository
 	cache      Cache
@@ -29,6 +44,13 @@ type Service struct {
 	baseURL    string
 	sourceYear string
 	cacheTTL   time.Duration
+
+	// lifecycle: background sync jobs run under baseCtx, which Close cancels.
+	baseCtx context.Context
+	cancel  context.CancelFunc
+	mu      sync.Mutex
+	closed  bool
+	jobs    sync.WaitGroup
 }
 
 // Options is what the service needs besides its repository. The zero value is
@@ -55,7 +77,7 @@ type syncProgress struct {
 const defaultHTTPTimeout = 20 * time.Second
 
 // NewService builds the service. It performs no I/O: call RecoverInterruptedJobs
-// once at startup.
+// once at startup, and Close at shutdown.
 func NewService(repo Repository, opts Options) *Service {
 	// Zero would mean "no timeout" to http.Client; never allow that, so a
 	// project that builds Options by hand stays safe.
@@ -71,6 +93,7 @@ func NewService(repo Repository, opts Options) *Service {
 	if newID == nil {
 		newID = newUUIDv7
 	}
+	baseCtx, cancel := context.WithCancel(context.Background())
 	return &Service{
 		repo:       repo,
 		cache:      cache,
@@ -79,6 +102,8 @@ func NewService(repo Repository, opts Options) *Service {
 		baseURL:    opts.BaseURL,
 		sourceYear: opts.SourceYear,
 		cacheTTL:   opts.CacheTTL,
+		baseCtx:    baseCtx,
+		cancel:     cancel,
 	}
 }
 
@@ -99,6 +124,39 @@ func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
 		return fmt.Errorf("mark interrupted location sync jobs: %w", err)
 	}
 	return nil
+}
+
+// Close stops the running sync job, if any, and waits for it to record its
+// final state, or for ctx to end. It is safe to call more than once; after the
+// first call StartSync fails with ErrClosed.
+func (s *Service) Close(ctx context.Context) error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.cancel()
+
+	done := make(chan struct{})
+	go func() {
+		s.jobs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for location sync job: %w", ctx.Err())
+	}
+}
+
+// startJob reserves a slot for a background job, or reports that the service is closed.
+func (s *Service) startJob() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.jobs.Add(1)
+	return true
 }
 
 func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
@@ -256,11 +314,18 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, re
 		UpdatedAt:    &now,
 	}
 
+	if !s.startJob() {
+		return dtolocation.SyncJob{}, ErrClosed
+	}
 	if err := s.repo.CreateSyncJob(ctx, &job); err != nil {
+		s.jobs.Done()
 		return dtolocation.SyncJob{}, err
 	}
 
-	go s.runSyncJob(job.ID, normalizedReq)
+	go func() {
+		defer s.jobs.Done()
+		s.runSyncJob(job.ID, normalizedReq)
+	}()
 
 	return mapSyncJob(job), nil
 }
@@ -303,16 +368,25 @@ func (s *Service) normalizeAndValidateRequest(req dtolocation.SyncRequest) (dtol
 	}
 }
 
+// runSyncJob runs one job under the service's lifecycle context. When Close
+// cancels it, the job ends as failed/interrupted, the same state
+// RecoverInterruptedJobs would give it after a restart.
 func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
-	jobCtx := context.Background()
+	jobCtx := s.baseCtx
 	if !s.syncing.CompareAndSwap(false, true) {
-		s.markSyncJobFailed(jobCtx, jobID, "Another location sync is already running in this service instance.")
+		s.markSyncJobFailed(jobID, "Another location sync is already running in this service instance.")
 		return
 	}
 	defer s.syncing.Store(false)
 
+	if jobCtx.Err() != nil {
+		s.markSyncJobInterrupted(jobID)
+		return
+	}
+
 	job, err := s.repo.GetSyncJobByID(jobCtx, jobID)
 	if err != nil {
+		s.markIfInterrupted(jobCtx, jobID)
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s: %v", jobID, err))
 		return
 	}
@@ -323,6 +397,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	job.StartedAt = &startedAt
 	job.UpdatedAt = &startedAt
 	if err := s.repo.UpdateSyncJob(jobCtx, &job); err != nil {
+		s.markIfInterrupted(jobCtx, jobID)
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as running: %v", jobID, err))
 		return
 	}
@@ -334,10 +409,17 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 		}
 	})
 	if err != nil {
-		s.markSyncJobFailed(jobCtx, job.ID, err.Error())
+		if jobCtx.Err() != nil {
+			s.markSyncJobInterrupted(job.ID)
+			return
+		}
+		s.markSyncJobFailed(job.ID, err.Error())
 		return
 	}
 
+	// The job finished; record it even if shutdown began a moment ago.
+	ctx, cancel := s.settleContext()
+	defer cancel()
 	s.applySyncProgress(&job, result)
 	finishedAt := time.Now()
 	job.Status = "completed"
@@ -345,12 +427,38 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	job.ErrorMessage = ""
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
-	if err := s.repo.UpdateSyncJob(jobCtx, &job); err != nil {
+	if err := s.repo.UpdateSyncJob(ctx, &job); err != nil {
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as completed: %v", job.ID, err))
 	}
 }
 
-func (s *Service) markSyncJobFailed(ctx context.Context, jobID, errorMessage string) {
+// settleContext returns a bounded context that survives cancellation of the
+// lifecycle context, for the writes that record a job's final state.
+func (s *Service) settleContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(s.baseCtx), settleTimeout)
+}
+
+// markIfInterrupted records the interrupted state when ctx was canceled, so a
+// job that never got going is not left queued.
+func (s *Service) markIfInterrupted(ctx context.Context, jobID string) {
+	if ctx.Err() != nil {
+		s.markSyncJobInterrupted(jobID)
+	}
+}
+
+func (s *Service) markSyncJobFailed(jobID, errorMessage string) {
+	s.finishFailed(jobID, "Location sync failed", errorMessage)
+}
+
+// markSyncJobInterrupted ends a job cut short by shutdown with the exact
+// message and error text FailActiveSyncJobs would write.
+func (s *Service) markSyncJobInterrupted(jobID string) {
+	s.finishFailed(jobID, "Location sync interrupted", shutdownMessage)
+}
+
+func (s *Service) finishFailed(jobID, message, errorMessage string) {
+	ctx, cancel := s.settleContext()
+	defer cancel()
 	job, err := s.repo.GetSyncJobByID(ctx, jobID)
 	if err != nil {
 		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
@@ -359,7 +467,7 @@ func (s *Service) markSyncJobFailed(ctx context.Context, jobID, errorMessage str
 
 	finishedAt := time.Now()
 	job.Status = "failed"
-	job.Message = "Location sync failed"
+	job.Message = message
 	job.ErrorMessage = errorMessage
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt

@@ -356,6 +356,7 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 	repo := &locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}
 	svc := NewService(repo, Options{SourceYear: "2026"})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
 	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "user-1")
 	if err != nil {
@@ -666,7 +667,7 @@ func TestLocationSyncProgressAndFailureHelpers(t *testing.T) {
 		t.Fatalf("unexpected progress application: %+v", job)
 	}
 
-	svc.markSyncJobFailed(context.Background(), "job-1", "failed")
+	svc.markSyncJobFailed("job-1", "failed")
 	if repo.syncJob.Status != "running" {
 		t.Fatalf("test double should keep original sync job copy, got %+v", repo.syncJob)
 	}

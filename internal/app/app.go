@@ -53,8 +53,13 @@ type App struct {
 	engine *gin.Engine  // nil until buildRoutes has run
 	server *http.Server // nil until buildRoutes has run
 
-	storage storage.Provider  // nil unless media is enabled
-	routes  func(*gin.Engine) // extra routes added by tests
+	storage storage.Provider // nil unless media is enabled
+
+	// lifecycle holds the shutdown hooks of background work the modules start
+	// (the location sync job). Close runs it before releasing Redis and the
+	// database, so that work can still use them while it finishes.
+	lifecycle *router.Lifecycle
+	routes    func(*gin.Engine) // extra routes added by tests
 
 	listener net.Listener                    // nil: Serve listens on server.Addr
 	migrate  func(ctx context.Context) error // replaces the real migrations in tests
@@ -187,7 +192,7 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		openDB = database.Open
 	}
 
-	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate, routes: d.routes}
+	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate, routes: d.routes, lifecycle: &router.Lifecycle{}}
 	if a.db, a.sqlDB, err = openDB(cfg.Database, cfg.App.Timezone); err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -266,7 +271,7 @@ func (a *App) buildRoutes() error {
 	if a.engine != nil {
 		return nil
 	}
-	engine, err := router.New(router.Deps{Config: a.cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: a.storage})
+	engine, err := router.New(router.Deps{Config: a.cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: a.storage, Lifecycle: a.lifecycle})
 	if err != nil {
 		return fmt.Errorf("initialize routes: %w", err)
 	}
@@ -296,8 +301,9 @@ func (a *App) Handler() http.Handler {
 	return a.engine
 }
 
-// Close closes Redis, then the database. It is safe to call more than once;
-// only the first call does anything and reports errors.
+// Close stops background work and waits for it, at most HTTP_SHUTDOWN_TIMEOUT,
+// then closes Redis and the database. It is safe to call more than once; only
+// the first call does anything and reports errors.
 func (a *App) Close() error {
 	a.closeMu.Lock()
 	defer a.closeMu.Unlock()
@@ -307,6 +313,11 @@ func (a *App) Close() error {
 	a.closed = true
 
 	var errs []error
+	stopCtx, cancel := context.WithTimeout(context.Background(), a.cfg.HTTP.ShutdownTimeout)
+	defer cancel()
+	if err := a.lifecycle.Close(stopCtx); err != nil {
+		errs = append(errs, fmt.Errorf("stop background work: %w", err))
+	}
 	if a.redis != nil {
 		if err := a.redis.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close redis: %w", err))

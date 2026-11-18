@@ -64,7 +64,7 @@ func newTestDepsWithMock(t *testing.T, mutate func(*config.Config)) (Deps, sqlmo
 	if err != nil {
 		t.Fatalf("authkit.New: %v", err)
 	}
-	return Deps{Config: cfg, DB: db, SQLDB: sqlDB, Kit: kit}, mock
+	return Deps{Config: cfg, DB: db, SQLDB: sqlDB, Kit: kit, Lifecycle: &Lifecycle{}}, mock
 }
 
 func newTestDeps(t *testing.T, mutate func(*config.Config)) Deps {
@@ -182,9 +182,10 @@ func TestGlobalBodyLimitCutsOffUndeclaredLengthBody(t *testing.T) {
 
 func TestNewRejectsIncompleteDeps(t *testing.T) {
 	cases := map[string]func(*Deps){
-		"nil DB":    func(d *Deps) { d.DB = nil },
-		"nil SQLDB": func(d *Deps) { d.SQLDB = nil },
-		"nil Kit":   func(d *Deps) { d.Kit = nil },
+		"nil DB":        func(d *Deps) { d.DB = nil },
+		"nil SQLDB":     func(d *Deps) { d.SQLDB = nil },
+		"nil Kit":       func(d *Deps) { d.Kit = nil },
+		"nil Lifecycle": func(d *Deps) { d.Lifecycle = nil },
 		"media enabled without storage": func(d *Deps) {
 			d.Config.Media.Enabled = true
 			d.Storage = nil

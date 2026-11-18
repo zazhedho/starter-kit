@@ -303,6 +303,59 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestCloseStopsBackgroundWorkBeforeReleasingConnections pins the shutdown
+// order: hooks registered by modules (the location sync job) run while the
+// database is still open. sqlmock expects the ping before the close.
+func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
+	mock, _, open := mockDB(t)
+	mock.ExpectPing()
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), testConfig(), deps{openDB: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookRan := false
+	a.lifecycle.OnClose("test job", func(ctx context.Context) error {
+		hookRan = true
+		return a.sqlDB.PingContext(ctx) // fails if the database were closed already
+	})
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if !hookRan {
+		t.Fatal("Close did not run the lifecycle hooks")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout: a hook that
+// never finishes must not block Close forever; the error is reported and the
+// connections are still released.
+func TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 20 * time.Millisecond
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), cfg, deps{openDB: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.lifecycle.OnClose("stuck job", func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	if err := a.Close(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close = %v, want it to report the timed-out hook", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the database was not closed: %v", err)
+	}
+}
+
 func closedPort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

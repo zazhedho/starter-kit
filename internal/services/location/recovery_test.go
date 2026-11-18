@@ -39,6 +39,7 @@ func TestRecoverInterruptedJobsFailsActiveJobs(t *testing.T) {
 func TestStartSyncUsesInjectedIDAndRequester(t *testing.T) {
 	repo := &locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}
 	svc := NewService(repo, Options{NewID: func() string { return "job-fixed" }})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
 	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "user-9")
 	if err != nil {
@@ -54,6 +55,7 @@ func TestStartSyncUsesInjectedIDAndRequester(t *testing.T) {
 func TestDefaultJobIDIsUUIDv7(t *testing.T) {
 	repo := &locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}
 	svc := NewService(repo, Options{})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
 	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u")
 	if err != nil {

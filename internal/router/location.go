@@ -25,10 +25,12 @@ func registerLocation(r gin.IRouter, d Deps) error {
 		CacheTTL:   loc.CacheTTL,
 	})
 	// A sync job left queued or running by a previous process will never
-	// finish: fail it now.
+	// finish: fail it now, then let the application stop this process's job at
+	// shutdown.
 	if err := svc.RecoverInterruptedJobs(context.Background()); err != nil {
 		return fmt.Errorf("recover location sync jobs: %w", err)
 	}
+	d.Lifecycle.OnClose("location sync", svc.Close)
 	h := httplocation.New(svc)
 
 	location := r.Group("/location")
