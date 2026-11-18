@@ -51,6 +51,19 @@ Use it only when a second module needs the code; until then keep it in the modul
 - the import alias is the prefix plus `shared` (`dtoshared`, `httpshared`);
 - a business module must not be named `shared`, and `internal/router/shared` is never mounted.
 
+### Ownership and the `_any` permissions
+
+For data a user owns, acting on your own rows needs no permission. Acting on other users' rows needs
+`<resource>:<action>_any` (`media:list_any`, `media:delete_any`), seeded in the migration to the roles that
+should have it. The handler decides: mount the route with `Auth()` then `LoadPermissions()`, read
+`authkit.ScopeFrom(ctx).Has("<resource>", "<action>_any")`, and pass the answer to the service inside a plain
+`Actor` (`CanListAny`, `CanDeleteAny`). The service applies it, for example by forcing the owner filter to the
+caller, and answers "not found" for a row the actor may not touch. `superadmin` passes every `Has` check.
+`LoadPermissions()` never rejects a user who holds no permission. The reference is the media module:
+[`docs/modules/media.md`](modules/media.md), `internal/router/media/register.go` and
+`internal/handlers/http/media/handler.go`. Use `Can(resource, action)` instead when the whole route needs a
+permission.
+
 ### Extension points: the composition root
 
 A module that needs a new shared infrastructure client (a mailer, a queue, a search client) makes one

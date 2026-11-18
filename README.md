@@ -10,7 +10,7 @@ A Go service template to start a project from. It gives you:
 - a layered module structure whose dependency rule is enforced by tests
 
 Two example modules show the pattern: [`location`](docs/modules/location.md) (reference data and a background
-sync job) and [`media`](docs/modules/media.md) (authenticated file upload to object storage). Build your own
+sync job) and [`media`](docs/modules/media.md) (authenticated file upload, list and delete on object storage, with `_any` permissions for other users' files). Build your own
 business features the same way; see [Adding a module](docs/adding-a-module.md). Per-module routes,
 permissions, environment variables and operational notes are in [`docs/modules/`](docs/modules/).
 
