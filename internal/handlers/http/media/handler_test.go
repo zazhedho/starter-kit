@@ -212,7 +212,12 @@ func TestUploadHandlerMapsServiceErrors(t *testing.T) {
 			svc := &serviceDouble{maxFileSize: 1024, err: c.err}
 			body, ct := multipartBody(t, "file", "a.png", []byte("data"))
 			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodPost, "/media", body, ct)
-			if rec.Code != c.status || errorMessage(t, rec) != c.message {
+			if c.status == http.StatusInternalServerError {
+				// gokit.InternalServerError: generic text plus the log ID.
+				if rec.Code != c.status || !strings.HasPrefix(errorMessage(t, rec), c.message) {
+					t.Fatalf("got %d %s, want 500 starting with %q", rec.Code, rec.Body.String(), c.message)
+				}
+			} else if rec.Code != c.status || errorMessage(t, rec) != c.message {
 				t.Fatalf("got %d %s, want %d %q", rec.Code, rec.Body.String(), c.status, c.message)
 			}
 			if strings.Contains(rec.Body.String(), "connection refused") {
@@ -311,7 +316,7 @@ func TestListHandlerRejectsABadOwnerFilter(t *testing.T) {
 	} {
 		t.Run(target, func(t *testing.T) {
 			svc := &serviceDouble{}
-			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, target, nil, "")
+			rec := serveWithPermissions(t, svc, uuid.NewString(), "viewer", []string{"media:list_any"}, http.MethodGet, target, nil, "")
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
@@ -329,7 +334,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
-	want := dtomedia.ListRequest{OrderBy: "created_at", OrderDirection: "desc", Page: 1, Limit: 20}
+	want := dtomedia.ListRequest{Page: 1, Limit: 20} // the default order is the repository's
 	if svc.listReq != want {
 		t.Fatalf("defaults: got %+v, want %+v", svc.listReq, want)
 	}
@@ -422,5 +427,73 @@ func TestListHandlerClampsTheLimit(t *testing.T) {
 				t.Fatalf("response limit = %d (%v), want %d", res.Limit, err, c.wantLimit)
 			}
 		})
+	}
+}
+
+// Without media:list_any the owner filter is ignored (the service forces the
+// caller's own id), so a malformed value must not turn into a 400.
+func TestListHandlerIgnoresAMalformedOwnerFilterWithoutListAny(t *testing.T) {
+	svc := &serviceDouble{}
+	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?filters[owner_user_id]=not-a-uuid", nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if svc.calls != 1 {
+		t.Fatalf("the service was called %d times, want 1", svc.calls)
+	}
+}
+
+// An empty page still has the full envelope: data is [], never null, and the
+// totals are zero.
+func TestListHandlerEmptyResultShape(t *testing.T) {
+	svc := &serviceDouble{} // nil items, total 0
+	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, rec.Body.String())
+	}
+	if got := strings.TrimSpace(string(raw["data"])); got != "[]" {
+		t.Fatalf("data = %s, want []", got)
+	}
+	var res struct {
+		TotalData  int  `json:"total_data"`
+		TotalPages int  `json:"total_pages"`
+		NextPage   bool `json:"next_page"`
+		PrevPage   bool `json:"prev_page"`
+		Limit      int  `json:"limit"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.TotalData != 0 || res.TotalPages != 0 || res.NextPage || res.PrevPage || res.Limit != defaultListLimit {
+		t.Fatalf("unexpected envelope %+v", res)
+	}
+}
+
+// Every plain 500 uses gokit.InternalServerError: a generic message and the
+// log ID for support, with no internal detail.
+func TestListHandler500UsesTheStandardBody(t *testing.T) {
+	svc := &serviceDouble{err: errors.New("database down")}
+	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
+	var res struct {
+		LogID   string `json:"log_id"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	logID, err := uuid.Parse(res.LogID)
+	if err != nil {
+		t.Fatalf("log_id %q: %v", res.LogID, err)
+	}
+	want, _ := json.Marshal(gokit.InternalServerError(logID))
+	if got := strings.TrimSpace(rec.Body.String()); got != string(want) {
+		t.Fatalf("body = %s, want %s", got, want)
+	}
+	if strings.Contains(rec.Body.String(), "database down") {
+		t.Fatal("the response must not reveal the internal error")
 	}
 }
