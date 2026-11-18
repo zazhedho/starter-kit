@@ -5,18 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
-const multipartOverhead = int64(1 << 20)
+const (
+	multipartOverhead = int64(1 << 20)
+	defaultListLimit  = 20
+	maxListLimit      = 100
+)
+
+// listFilters are the filters[...] keys read into typed fields below. Which
+// columns may be filtered or sorted, and the default order, belong to the
+// repository, the single authority for them.
+var listFilters = []string{"owner_user_id", "content_type"}
 
 type Handler struct {
 	service       Service
@@ -79,7 +89,7 @@ func (h *Handler) Upload(ctx *gin.Context) {
 
 		statusCode, publicError := mediaErrorResponse(err)
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Upload; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgInvalidRequest, logID, publicError))
+		writeMediaError(ctx, logID, statusCode, gokit.MsgInvalidRequest, publicError)
 		return
 	}
 
@@ -92,6 +102,65 @@ func (h *Handler) Upload(ctx *gin.Context) {
 		AfterData:  data,
 	})
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
+}
+
+func (h *Handler) List(ctx *gin.Context) {
+	logID := gokit.GenerateLogId(ctx)
+	logPrefix := "[MediaHandler][List]"
+
+	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "", "", defaultListLimit)
+	if err != nil {
+		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; GetBaseParams; Error: %v", logPrefix, err))
+		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "invalid query parameters"))
+		return
+	}
+
+	params.Limit = clampLimit(params.Limit)
+	params.Offset = (params.Page - 1) * params.Limit
+
+	filters := gokit.WhitelistStringFilter(params.Filters, listFilters)
+	ownerID, _ := filters["owner_user_id"].(string)
+	contentType, _ := filters["content_type"].(string)
+	actor := actorFrom(ctx.Request.Context())
+	// Only list_any callers may filter by owner; for everyone else the value
+	// is ignored, so it is not validated.
+	if actor.CanListAny && ownerID != "" {
+		if _, err := uuid.Parse(ownerID); err != nil {
+			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "owner_user_id must be a UUID"))
+			return
+		}
+	}
+
+	data, total, err := h.service.List(ctx.Request.Context(), actor, dtomedia.ListRequest{
+		Search:         params.Search,
+		OwnerUserID:    ownerID,
+		ContentType:    contentType,
+		OrderBy:        params.OrderBy,
+		OrderDirection: params.OrderDirection,
+		Page:           params.Page,
+		Limit:          params.Limit,
+		Offset:         params.Offset,
+	})
+	if err != nil {
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.List; Error: %v", logPrefix, err))
+		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
+		return
+	}
+	if data == nil {
+		data = []domainmedia.Media{} // data is [] for an empty page, never null
+	}
+
+	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, data))
+}
+
+// clampLimit bounds a user-facing list: gokit passes -1 (no limit) through
+// and accepts up to 10000, so anything below 1 becomes the default and
+// anything above maxListLimit becomes the maximum.
+func clampLimit(limit int) int {
+	if limit < 1 {
+		return defaultListLimit
+	}
+	return min(limit, maxListLimit)
 }
 
 func (h *Handler) Delete(ctx *gin.Context) {
@@ -115,7 +184,7 @@ func (h *Handler) Delete(ctx *gin.Context) {
 
 		statusCode, publicError := mediaErrorResponse(err)
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgSomethingWrong, logID, publicError))
+		writeMediaError(ctx, logID, statusCode, gokit.MsgSomethingWrong, publicError)
 		return
 	}
 
@@ -130,13 +199,25 @@ func (h *Handler) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, "Media deleted successfully", logID, nil))
 }
 
-// actorFrom reduces the authenticated scope to what the media rules need.
+// actorFrom reduces the scope to what the media rules need. It is only right
+// after Auth and LoadPermissions: Has is false without the loaded permissions.
 func actorFrom(ctx context.Context) domainmedia.Actor {
 	scope := authkit.ScopeFrom(ctx)
 	return domainmedia.Actor{
 		UserID:       scope.UserID,
-		IsSuperAdmin: strings.TrimSpace(scope.Role) == authkit.RoleSuperAdmin,
+		CanListAny:   scope.Has("media", "list_any"),
+		CanDeleteAny: scope.Has("media", "delete_any"),
 	}
+}
+
+// writeMediaError answers with the standard 500 body for a plain server error
+// and with the mapped status and message otherwise.
+func writeMediaError(ctx *gin.Context, logID uuid.UUID, statusCode int, msg, publicError string) {
+	if statusCode == http.StatusInternalServerError {
+		ctx.JSON(statusCode, gokit.InternalServerError(logID))
+		return
+	}
+	ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, msg, logID, publicError))
 }
 
 func mediaErrorResponse(err error) (int, string) {

@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
+	"github.com/zazhedho/authkit"
 
 	"starter-kit/internal/config"
 	"starter-kit/internal/router/module"
@@ -27,6 +29,7 @@ func engineFor(t *testing.T, d module.Deps) *gin.Engine {
 // must be added here and, if it is protected, to TestMediaRoutesProtection.
 var mediaRoutes = []string{
 	"DELETE /api/media/:id",
+	"GET /api/media",
 	"POST /api/media",
 }
 
@@ -74,6 +77,9 @@ func TestMediaRoutesProtection(t *testing.T) {
 		}
 		if got := routertest.Serve(engine, http.MethodDelete, "/api/media/abc"); got != http.StatusUnauthorized {
 			t.Fatalf("DELETE /api/media/abc without token: expected 401, got %d", got)
+		}
+		if got := routertest.Serve(engine, http.MethodGet, "/api/media"); got != http.StatusUnauthorized {
+			t.Fatalf("GET /api/media without token: expected 401, got %d", got)
 		}
 	})
 }
@@ -148,5 +154,52 @@ func TestMediaUploadExtendsReadDeadline(t *testing.T) {
 	}
 	if diff := time.Until(rec.deadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
 		t.Fatalf("deadline is %s away from now+UploadTimeout", diff)
+	}
+}
+
+// With Auth passing and no such user in the database, LoadPermissions answers
+// 403 before the handler runs; a route without it would reach the service. The
+// user lookup is asserted too, so the 403 cannot come from anywhere else.
+func TestMediaListAndDeleteLoadPermissionsAfterAuth(t *testing.T) {
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/api/media"},
+		{http.MethodDelete, "/api/media/22222222-2222-2222-2222-222222222222"},
+	} {
+		t.Run(c.method+" "+c.path, func(t *testing.T) {
+			d := mediaDeps(t)
+			db, mock := routertest.NewExecDB(t)
+			kit, err := authkit.New(authkit.Config{DB: db, AppName: "starter-kit-test", JWTKey: "test-jwt-key-that-is-at-least-32-characters-long"})
+			if err != nil {
+				t.Fatalf("authkit.New: %v", err)
+			}
+			d.DB, d.Kit = db, kit
+			mock.ExpectQuery(`FROM "blacklist"`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			mock.ExpectQuery(`FROM "users"`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+			token, err := kit.IssueAccessToken("11111111-1111-1111-1111-111111111111", "", "viewer")
+			if err != nil {
+				t.Fatalf("token: %v", err)
+			}
+			req := httptest.NewRequest(c.method, c.path, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			engineFor(t, d).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403 from LoadPermissions, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("permission lookup did not run: %v", err)
+			}
+		})
+	}
+}
+
+func TestMediaUploadSkipsLoadPermissions(t *testing.T) {
+	d := mediaDeps(t)
+	rec := httptest.NewRecorder()
+	engineFor(t, d).ServeHTTP(rec, uploadRequest(t, d, 1024))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload must not need a permission lookup, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

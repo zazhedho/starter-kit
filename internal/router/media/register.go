@@ -28,8 +28,12 @@ func Register(r gin.IRouter, d module.Deps) error {
 	media := r.Group("/media").Use(d.Kit.Auth())
 	{
 		uploadLimiter := gokit.IPRateLimitMiddleware(d.Redis, "media_upload", m.UploadRateLimit, m.UploadRateWindow)
+		// Permission-aware routes load the caller's permissions after Auth; the
+		// handler reads them through the scope and never rejects on its own.
+		loadPermissions := d.Kit.LoadPermissions()
+		media.GET("", loadPermissions, h.List)
 		media.POST("", uploadLimiter, h.Upload)
-		media.DELETE("/:id", h.Delete)
+		media.DELETE("/:id", loadPermissions, h.Delete)
 	}
 
 	logus.WriteLog(logus.LogLevelInfo, "Media routes registered")

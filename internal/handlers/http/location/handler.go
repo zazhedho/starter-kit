@@ -1,6 +1,7 @@
 package location
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -40,78 +41,39 @@ func (h *Handler) GetProvince(ctx *gin.Context) {
 }
 
 func (h *Handler) GetCity(ctx *gin.Context) {
-	logId := gokit.GenerateLogId(ctx)
-	logPrefix := "[LocationHandler][GetCity]"
-	reqCtx := ctx.Request.Context()
-
-	provinceCode := ctx.Query("province_code")
-	if provinceCode == "" {
-		res := gokit.Response(http.StatusBadRequest, gokit.MsgInvalidRequest, logId, nil)
-		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: "province_code is required"}
-		ctx.JSON(http.StatusBadRequest, res)
-		return
-	}
-
-	data, err := h.service.GetCity(reqCtx, provinceCode)
-	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetCity; Error: %+v", logPrefix, err))
-		res := gokit.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
-		return
-	}
-
-	res := gokit.Response(http.StatusOK, "Get city successfully", logId, data)
-	ctx.JSON(http.StatusOK, res)
+	h.listByParent(ctx, "GetCity", "province_code", "Get city successfully", h.service.GetCity)
 }
 
 func (h *Handler) GetDistrict(ctx *gin.Context) {
-	logId := gokit.GenerateLogId(ctx)
-	logPrefix := "[LocationHandler][GetDistrict]"
-	reqCtx := ctx.Request.Context()
-
-	cityCode := ctx.Query("city_code")
-	if cityCode == "" {
-		res := gokit.Response(http.StatusBadRequest, gokit.MsgInvalidRequest, logId, nil)
-		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: "city_code is required"}
-		ctx.JSON(http.StatusBadRequest, res)
-		return
-	}
-
-	data, err := h.service.GetDistrict(reqCtx, cityCode)
-	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetDistrict; Error: %+v", logPrefix, err))
-		res := gokit.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
-		return
-	}
-
-	res := gokit.Response(http.StatusOK, "Get district successfully", logId, data)
-	ctx.JSON(http.StatusOK, res)
+	h.listByParent(ctx, "GetDistrict", "city_code", "Get district successfully", h.service.GetDistrict)
 }
 
 func (h *Handler) GetVillage(ctx *gin.Context) {
-	logId := gokit.GenerateLogId(ctx)
-	logPrefix := "[LocationHandler][GetVillage]"
-	reqCtx := ctx.Request.Context()
+	h.listByParent(ctx, "GetVillage", "district_code", "Get village successfully", h.service.GetVillage)
+}
 
-	districtCode := ctx.Query("district_code")
-	if districtCode == "" {
+// listByParent serves the lookups that need a parent code in the query string,
+// answering 400 when it is missing.
+func (h *Handler) listByParent(ctx *gin.Context, method, param, okMessage string, lookup func(context.Context, string) ([]dtolocation.Location, error)) {
+	logId := gokit.GenerateLogId(ctx)
+	logPrefix := "[LocationHandler][" + method + "]"
+
+	code := ctx.Query(param)
+	if code == "" {
 		res := gokit.Response(http.StatusBadRequest, gokit.MsgInvalidRequest, logId, nil)
-		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: "district_code is required"}
+		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: param + " is required"}
 		ctx.JSON(http.StatusBadRequest, res)
 		return
 	}
 
-	data, err := h.service.GetVillage(reqCtx, districtCode)
+	data, err := lookup(ctx.Request.Context(), code)
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetVillage; Error: %+v", logPrefix, err))
-		res := gokit.InternalServerError(logId)
-		ctx.JSON(http.StatusInternalServerError, res)
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.%s; Error: %+v", logPrefix, method, err))
+		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logId))
 		return
 	}
 
-	res := gokit.Response(http.StatusOK, "Get village successfully", logId, data)
-	ctx.JSON(http.StatusOK, res)
+	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, okMessage, logId, data))
 }
 
 func (h *Handler) Sync(ctx *gin.Context) {

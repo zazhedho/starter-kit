@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
 // Service is what the media handlers call. The concrete service lives in
@@ -12,5 +13,6 @@ import (
 type Service interface {
 	MaxFileSize() int64
 	Upload(ctx context.Context, ownerUserID string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error)
+	List(ctx context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error)
 	Delete(ctx context.Context, actor domainmedia.Actor, id string) (domainmedia.Media, error)
 }

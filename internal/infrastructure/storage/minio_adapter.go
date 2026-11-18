@@ -65,40 +65,18 @@ func NewMinIOAdapter(config Config) (*MinIOAdapter, error) {
 }
 
 func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (StoredFile, error) {
-	objectName := buildObjectName(fileHeader.Filename, folder)
-
-	fileSize := fileHeader.Size
-
-	contentType := fileHeader.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	_, err := m.client.PutObject(ctx, m.bucketName, objectName, file, fileSize, minio.PutObjectOptions{
-		ContentType: contentType,
-	})
+	objectName, err := uploadMultipart(ctx, m.client, m.bucketName, file, fileHeader, folder, "failed to upload file")
 	if err != nil {
-		return StoredFile{}, fmt.Errorf("failed to upload file: %w", err)
+		return StoredFile{}, err
 	}
-
 	return StoredFile{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
 }
 
 func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (StoredFile, error) {
-	objectName := buildObjectName(filename, folder)
-
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	reader := strings.NewReader(string(data))
-	_, err := m.client.PutObject(ctx, m.bucketName, objectName, reader, int64(len(data)), minio.PutObjectOptions{
-		ContentType: contentType,
-	})
+	objectName, err := uploadBytes(ctx, m.client, m.bucketName, data, filename, folder, contentType, "failed to upload file")
 	if err != nil {
-		return StoredFile{}, fmt.Errorf("failed to upload file: %w", err)
+		return StoredFile{}, err
 	}
-
 	return StoredFile{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
 }
 

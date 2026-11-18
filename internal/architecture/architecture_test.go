@@ -682,23 +682,39 @@ func isShared(p string) bool {
 	return ok && module == sharedName
 }
 
-// crossesModules reports whether a file in directory dir (module-relative)
-// imports a package of a different business module. A shared package may be
-// imported by any module but may import no business module at all.
+// sharedEntityTrees hold the entities and data shapes a module exposes; the
+// higher layers of another module may reference them, as a projects module
+// references users.
+var sharedEntityTrees = []string{"internal/domain", "internal/dto"}
+
+func underAny(p string, trees []string) bool {
+	for _, tree := range trees {
+		if underTree(p, tree) {
+			return true
+		}
+	}
+	return false
+}
+
+// crossesModules reports whether a file in dir (module-relative) imports
+// another business module, except that module's domain or dto from a higher
+// layer. domain, dto and shared packages never import a business module.
 func crossesModules(dir, importPath string) bool {
 	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
 	if !ok {
 		return false
 	}
 	from, to := moduleOf(dir), moduleOf(internal)
-	if to == "" {
+	if to == "" || from == to || (from == "" && !isShared(dir)) {
 		return false
 	}
-	return from != to && (from != "" || isShared(dir))
+	higherLayer := from != "" && !underAny(dir, sharedEntityTrees)
+	return !higherLayer || !underAny(internal, sharedEntityTrees)
 }
 
-// Modules must not import each other in any layer, tests included; they meet only
-// in internal/router and internal/app.
+// Modules must not import each other's peer layers, tests included; they may
+// reference another module's domain and dto from a higher layer (see
+// crossesModules) and otherwise meet only in internal/router and internal/app.
 func TestModulesDoNotImportEachOther(t *testing.T) {
 	goFiles(t, func(p string, file *ast.File) {
 		for _, imp := range file.Imports {
@@ -708,7 +724,7 @@ func TestModulesDoNotImportEachOther(t *testing.T) {
 				continue
 			}
 			if crossesModules(path.Dir(p), ip) {
-				t.Errorf("%s imports %s: a module must not import another module", p, ip)
+				t.Errorf("%s imports %s: a module may only import another module's domain or dto, from a higher layer", p, ip)
 			}
 		}
 	})
@@ -720,9 +736,21 @@ func TestCrossModuleRuleDetectsViolations(t *testing.T) {
 		want          bool
 	}{
 		{"media service imports location service", "internal/services/media", "starter-kit/internal/services/location", true},
-		{"media handler imports location domain", "internal/handlers/http/media", "starter-kit/internal/domain/location", true},
-		{"location repository imports media dto", "internal/repositories/location", "starter-kit/internal/dto/media", true},
-		{"cache of location imports media", "internal/infrastructure/cache/location", "starter-kit/internal/domain/media", true},
+		{"media handler imports location domain", "internal/handlers/http/media", "starter-kit/internal/domain/location", false},
+		{"location repository imports media dto", "internal/repositories/location", "starter-kit/internal/dto/media", false},
+		{"cache of location imports media domain", "internal/infrastructure/cache/location", "starter-kit/internal/domain/media", false},
+		{"media service imports location domain", "internal/services/media", "starter-kit/internal/domain/location", false},
+		{"media service imports location dto", "internal/services/media", "starter-kit/internal/dto/location", false},
+		{"media domain imports location domain", "internal/domain/media", "starter-kit/internal/domain/location", true},
+		{"media dto imports location dto", "internal/dto/media", "starter-kit/internal/dto/location", true},
+		{"media domain imports location dto", "internal/domain/media", "starter-kit/internal/dto/location", true},
+		{"media dto imports location domain", "internal/dto/media", "starter-kit/internal/domain/location", true},
+		{"media handler imports location handler", "internal/handlers/http/media", "starter-kit/internal/handlers/http/location", true},
+		{"media repository imports location repository", "internal/repositories/media", "starter-kit/internal/repositories/location", true},
+		{"media handler imports location service", "internal/handlers/http/media", "starter-kit/internal/services/location", true},
+		{"media service imports location cache", "internal/services/media", "starter-kit/internal/infrastructure/cache/location", true},
+		{"media service imports a location domain subpackage", "internal/services/media", "starter-kit/internal/domain/location/sub", false},
+		{"services shared imports a module domain", "internal/services/shared", "starter-kit/internal/domain/location", true},
 		{"media service imports its own domain", "internal/services/media", "starter-kit/internal/domain/media", false},
 		{"nested package imports its own module", "internal/services/media/upload", "starter-kit/internal/domain/media", false},
 		{"media service imports infrastructure", "internal/services/media", "starter-kit/internal/infrastructure/storage", false},
@@ -730,10 +758,11 @@ func TestCrossModuleRuleDetectsViolations(t *testing.T) {
 		{"router/location imports router/module", "internal/router/location", "starter-kit/internal/router/module", false},
 		{"router/location imports its own service", "internal/router/location", "starter-kit/internal/services/location", false},
 		{"router/location imports router/media", "internal/router/location", "starter-kit/internal/router/media", true},
-		{"router/media imports location domain", "internal/router/media", "starter-kit/internal/domain/location", true},
+		{"router/media imports location domain", "internal/router/media", "starter-kit/internal/domain/location", false},
+		{"router/media imports location service", "internal/router/media", "starter-kit/internal/services/location", true},
 		{"location service imports router/media", "internal/services/location", "starter-kit/internal/router/media", true},
 		{"router/module imports a module", "internal/router/module", "starter-kit/internal/services/media", false},
-		{"grpc handler imports another module's domain", "internal/handlers/grpc/media", "starter-kit/internal/domain/location", true},
+		{"grpc handler imports another module's domain", "internal/handlers/grpc/media", "starter-kit/internal/domain/location", false},
 		{"grpc handler imports http handler of the same module", "internal/handlers/grpc/media", "starter-kit/internal/handlers/http/media", false},
 		{"grpc handler imports http handler of another module", "internal/handlers/grpc/media", "starter-kit/internal/handlers/http/location", true},
 		{"transport root package", "internal/handlers/grpc", "starter-kit/internal/domain/location", false},

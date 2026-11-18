@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
 type mediaTestFile struct {
@@ -26,6 +27,16 @@ type mediaRepoMock struct {
 	getErr    error
 	deletedID string
 	deleteErr error
+
+	listed    dtomedia.ListRequest
+	listItems []domainmedia.Media
+	listTotal int64
+	listErr   error
+}
+
+func (m *mediaRepoMock) List(_ context.Context, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+	m.listed = req
+	return m.listItems, m.listTotal, m.listErr
 }
 
 func (m *mediaRepoMock) Store(_ context.Context, media domainmedia.Media) error {
@@ -162,13 +173,13 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 		}
 	})
 
-	t.Run("superadmin", func(t *testing.T) {
+	t.Run("delete any", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
 		service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 
-		if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString(), IsSuperAdmin: true}, media.ID); err != nil {
-			t.Fatalf("delete as superadmin: %v", err)
+		if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString(), CanDeleteAny: true}, media.ID); err != nil {
+			t.Fatalf("delete with delete_any: %v", err)
 		}
 	})
 }
@@ -211,5 +222,82 @@ func TestDeleteTrimsTheActorUserID(t *testing.T) {
 	service := NewService(&mediaRepoMock{media: media}, &mediaStorageMock{}, Options{})
 	if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: "  " + ownerID + " "}, media.ID); err != nil {
 		t.Fatalf("delete with padded actor id: %v", err)
+	}
+}
+
+func TestDeleteOtherWithoutDeleteAnyIsForbidden(t *testing.T) {
+	media := domainmedia.Media{ID: uuid.NewString(), OwnerUserID: uuid.NewString(), URL: "https://cdn/media/file.png"}
+	repo := &mediaRepoMock{media: media}
+	storageMock := &mediaStorageMock{}
+	service := NewService(repo, storageMock, Options{})
+
+	// CanListAny must not leak into delete rights.
+	_, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString(), CanListAny: true}, media.ID)
+	if !errors.Is(err, domainmedia.ErrMediaForbidden) {
+		t.Fatalf("expected forbidden, got %v", err)
+	}
+	if storageMock.deletedURL != "" || repo.deletedID != "" {
+		t.Fatal("forbidden delete must leave storage and metadata untouched")
+	}
+}
+
+func TestDeleteOtherWithDeleteAny(t *testing.T) {
+	media := domainmedia.Media{ID: uuid.NewString(), OwnerUserID: uuid.NewString(), URL: "https://cdn/media/file.png"}
+	repo := &mediaRepoMock{media: media}
+	storageMock := &mediaStorageMock{}
+	service := NewService(repo, storageMock, Options{})
+
+	if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString(), CanDeleteAny: true}, media.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if storageMock.deletedURL != media.URL || repo.deletedID != media.ID {
+		t.Fatalf("expected storage and metadata deletion, got url=%q id=%q", storageMock.deletedURL, repo.deletedID)
+	}
+}
+
+func TestListOwnOnlyWithoutListAny(t *testing.T) {
+	me, other := uuid.NewString(), uuid.NewString()
+	repo := &mediaRepoMock{listItems: []domainmedia.Media{{ID: "m-1"}}, listTotal: 1}
+	service := NewService(repo, &mediaStorageMock{}, Options{})
+
+	items, total, err := service.List(context.Background(), domainmedia.Actor{UserID: " " + me + " ", CanDeleteAny: true}, dtomedia.ListRequest{OwnerUserID: other, Search: "cat"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if repo.listed.OwnerUserID != me {
+		t.Fatalf("owner filter is %q, want the caller %q", repo.listed.OwnerUserID, me)
+	}
+	if repo.listed.Search != "cat" || len(items) != 1 || total != 1 {
+		t.Fatalf("other fields must pass through: %+v items=%d total=%d", repo.listed, len(items), total)
+	}
+
+	if _, _, err := service.List(context.Background(), domainmedia.Actor{UserID: me}, dtomedia.ListRequest{}); err != nil || repo.listed.OwnerUserID != me {
+		t.Fatalf("an empty filter must also be forced to the caller, got %q err %v", repo.listed.OwnerUserID, err)
+	}
+}
+
+func TestListAnyHonorsOwnerFilter(t *testing.T) {
+	other := uuid.NewString()
+	repo := &mediaRepoMock{}
+	service := NewService(repo, &mediaStorageMock{}, Options{})
+	actor := domainmedia.Actor{UserID: uuid.NewString(), CanListAny: true}
+
+	if _, _, err := service.List(context.Background(), actor, dtomedia.ListRequest{OwnerUserID: other}); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if repo.listed.OwnerUserID != other {
+		t.Fatalf("owner filter is %q, want %q", repo.listed.OwnerUserID, other)
+	}
+
+	if _, _, err := service.List(context.Background(), actor, dtomedia.ListRequest{}); err != nil || repo.listed.OwnerUserID != "" {
+		t.Fatalf("list_any without a filter must stay unfiltered, got %q err %v", repo.listed.OwnerUserID, err)
+	}
+}
+
+func TestListReturnsRepositoryErrors(t *testing.T) {
+	boom := errors.New("db down")
+	service := NewService(&mediaRepoMock{listErr: boom}, &mediaStorageMock{}, Options{})
+	if _, _, err := service.List(context.Background(), domainmedia.Actor{UserID: uuid.NewString()}, dtomedia.ListRequest{}); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want the repository error", err)
 	}
 }

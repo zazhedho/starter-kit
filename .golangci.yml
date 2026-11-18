@@ -31,7 +31,7 @@ linters:
     - unused
   settings:
     dupl:
-      threshold: 200
+      threshold: 80
     misspell:
       locale: US
   exclusions:
@@ -42,6 +42,7 @@ linters:
       - path: _test\.go
         linters:
           - noctx
+          - dupl
 
 formatters:
   enable:

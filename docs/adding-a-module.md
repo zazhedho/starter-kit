@@ -41,7 +41,8 @@ exists but is not in `modules`, and the entry's `Name` must equal the directory 
 
 ### Shared helpers: the reserved `shared` directory
 
-Modules must not import each other, so a helper two modules need (pagination, response helpers, a common
+Modules must not import each other's services, handlers, repositories or routers (they may reference another
+module's `domain` and `dto` from those layers, never from `domain` or `dto`), so a helper two modules need (pagination, response helpers, a common
 DTO) has one home: `<tree>/shared`, for example `internal/handlers/http/shared` or `internal/dto/shared`.
 Use it only when a second module needs the code; until then keep it in the module. Rules:
 
@@ -49,6 +50,20 @@ Use it only when a second module needs the code; until then keep it in the modul
 - the layer rules of its tree still apply (`dto/shared` is standard library plus domain only);
 - the import alias is the prefix plus `shared` (`dtoshared`, `httpshared`);
 - a business module must not be named `shared`, and `internal/router/shared` is never mounted.
+
+### Ownership and the `_any` permissions
+
+For data a user owns, acting on your own rows needs no permission. Acting on other users' rows needs
+`<resource>:<action>_any` (`media:list_any`, `media:delete_any`), seeded in the migration to the roles that
+should have it. The handler decides: mount the route with `Auth()` then `LoadPermissions()`, read
+`authkit.ScopeFrom(ctx).Has("<resource>", "<action>_any")`, and pass the answer to the service inside a plain
+`Actor` (`CanListAny`, `CanDeleteAny`). The service applies it, for example by forcing the owner filter to the
+caller, and returns a forbidden error (`ErrMediaForbidden`) for a row the actor may not touch; the handler
+maps it to `404`, the same as a missing row, so a caller cannot probe which ids exist. `superadmin` passes every `Has` check.
+`LoadPermissions()` never rejects a user who holds no permission. The reference is the media module:
+[`docs/modules/media.md`](modules/media.md), `internal/router/media/register.go` and
+`internal/handlers/http/media/handler.go`. Use `Can(resource, action)` instead when the whole route needs a
+permission.
 
 ### Extension points: the composition root
 
@@ -308,6 +323,8 @@ package projects
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"github.com/zazhedho/gokit"
 	"gorm.io/gorm"
@@ -315,6 +332,8 @@ import (
 	domainprojects "starter-kit/internal/domain/projects"
 	dtoprojects "starter-kit/internal/dto/projects"
 )
+
+var listOrderColumns = []string{"name", "created_at"}
 
 // Repository is the GORM adapter for the projects table. It embeds the generic
 // gokit repository for Store, GetByID, Update and Delete, and adds only the
@@ -328,25 +347,39 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{Repository: gokit.NewRepository[domainprojects.Project](db)}
 }
 
+// List returns one page of projects and the total count. This repository is
+// the authority for what may be sorted: a column or direction outside the
+// allow list falls back to created_at DESC instead of failing, so a bad
+// order_by never turns into a 500. id is always the last sort key, so rows
+// that share the sort value keep one order and pages never skip or repeat rows.
 func (r *Repository) List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
+	orderBy, direction := req.OrderBy, strings.ToUpper(req.OrderDirection)
+	if !slices.Contains(listOrderColumns, orderBy) || (direction != "ASC" && direction != "DESC") {
+		orderBy, direction = "created_at", "DESC"
+	}
+
+	// gokit appends DefaultOrders only when the params carry no explicit
+	// order, so the chosen order goes through DefaultOrders to get the
+	// tie-breaker after it.
 	params := gokit.BaseParams{
-		Search:         req.Search,
-		OrderBy:        req.OrderBy,
-		OrderDirection: req.OrderDirection,
-		Page:           req.Page,
-		Limit:          req.Limit,
-		Offset:         req.Offset,
+		Search: req.Search,
+		Page:   req.Page,
+		Limit:  req.Limit,
+		Offset: req.Offset,
 	}
 	return r.GetAll(ctx, params, gokit.QueryOptions{
-		Search:              gokit.BuildSearchFunc("name"),
-		AllowedOrderColumns: []string{"name", "created_at"},
-		DefaultOrders:       []string{"created_at DESC"},
+		Search:        gokit.BuildSearchFunc("name"),
+		DefaultOrders: []string{orderBy + " " + direction, "id " + direction},
 	})
 }
 ```
 
 Searchable columns, allowed filters and sortable columns are set through `gokit.QueryOptions`; add custom
-repository methods only for business-specific queries.
+repository methods only for business-specific queries. The repository is the single authority for the sort
+columns, the default order and (when the list has filters) `AllowedFilters`; the handler keeps no copy of
+the order defaults (it passes empty ones to `GetBaseParams`). The one list the handler does keep is the
+`filters[...]` keys it reads into typed fields of the dto (see `internal/handlers/http/media`): it only
+turns values into strings, and the repository's `AllowedFilters` still decides what reaches SQL.
 
 ### 6. Handler
 
@@ -392,17 +425,20 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
+const (
+	defaultListLimit = 20
+	maxListLimit     = 100
+)
+
 // Handler embeds authkit.AuditWriter to record every mutation.
 type Handler struct {
-	service  Service
-	pageSize int
+	service Service
 	authkit.AuditWriter
 }
 
-func New(svc Service, audit authkit.AuditService, pageSize int) *Handler {
+func New(svc Service, audit authkit.AuditService) *Handler {
 	return &Handler{
 		service:     svc,
-		pageSize:    pageSize,
 		AuditWriter: authkit.NewAuditWriter(audit, "ProjectsHandler"),
 	}
 }
@@ -411,13 +447,26 @@ type createRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
+// clampLimit bounds a user-facing list: anything below 1 (including -1)
+// becomes defaultListLimit and anything above maxListLimit becomes the maximum.
+func clampLimit(limit int) int {
+	if limit < 1 {
+		return defaultListLimit
+	}
+	return min(limit, maxListLimit)
+}
+
 func (h *Handler) List(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
-	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", h.pageSize)
+	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "", "", defaultListLimit)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 		return
 	}
+	// A user-facing list must be bounded: gokit keeps limit=-1 (no limit) and
+	// accepts up to 10000, so clamp it and recompute the offset.
+	params.Limit = clampLimit(params.Limit)
+	params.Offset = (params.Page - 1) * params.Limit
 	items, total, err := h.service.List(ctx.Request.Context(), dtoprojects.ListRequest{
 		Search:         params.Search,
 		OrderBy:        params.OrderBy,
@@ -498,7 +547,7 @@ type wired struct{ handler *httpprojects.Handler }
 func wire(d module.Deps) (*wired, error) {
 	repo := repositoryprojects.NewRepository(d.DB)
 	svc := serviceprojects.NewService(repo, gokit.CreateUUID)
-	return &wired{handler: httpprojects.New(svc, d.Kit.Audit(), d.Config.Projects.PageSize)}, nil
+	return &wired{handler: httpprojects.New(svc, d.Kit.Audit())}, nil
 }
 ```
 
@@ -664,8 +713,9 @@ problems = append(problems, c.validateProjects()...)
 `l.str`, `l.integer`, `l.duration` and `l.megabytes` record an unparsable value for `Validate` and fall
 back to the default; validation messages name the variable and never print its value. Config's `String`
 method lists sections one by one: add the new one to its format string if it should appear in the logged
-configuration. Skip this step when the module has no settings (and have `wire` pass a constant instead of
-`d.Config.Projects.PageSize`).
+configuration. Skip this step when the module has no settings. The handler above uses the `defaultListLimit`
+constant; to make that default configurable, give `New` a `pageSize int`, use it in place of
+`defaultListLimit` in `List` and `clampLimit`, and pass `d.Config.Projects.PageSize` from `wire`.
 
 Document the variable in `.env.example` under its own block:
 

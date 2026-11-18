@@ -1637,6 +1637,69 @@
       "description": "Available only when MEDIA_ENABLED=true. File type is detected from bytes; default maximum size is 10 MB.",
       "item": [
         {
+          "name": "List Media",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/media?page=1&limit=20&order_by=created_at&order_direction=desc",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "media"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "File name contains this text (case-insensitive).",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number, starting at 1.",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size; default 20.",
+                  "disabled": false
+                },
+                {
+                  "key": "order_by",
+                  "value": "created_at",
+                  "description": "One of created_at, size, original_name; anything else falls back to created_at.",
+                  "disabled": false
+                },
+                {
+                  "key": "order_direction",
+                  "value": "desc",
+                  "description": "asc or desc.",
+                  "disabled": false
+                },
+                {
+                  "key": "filters[content_type]",
+                  "value": "",
+                  "description": "Exact content type, e.g. image/png.",
+                  "disabled": true
+                },
+                {
+                  "key": "filters[owner_user_id]",
+                  "value": "",
+                  "description": "Owner UUID. Honored only with media:list_any; otherwise ignored and the list stays your own files.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lists your own media; with the media:list_any permission (admin, superadmin) it lists everyone's. Paginated."
+          },
+          "response": []
+        },
+        {
           "name": "Upload Media",
           "event": [
             {
@@ -1695,7 +1758,7 @@
                 "{{media_id}}"
               ]
             },
-            "description": "Only media owner or superadmin may delete this object."
+            "description": "Deletes your own media. Deleting someone else's needs the media:delete_any permission; without it the answer is 404."
           },
           "response": []
         }
