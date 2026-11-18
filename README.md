@@ -113,7 +113,9 @@ Dependencies point inward only: everything depends on `domain` (and `dto`), and 
   handlers/http   --> domain, dto       calls the Service interface it declares
   services        --> domain, dto       calls the Repository, Cache and Storage interfaces it declares
   repositories    --> domain, dto       satisfies services' Repository by method set
-  infrastructure  --> domain, dto       satisfies services' Cache and Storage by method set (and reads config)
+  infrastructure  --> config            owns its types and satisfies services' Cache and Storage by method set;
+                                        imports no domain or dto, except infrastructure/cache/<module>, which
+                                        implements that module's port and may import its domain
 
   router, app     --> everything        the only code that constructs the pieces and joins them:
                                         handler(service(repository)), so Go checks every fit at compile time
@@ -125,8 +127,10 @@ What `internal/architecture` checks on every `go test ./...` (it parses the sour
 - `dto` imports only the standard library and `domain`.
 - `services` import neither `infrastructure`, `repositories`, `handlers`, `router`, `app` nor `config`, and none of gin, gorm, go-redis, `github.com/minio/minio-go`, `gokit` or `authkit`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
 - `handlers` import neither `services`, `repositories`, `infrastructure`, `router`, `app` nor `config`, and neither gorm, go-redis nor `github.com/minio/minio-go`; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
-- `repositories` import neither `services`, `handlers`, `infrastructure`, `router`, `app` nor `config`, and not gin. `infrastructure` imports neither `services`, `handlers`, `repositories`, `router` nor `app`. `config` imports nothing from this module, and `router` does not import `app`.
+- `repositories` import neither `services`, `handlers`, `infrastructure`, `router`, `app` nor `config`, and not gin. `infrastructure` imports neither `services`, `handlers`, `repositories`, `router` nor `app`, and no `domain` either: it owns its types (`storage.Provider`, not a domain interface). The one exception is `infrastructure/cache/<module>`, which implements that module's port and may import that module's domain. `config` imports nothing from this module, and `router` does not import `app`.
 - A module's packages never import another module's packages: nothing under `media` imports `location`, in any layer, and the reverse. Modules meet only in `router` and `app`.
+- A `shared` directory (`<tree>/shared`, for example `handlers/http/shared` for pagination or response helpers, or `dto/shared`) is the one reserved name in a per-module tree. It is not a module: any module of that tree may import it, and it must not import any business module of any tree (it may import the `shared` packages of layers its own layer may import). The layer rules of its tree still apply (`dto/shared` stays standard library plus domain), the import alias is the prefix plus `shared` (`dtoshared`, `httpshared`), and no module may be named `shared`. Create one only when two modules need the same helper; no `shared` package exists yet.
+- Every top-level directory of `internal/` is a known layer (`TestInternalLayersAreKnown`): a new layer needs a rule in `internal/architecture/architecture_test.go` and a line in this dependency rule. Every `internal/router/<module>` is mounted in `modules.go` under its own name (`TestEveryRouterDirectoryIsMounted`), so an unlisted package fails instead of serving no routes.
 - Exported `New*` constructors in `services`, `repositories` and `handlers` return a pointer to a struct (and optionally an error), never an interface. Interfaces live with their consumer: there is no shared `interfaces` package and no `Interface` suffix.
 
 Internal-import rules apply to non-test files only. Test files are checked only against the external bans, and only for `domain`, `dto`, `services` and `handlers`. The rule that modules never import each other covers test files too.
@@ -336,7 +340,7 @@ make fmt         # golangci-lint fmt: formats the code and the import groups
 make hook-install   # git hooks: lint on commit, lint and tests on push
 ```
 
-CI runs the same lint and test steps (`.github/workflows`). The unit tests need no services.
+CI runs build, vet and test in `.github/workflows/ci.yml` and lint in `.github/workflows/lint.yml`. The unit tests need no services.
 `internal/infrastructure/database` also has integration tests against a real PostgreSQL; they are skipped unless
 `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable`
 against a throwaway container.

@@ -2118,7 +2118,7 @@
           "response": []
         }
       ],
-      "description": "Runtime reads use Redis then PostgreSQL. External API is used only by the sync endpoint to refresh database data."
+      "description": "Runtime reads use Redis then PostgreSQL. The external Location Service is used by the sync endpoint and, when a read finds no rows, as a fallback fetch that fills the database."
     }
   ]
 }

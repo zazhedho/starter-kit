@@ -2,7 +2,8 @@
 
 The procedure to check a fresh checkout of this project against a real, throwaway PostgreSQL: empty database,
 migrations, boot, endpoints, readiness, signals, the Redis failure mode and the Docker image. It was run on
-2026-11-18 at commit `32adb44`: **15 checks, 15 PASS, 0 FAIL** (results below).
+2026-11-18 at commit `32adb44`: **15 checks, 15 PASS, 0 FAIL** (results below). Later commits on the branch changed only `_test.go` files, no runtime code
+(`git diff --stat 32adb44 HEAD -- '*.go'`), so the run still stands.
 
 Everything is fake and disposable. No `.env` file is used: the service accepts a missing `.env` when `APP_ENV`
 is set, so all configuration is exported in the shell. Scratch files (binary, logs) live outside the repository.
@@ -103,8 +104,9 @@ Summary: 15 PASS, 0 FAIL.
 
 Notes:
 - Check 11 depends on an external service. With empty location tables the first `GET /api/location/province`
-  fetches the list from the Location Service (`LOCATION_SERVICE_BASE_URL`) and stores it, so a `5xx` there means
-  the service was unreachable, not that the project is broken. Later calls read PostgreSQL.
+  fetches the list from the Location Service (`LOCATION_SERVICE_BASE_URL`) and stores it (the read fallback in
+  `internal/services/location`), so a `5xx` there means the service was unreachable, not that the project is
+  broken. Later calls read PostgreSQL.
 - Check 13 holds the shutdown with an open, unfinished request because the drain waits for running requests; the
   first signal restores default signal handling, which is why the second one ends the process.
 - To exercise the modules that are off by default, set `MEDIA_ENABLED=true` together with the `STORAGE_*`

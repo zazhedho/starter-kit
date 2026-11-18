@@ -30,12 +30,34 @@ The few shared files:
 |---|---|---|
 | 1 | `migrations/<UTC timestamp>_<m>_create_table.up.sql` and `.down.sql` | the table plus the `module-seed` output (menu and permissions) |
 | 2 | `internal/router/modules.go` | one import line and one entry in `modules`, alphabetical |
-| 3 (only with settings) | `internal/config/config.go`, `load.go`, `validate.go` | one field in `Config`, one line in `FromEnv`, one call in `Validate` |
+| 3 (only with settings) | `internal/config/config.go`, `load.go`, `validate.go` | one field in `Config` and its section in the `Config.String` format (`config.go` ≈121), one line in `FromEnv`, one call in `Validate` |
 | 4 (only with env variables) | `.env.example` | its own `# --- <m> ---` block |
 
-No edit to the README, the route-table test, the architecture guard, lint, CI, the Makefile or the
+Apart from the composition-root edit under "Extension points" below (needed only for a new shared
+client), no edit to the README, the route-table test, the architecture guard, lint, CI, the Makefile or the
 Dockerfile. `TestRouteTable` in `internal/router` derives its expectation from `modules.go`, so the new
-module is covered the moment it is listed.
+module is covered the moment it is listed. `TestEveryRouterDirectoryIsMounted` fails if `internal/router/<m>`
+exists but is not in `modules`, and the entry's `Name` must equal the directory name.
+
+### Shared helpers: the reserved `shared` directory
+
+Modules must not import each other, so a helper two modules need (pagination, response helpers, a common
+DTO) has one home: `<tree>/shared`, for example `internal/handlers/http/shared` or `internal/dto/shared`.
+Use it only when a second module needs the code; until then keep it in the module. Rules:
+
+- any module of that tree may import it; it must not import any business module, in any tree;
+- the layer rules of its tree still apply (`dto/shared` is standard library plus domain only);
+- the import alias is the prefix plus `shared` (`dtoshared`, `httpshared`);
+- a business module must not be named `shared`, and `internal/router/shared` is never mounted.
+
+### Extension points: the composition root
+
+A module that needs a new shared infrastructure client (a mailer, a queue, a search client) makes one
+expected edit outside its own folders: add a field to `module.Deps` (`internal/router/module/module.go`),
+open and close the client in `internal/app`, and set the field in `App.ModuleDeps()`. `internal/app` is the
+composition root, the only place that opens connections. Note that storage is opened only when media is
+enabled (`internal/app/app.go` ≈200-209): another module that uses `d.Storage` must widen that condition,
+or `Storage` is nil for it.
 
 Order of work: migration, domain, dto, service (with a fake-based test), repository, handler,
 `router/<m>` (wire, register, route test), the `modules.go` line, config if needed, then

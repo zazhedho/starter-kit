@@ -1,14 +1,19 @@
 # Location module
 
 Provinces, cities, districts and villages, stored in PostgreSQL and filled by an asynchronous sync job
-that imports from a shared Location Service.
+(or, on a first read of an empty table, by a fallback fetch) from a shared Location Service.
 
 - Code: `internal/{domain,dto,services,repositories}/location`, `internal/handlers/http/location`,
   `internal/infrastructure/cache/location`, `internal/router/location` (`wire.go`, `register.go`),
   `internal/config/location.go`.
 - Always mounted (there is no on/off switch).
 - PostgreSQL is the source of truth. Redis is only a runtime cache and is optional. The Location Service is
-  used only by the sync job, never by the read routes.
+  called by the sync job and by one fallback in the read routes: when a read finds no rows (empty tables, or
+  nothing under that parent code), the service fetches that level from the Location Service, upserts it and
+  returns it, so a first read of an unsynced database needs the Location Service to be reachable (an error
+  there is returned to the caller). City, district and village fallbacks also need the parent row to exist
+  locally (the district fallback reads the city, the village fallback the city and district), so bootstrap
+  with a sync before relying on it.
 
 ## Routes
 
