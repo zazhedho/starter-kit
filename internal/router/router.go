@@ -12,13 +12,7 @@ import (
 	"starter-kit/internal/router/module"
 )
 
-// Deps and Lifecycle are temporary aliases while the modules move out.
-type (
-	Deps      = module.Deps
-	Lifecycle = module.Lifecycle
-)
-
-func validate(d Deps) error {
+func validate(d module.Deps) error {
 	var missing []string
 	if d.DB == nil {
 		missing = append(missing, "DB")
@@ -40,7 +34,7 @@ func validate(d Deps) error {
 
 // New returns the engine, or an error when Deps is incomplete or a module
 // fails to register. Probes live on the engine; modules (modules.go) mount under /api.
-func New(d Deps) (*gin.Engine, error) {
+func New(d module.Deps) (*gin.Engine, error) {
 	if err := validate(d); err != nil {
 		return nil, err
 	}

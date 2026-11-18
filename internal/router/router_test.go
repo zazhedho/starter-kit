@@ -17,7 +17,7 @@ import (
 	"starter-kit/internal/testutil/routertest"
 )
 
-func newEngine(t *testing.T, d Deps) *gin.Engine {
+func newEngine(t *testing.T, d module.Deps) *gin.Engine {
 	t.Helper()
 	engine, err := New(d)
 	if err != nil {
@@ -117,11 +117,11 @@ func TestGlobalBodyLimitCutsOffUndeclaredLengthBody(t *testing.T) {
 }
 
 func TestNewRejectsIncompleteDeps(t *testing.T) {
-	cases := map[string]func(*Deps){
-		"nil DB":        func(d *Deps) { d.DB = nil },
-		"nil SQLDB":     func(d *Deps) { d.SQLDB = nil },
-		"nil Kit":       func(d *Deps) { d.Kit = nil },
-		"nil Lifecycle": func(d *Deps) { d.Lifecycle = nil },
+	cases := map[string]func(*module.Deps){
+		"nil DB":        func(d *module.Deps) { d.DB = nil },
+		"nil SQLDB":     func(d *module.Deps) { d.SQLDB = nil },
+		"nil Kit":       func(d *module.Deps) { d.Kit = nil },
+		"nil Lifecycle": func(d *module.Deps) { d.Lifecycle = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
