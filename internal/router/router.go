@@ -9,6 +9,7 @@ import (
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 
+	routermedia "starter-kit/internal/router/media"
 	"starter-kit/internal/router/module"
 )
 
@@ -34,7 +35,7 @@ var rootRegistrars = []registrar{
 // added to the router tests' expected route list.
 var apiRegistrars = []registrar{
 	{"location", registerLocation},
-	{"media", registerMedia},
+	{"media", routermedia.Register},
 }
 
 func validate(d Deps) error {
@@ -50,9 +51,6 @@ func validate(d Deps) error {
 	}
 	if d.Lifecycle == nil {
 		missing = append(missing, "Lifecycle")
-	}
-	if d.Config.Media.Enabled && d.Storage == nil {
-		missing = append(missing, "Storage (media is enabled)")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("router deps incomplete: %v", missing)

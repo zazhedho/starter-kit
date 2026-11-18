@@ -121,6 +121,18 @@ func AuthkitRoutes(t *testing.T, d module.Deps) map[string]bool {
 	return RouteSet(engine)
 }
 
+// Mount registers one module alone on an empty engine, under /api as the router
+// does, and fails the test if registration returns an error. Use Engine.Routes
+// to read what the module mounts.
+func Mount(t *testing.T, register func(gin.IRouter, module.Deps) error, d module.Deps) *gin.Engine {
+	t.Helper()
+	engine := gin.New()
+	if err := register(engine.Group("/api"), d); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	return engine
+}
+
 // Serve sends a body-less request to h and returns the status code.
 func Serve(h http.Handler, method, path string) int {
 	rec := httptest.NewRecorder()

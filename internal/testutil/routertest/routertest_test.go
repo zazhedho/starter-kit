@@ -7,6 +7,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
+
+	"starter-kit/internal/router/module"
 )
 
 func TestNewDepsIsCompleteAndMediaIsOff(t *testing.T) {
@@ -50,3 +52,17 @@ func TestNewExecDBSendsStatementsToTheMock(t *testing.T) {
 }
 
 func sqlmockResult() driver.Result { return sqlmock.NewResult(0, 1) }
+
+func TestMountRegistersOnlyUnderAPI(t *testing.T) {
+	reg := func(r gin.IRouter, _ module.Deps) error {
+		r.GET("/thing", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		return nil
+	}
+	engine := Mount(t, reg, NewDeps(t, nil))
+	if got := SortedKeys(RouteSet(engine)); len(got) != 1 || got[0] != "GET /api/thing" {
+		t.Fatalf("routes = %v", got)
+	}
+	if got := Serve(engine, http.MethodGet, "/api/thing"); got != http.StatusNoContent {
+		t.Fatalf("Serve = %d", got)
+	}
+}
