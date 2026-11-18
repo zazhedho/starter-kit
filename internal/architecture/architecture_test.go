@@ -178,6 +178,68 @@ var rules = []rule{
 	},
 }
 
+// knownLayers is every top-level directory of internal/. A new layer needs a
+// rule in rules above and a line in the README's dependency rule before it is
+// added here.
+var knownLayers = []string{"app", "architecture", "config", "domain", "dto", "handlers", "infrastructure", "repositories", "router", "services", "testutil"}
+
+// layerProblems compares the directories found under internal/ with knownLayers.
+func layerProblems(found []string) []string {
+	known := map[string]bool{}
+	for _, l := range knownLayers {
+		known[l] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range found {
+		seen[d] = true
+		if !known[d] {
+			out = append(out, "internal/"+d+" is an unknown layer: a new layer needs a rule in rules (architecture_test.go) plus a line in the README's dependency rule, then an entry in knownLayers")
+		}
+	}
+	for _, l := range knownLayers {
+		if !seen[l] {
+			out = append(out, "internal/"+l+" is in knownLayers but missing on disk; remove it from the list (and its rule and README line)")
+		}
+	}
+	return out
+}
+
+func TestLayerProblemsDetectsViolations(t *testing.T) {
+	all := append([]string{}, knownLayers...)
+	cases := []struct {
+		name  string
+		found []string
+		want  int
+	}{
+		{"exactly the known set", all, 0},
+		{"unknown layer", append(append([]string{}, all...), "workers"), 1},
+		{"known layer removed", all[1:], 1},
+		{"renamed layer", append(append([]string{}, all[1:]...), "apps"), 2},
+	}
+	for _, c := range cases {
+		if got := layerProblems(c.found); len(got) != c.want {
+			t.Errorf("%s: %v, want %d problems", c.name, got, c.want)
+		}
+	}
+}
+
+func TestInternalLayersAreKnown(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join("..", "..", "internal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, e := range entries {
+		if e.IsDir() {
+			found = append(found, e.Name())
+		}
+	}
+	for _, p := range layerProblems(found) {
+		t.Error(p)
+	}
+}
+
 func isStdlib(importPath string) bool {
 	first, _, _ := strings.Cut(importPath, "/")
 	return !strings.Contains(first, ".")

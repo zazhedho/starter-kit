@@ -1,6 +1,7 @@
 package router
 
 import (
+	"os"
 	"sort"
 	"testing"
 
@@ -87,6 +88,81 @@ func TestModulesAreAlphabeticalAndUnique(t *testing.T) {
 		if i > 0 && modules[i-1].Name >= m.Name {
 			t.Errorf("modules must be alphabetical and unique: %q follows %q", m.Name, modules[i-1].Name)
 		}
+	}
+}
+
+// orphanProblems compares the router subdirectories with the mounted entries:
+// every directory except module (the leaf) and shared must be mounted under its
+// own name, and no entry may be called shared.
+func orphanProblems(dirs []string, entries []module.Entry) []string {
+	mounted := map[string]bool{}
+	var problems []string
+	for _, e := range entries {
+		mounted[e.Name] = true
+		if e.Name == "shared" {
+			problems = append(problems, "an entry is named shared, a reserved directory name")
+		}
+	}
+	isDir := map[string]bool{}
+	for _, d := range dirs {
+		isDir[d] = true
+		if d == "module" || d == "shared" {
+			continue
+		}
+		if !mounted[d] {
+			problems = append(problems, "internal/router/"+d+" is not mounted in modules (add module.Entry{Name: \""+d+"\", ...} to modules.go)")
+		}
+	}
+	for _, e := range entries {
+		if e.Name != "shared" && !isDir[e.Name] {
+			problems = append(problems, "entry "+e.Name+" has no internal/router/"+e.Name+" directory; Name must equal the directory name")
+		}
+	}
+	return problems
+}
+
+func TestOrphanProblemsDetectsViolations(t *testing.T) {
+	e := func(names ...string) []module.Entry {
+		out := make([]module.Entry, 0, len(names))
+		for _, n := range names {
+			out = append(out, module.Entry{Name: n})
+		}
+		return out
+	}
+	cases := []struct {
+		name    string
+		dirs    []string
+		entries []module.Entry
+		want    int
+	}{
+		{"all mounted", []string{"location", "media", "module"}, e("location", "media"), 0},
+		{"shared dir is exempt", []string{"location", "module", "shared"}, e("location"), 0},
+		{"orphan directory", []string{"location", "module", "projects"}, e("location"), 1},
+		{"entry name differs from directory", []string{"location", "module"}, e("places"), 2},
+		{"entry named shared", []string{"location", "module", "shared"}, e("location", "shared"), 1},
+	}
+	for _, c := range cases {
+		if got := orphanProblems(c.dirs, c.entries); len(got) != c.want {
+			t.Errorf("%s: %v, want %d problems", c.name, got, c.want)
+		}
+	}
+}
+
+// TestEveryRouterDirectoryIsMounted: a router/<module> package that is not in
+// modules would silently serve no routes.
+func TestEveryRouterDirectoryIsMounted(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	for _, p := range orphanProblems(dirs, modules) {
+		t.Error(p)
 	}
 }
 
