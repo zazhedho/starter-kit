@@ -18,6 +18,7 @@ import (
 	"github.com/zazhedho/gokit"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
 func TestMediaErrorResponseMapsDomainErrors(t *testing.T) {
@@ -55,6 +56,17 @@ type serviceDouble struct {
 	deleteActor domainmedia.Actor
 	deleteID    string
 	calls       int
+
+	listActor domainmedia.Actor
+	listReq   dtomedia.ListRequest
+	listItems []domainmedia.Media
+	listTotal int64
+}
+
+func (d *serviceDouble) List(_ context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+	d.calls++
+	d.listActor, d.listReq = actor, req
+	return d.listItems, d.listTotal, d.err
 }
 
 func (d *serviceDouble) MaxFileSize() int64 { return d.maxFileSize }
@@ -75,13 +87,21 @@ func (d *serviceDouble) Delete(_ context.Context, actor domainmedia.Actor, id st
 // scope, then performs one request.
 func serve(t *testing.T, svc Service, userID, role, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveWithPermissions(t, svc, userID, role, nil, method, target, body, contentType)
+}
+
+// serveWithPermissions is serve for a caller holding permissions, each written
+// as "resource:action".
+func serveWithPermissions(t *testing.T, svc Service, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	h := New(svc, nil, 0)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
-		scope := authkit.NewScope(userID, "tester", role, nil)
+		scope := authkit.NewScope(userID, "tester", role, permissions)
 		c.Request = c.Request.WithContext(authkit.WithScope(c.Request.Context(), scope))
 	})
+	engine.GET("/media", h.List)
 	engine.POST("/media", h.Upload)
 	engine.DELETE("/media/:id", h.Delete)
 
@@ -202,28 +222,40 @@ func TestUploadHandlerMapsServiceErrors(t *testing.T) {
 	}
 }
 
+func TestActorFromMapsScopePermissions(t *testing.T) {
+	user := uuid.NewString()
+	cases := []struct {
+		name  string
+		role  string
+		perms []string
+		want  domainmedia.Actor
+	}{
+		{"plain user", "viewer", nil, domainmedia.Actor{UserID: user}},
+		{"list_any only", "viewer", []string{"media:list_any"}, domainmedia.Actor{UserID: user, CanListAny: true}},
+		{"delete_any only", "viewer", []string{"media:delete_any"}, domainmedia.Actor{UserID: user, CanDeleteAny: true}},
+		{"other resource", "viewer", []string{"locations:list_any"}, domainmedia.Actor{UserID: user}},
+		{"superadmin passes every check", authkit.RoleSuperAdmin, nil, domainmedia.Actor{UserID: user, CanListAny: true, CanDeleteAny: true}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := authkit.WithScope(context.Background(), authkit.NewScope(user, "tester", c.role, c.perms))
+			if got := actorFrom(ctx); got != c.want {
+				t.Fatalf("actorFrom = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestDeleteHandlerBuildsTheActorFromTheScope(t *testing.T) {
 	id := uuid.NewString()
 	user := uuid.NewString()
-	cases := []struct {
-		role      string
-		superuser bool
-	}{
-		{"viewer", false},
-		{authkit.RoleSuperAdmin, true},
-		{" " + authkit.RoleSuperAdmin + " ", true},
+	svc := &serviceDouble{media: domainmedia.Media{ID: id}}
+	rec := serveWithPermissions(t, svc, user, "viewer", []string{"media:delete_any"}, http.MethodDelete, "/media/"+id, nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
-	for _, c := range cases {
-		t.Run(c.role, func(t *testing.T) {
-			svc := &serviceDouble{media: domainmedia.Media{ID: id}}
-			rec := serve(t, svc, user, c.role, http.MethodDelete, "/media/"+id, nil, "")
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
-			}
-			if svc.deleteID != id || svc.deleteActor != (domainmedia.Actor{UserID: user, IsSuperAdmin: c.superuser}) {
-				t.Fatalf("service got id %q actor %+v", svc.deleteID, svc.deleteActor)
-			}
-		})
+	if svc.deleteID != id || svc.deleteActor != (domainmedia.Actor{UserID: user, CanDeleteAny: true}) {
+		t.Fatalf("service got id %q actor %+v", svc.deleteID, svc.deleteActor)
 	}
 }
 
@@ -257,5 +289,101 @@ func TestDeleteHandlerMapsServiceErrors(t *testing.T) {
 				t.Fatalf("status = %d, want %d, body %s", rec.Code, c.status, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestListHandlerRejectsABadPageNumber(t *testing.T) {
+	svc := &serviceDouble{}
+	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?page=abc", nil, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if svc.calls != 0 {
+		t.Fatal("the service must not be called for a bad query")
+	}
+}
+
+func TestListHandlerRejectsABadOwnerFilter(t *testing.T) {
+	for _, target := range []string{
+		"/media?filters[owner_user_id]=not-a-uuid",
+		`/media?filters[owner_user_id]=["x"]`,
+		"/media?filters[owner_user_id]=42",
+	} {
+		t.Run(target, func(t *testing.T) {
+			svc := &serviceDouble{}
+			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, target, nil, "")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+			}
+			if svc.calls != 0 {
+				t.Fatal("the service must not be called for a bad owner filter")
+			}
+		})
+	}
+}
+
+func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
+	user, other := uuid.NewString(), uuid.NewString()
+	svc := &serviceDouble{}
+	rec := serve(t, svc, user, "viewer", http.MethodGet, "/media", nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	want := dtomedia.ListRequest{OrderBy: "created_at", OrderDirection: "desc", Page: 1, Limit: 20}
+	if svc.listReq != want {
+		t.Fatalf("defaults: got %+v, want %+v", svc.listReq, want)
+	}
+	if svc.listActor != (domainmedia.Actor{UserID: user}) {
+		t.Fatalf("actor = %+v", svc.listActor)
+	}
+
+	target := "/media?search=cat&page=3&limit=5&order_by=size&order_direction=asc" +
+		"&filters[owner_user_id]=" + other + "&filters[content_type]=image/png&filters[object_key]=secret"
+	svc = &serviceDouble{}
+	if rec := serve(t, svc, user, "viewer", http.MethodGet, target, nil, ""); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	want = dtomedia.ListRequest{
+		Search: "cat", OwnerUserID: other, ContentType: "image/png",
+		OrderBy: "size", OrderDirection: "asc", Page: 3, Limit: 5, Offset: 10,
+	}
+	if svc.listReq != want {
+		t.Fatalf("got %+v, want %+v", svc.listReq, want)
+	}
+}
+
+func TestListHandlerRespondsWithThePaginationShape(t *testing.T) {
+	svc := &serviceDouble{listItems: []domainmedia.Media{{ID: "m-1", OwnerUserID: "u-1"}}, listTotal: 41}
+	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?limit=20&page=2", nil, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var res struct {
+		TotalData   int  `json:"total_data"`
+		TotalPages  int  `json:"total_pages"`
+		CurrentPage int  `json:"current_page"`
+		NextPage    bool `json:"next_page"`
+		PrevPage    bool `json:"prev_page"`
+		Limit       int  `json:"limit"`
+		Data        []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, rec.Body.String())
+	}
+	if res.TotalData != 41 || res.TotalPages != 3 || res.CurrentPage != 2 || !res.NextPage || !res.PrevPage || res.Limit != 20 {
+		t.Fatalf("unexpected pagination %+v", res)
+	}
+	if len(res.Data) != 1 || res.Data[0].ID != "m-1" {
+		t.Fatalf("unexpected data %+v", res.Data)
+	}
+}
+
+func TestListHandlerMapsServiceErrors(t *testing.T) {
+	svc := &serviceDouble{err: errors.New("database down")}
+	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
 }

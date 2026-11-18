@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
 const (
@@ -124,7 +125,7 @@ func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string
 	if err != nil {
 		return domainmedia.Media{}, err
 	}
-	if media.OwnerUserID != strings.TrimSpace(actor.UserID) && !actor.IsSuperAdmin {
+	if media.OwnerUserID != strings.TrimSpace(actor.UserID) && !actor.CanDeleteAny {
 		return domainmedia.Media{}, domainmedia.ErrMediaForbidden
 	}
 
@@ -136,6 +137,15 @@ func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string
 	}
 
 	return media, nil
+}
+
+// List returns a page of media and the total match count. Without list_any the
+// owner filter is forced to the caller, whatever the request asked for.
+func (s *Service) List(ctx context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+	if !actor.CanListAny {
+		req.OwnerUserID = strings.TrimSpace(actor.UserID)
+	}
+	return s.repo.List(ctx, req)
 }
 
 // newUUIDv7 returns a time-ordered UUID, falling back to a random one if the

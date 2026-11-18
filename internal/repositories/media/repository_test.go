@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
 func newMockRepo(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
@@ -109,5 +111,90 @@ func TestRepositoryDeleteReturnsDatabaseErrors(t *testing.T) {
 
 	if err := NewRepository(db).Delete(context.Background(), "m-1"); !errors.Is(err, boom) {
 		t.Fatalf("Delete = %v, want the database error", err)
+	}
+}
+
+func listRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "owner_user_id", "original_name"}).AddRow("m-1", "u-1", "cat.png")
+}
+
+func expectCount(mock sqlmock.Sqlmock, total int) {
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "media"`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(total))
+}
+
+func TestRepositoryListAppliesSearchFiltersAndOrder(t *testing.T) {
+	db, mock := newMockRepo(t)
+	expectCount(mock, 41)
+	mock.ExpectQuery(`SELECT \* FROM "media" WHERE .*LOWER\(original_name\) LIKE LOWER\(.*owner_user_id = .*"media"."deleted_at" IS NULL ORDER BY size ASC LIMIT .* OFFSET`).
+		WillReturnRows(listRows())
+
+	items, total, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{
+		Search: "cat", OwnerUserID: "u-1", ContentType: "image/png",
+		OrderBy: "size", OrderDirection: "asc", Page: 2, Limit: 20, Offset: 20,
+	})
+	if err != nil {
+		t.Fatalf("List = %v", err)
+	}
+	if total != 41 || len(items) != 1 || items[0].ID != "m-1" {
+		t.Fatalf("got total=%d items=%+v", total, items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepositoryListFiltersByOwnerAndContentType(t *testing.T) {
+	db, mock := newMockRepo(t)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "media" WHERE`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT \* FROM "media" WHERE`).WillReturnRows(listRows())
+
+	_, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OwnerUserID: "u-1", ContentType: "image/png", Limit: 20})
+	if err != nil {
+		t.Fatalf("List = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) {
+	for _, orderBy := range []string{"object_key", "url", "size; DROP TABLE media", "owner_user_id"} {
+		t.Run(orderBy, func(t *testing.T) {
+			db, mock := newMockRepo(t)
+			expectCount(mock, 1)
+			mock.ExpectQuery(`ORDER BY created_at DESC LIMIT`).WillReturnRows(listRows())
+
+			if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: orderBy, OrderDirection: "asc", Limit: 20}); err != nil {
+				t.Fatalf("List = %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRepositoryListFallsBackToDefaultOrderForBadDirection(t *testing.T) {
+	db, mock := newMockRepo(t)
+	expectCount(mock, 1)
+	mock.ExpectQuery(`ORDER BY created_at DESC LIMIT`).WillReturnRows(listRows())
+
+	if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: "size", OrderDirection: "sideways; DROP", Limit: 20}); err != nil {
+		t.Fatalf("List = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepositoryListReturnsDatabaseErrors(t *testing.T) {
+	db, mock := newMockRepo(t)
+	boom := errors.New("count failed")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "media"`)).WillReturnError(boom)
+
+	if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{Limit: 20}); !errors.Is(err, boom) {
+		t.Fatalf("List = %v, want the database error", err)
 	}
 }

@@ -5,18 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 
 	domainmedia "starter-kit/internal/domain/media"
+	dtomedia "starter-kit/internal/dto/media"
 )
 
-const multipartOverhead = int64(1 << 20)
+const (
+	multipartOverhead = int64(1 << 20)
+	defaultListLimit  = 20
+)
+
+// listFilters are the filters[...] keys the list endpoint reads.
+var listFilters = []string{"owner_user_id", "content_type"}
 
 type Handler struct {
 	service       Service
@@ -94,6 +101,46 @@ func (h *Handler) Upload(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
 }
 
+func (h *Handler) List(ctx *gin.Context) {
+	logID := gokit.GenerateLogId(ctx)
+	logPrefix := "[MediaHandler][List]"
+
+	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", defaultListLimit)
+	if err != nil {
+		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; GetBaseParams; Error: %v", logPrefix, err))
+		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "invalid query parameters"))
+		return
+	}
+
+	filters := gokit.WhitelistStringFilter(params.Filters, listFilters)
+	ownerID, _ := filters["owner_user_id"].(string)
+	contentType, _ := filters["content_type"].(string)
+	if ownerID != "" {
+		if _, err := uuid.Parse(ownerID); err != nil {
+			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "owner_user_id must be a UUID"))
+			return
+		}
+	}
+
+	data, total, err := h.service.List(ctx.Request.Context(), actorFrom(ctx.Request.Context()), dtomedia.ListRequest{
+		Search:         params.Search,
+		OwnerUserID:    ownerID,
+		ContentType:    contentType,
+		OrderBy:        params.OrderBy,
+		OrderDirection: params.OrderDirection,
+		Page:           params.Page,
+		Limit:          params.Limit,
+		Offset:         params.Offset,
+	})
+	if err != nil {
+		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.List; Error: %v", logPrefix, err))
+		ctx.JSON(http.StatusInternalServerError, gokit.ErrorResponse(http.StatusInternalServerError, gokit.MsgSomethingWrong, logID, gokit.MsgSomethingWrong))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, data))
+}
+
 func (h *Handler) Delete(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
 	logPrefix := "[MediaHandler][Delete]"
@@ -130,12 +177,14 @@ func (h *Handler) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, "Media deleted successfully", logID, nil))
 }
 
-// actorFrom reduces the authenticated scope to what the media rules need.
+// actorFrom reduces the scope to what the media rules need. It is only right
+// after Auth and LoadPermissions: Has is false without the loaded permissions.
 func actorFrom(ctx context.Context) domainmedia.Actor {
 	scope := authkit.ScopeFrom(ctx)
 	return domainmedia.Actor{
 		UserID:       scope.UserID,
-		IsSuperAdmin: strings.TrimSpace(scope.Role) == authkit.RoleSuperAdmin,
+		CanListAny:   scope.Has("media", "list_any"),
+		CanDeleteAny: scope.Has("media", "delete_any"),
 	}
 }
 
