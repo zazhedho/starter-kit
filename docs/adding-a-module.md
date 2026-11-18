@@ -41,7 +41,8 @@ exists but is not in `modules`, and the entry's `Name` must equal the directory 
 
 ### Shared helpers: the reserved `shared` directory
 
-Modules must not import each other, so a helper two modules need (pagination, response helpers, a common
+Modules must not import each other's services, handlers, repositories or routers (they may reference another
+module's `domain` and `dto` from those layers, never from `domain` or `dto`), so a helper two modules need (pagination, response helpers, a common
 DTO) has one home: `<tree>/shared`, for example `internal/handlers/http/shared` or `internal/dto/shared`.
 Use it only when a second module needs the code; until then keep it in the module. Rules:
 
