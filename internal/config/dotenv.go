@@ -7,10 +7,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// LoadDotEnv loads path into the process environment without overriding
-// variables that are already set. A missing or unreadable file is an error
-// only when APP_ENV is not set, which is how containers that inject the
-// environment run without a .env file.
+// LoadDotEnv loads path without overriding variables already set. A missing
+// file is an error only when APP_ENV is unset (containers inject the environment).
 func LoadDotEnv(path string) error {
 	err := godotenv.Load(path)
 	if err != nil && os.Getenv("APP_ENV") == "" {

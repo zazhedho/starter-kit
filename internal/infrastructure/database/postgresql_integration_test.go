@@ -15,10 +15,8 @@ import (
 
 const integrationTimezone = "Asia/Jakarta"
 
-// adminSettings returns connection settings for the PostgreSQL named by
-// STARTER_KIT_TEST_DATABASE_URL, in both shapes the service accepts: the
-// DATABASE_URL form and the DB_* parts. The test is skipped when the variable
-// is not set.
+// adminSettings returns settings for STARTER_KIT_TEST_DATABASE_URL in both
+// accepted shapes (URL and DB_* parts); the test is skipped if it is unset.
 func adminSettings(t *testing.T) (viaURL, viaParts config.Database) {
 	t.Helper()
 	raw := os.Getenv("STARTER_KIT_TEST_DATABASE_URL")

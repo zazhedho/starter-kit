@@ -1,11 +1,6 @@
-// Package logcapture lets a test binary read what the service logs, on every
-// platform and without file-descriptor tricks.
-//
-// logus builds its logger once, on the first line written, around whatever
-// os.Stdout is at that moment. Start therefore points os.Stdout at a pipe,
-// makes logus build its logger, and puts os.Stdout back: the logger keeps
-// writing into the pipe, while the testing package and everything else keep
-// the real stdout. Call Start from TestMain, before any test can log.
+// Package logcapture lets a test binary read what the service logs.
+// logus builds its logger on the first write, around the then-current os.Stdout;
+// Start swaps in a pipe for that moment. Call it from TestMain, before any test logs.
 package logcapture
 
 import (
@@ -41,9 +36,8 @@ type Capture struct {
 // Mark is a position in the captured output.
 type Mark int
 
-// Start begins capturing the logus output and the standard log package. It
-// panics if the pipe cannot be created, which only happens when the process
-// is out of file descriptors.
+// Start captures logus output and the standard log package. It panics if the
+// pipe cannot be created (out of file descriptors).
 func Start() *Capture {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -121,9 +115,8 @@ func (c *Capture) Since(m Mark) string {
 // All returns everything captured so far.
 func (c *Capture) All() string { return c.Since(0) }
 
-// Stop restores the standard log package output and ends the capture. The
-// logus logger cannot be rebuilt, so call it only when the binary is about to
-// exit.
+// Stop restores log output and ends the capture; logus cannot be rebuilt, so call
+// it only just before exit.
 func (c *Capture) Stop() {
 	log.SetOutput(c.prevL)
 	_ = c.w.Close()

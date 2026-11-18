@@ -94,9 +94,8 @@ func TestNoPackageLevelConnections(t *testing.T) {
 	})
 }
 
-// rule describes what one package tree under internal/ must not import.
-// internal entries are prefixes relative to the module ("internal/services");
-// external entries are import-path prefixes.
+// rule lists what one package tree under internal/ must not import; internal
+// entries are module-relative prefixes, external entries import-path prefixes.
 type rule struct {
 	tree           string
 	forbidInternal []string
@@ -320,9 +319,8 @@ func TestRulesDetectViolations(t *testing.T) {
 	}
 }
 
-// TestInterfacesLiveWithTheirConsumer keeps the Go convention: an interface is
-// declared by the package that uses it (ports.go), never in a producer-side
-// internal/interfaces package, and carries no "Interface" suffix.
+// Interfaces are declared by their consumer (ports.go), never in a producer-side
+// package, and carry no "Interface" suffix.
 func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 	if _, err := os.Stat(filepath.Join("..", "..", "internal", "interfaces")); err == nil {
 		t.Error("internal/interfaces must not exist: declare interfaces in the consuming package (ports.go)")
@@ -348,11 +346,8 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 	})
 }
 
-// moduleAliasPrefix maps a package tree that holds one package per module to
-// the import-alias prefix every importer must use: the alias is the prefix
-// followed by the module name, for example domainlocation or httpmedia. The
-// handler prefix is "http" (the transport) because handlers/<transport>/<module>
-// leaves room for other transports.
+// moduleAliasPrefix maps each per-module package tree to the import-alias prefix
+// importers must use (domainlocation, httpmedia). Handlers use "http" to leave room for other transports.
 var moduleAliasPrefix = map[string]string{
 	"internal/domain":               "domain",
 	"internal/dto":                  "dto",
@@ -465,9 +460,8 @@ func TestPackageNameMatchesDirectory(t *testing.T) {
 	})
 }
 
-// moduleOf returns the business module a module-relative path ("internal/
-// services/media", or a file's directory) belongs to, or "" when it is not
-// inside a per-module tree. The trees are those of moduleAliasPrefix.
+// moduleOf returns the business module a module-relative path belongs to, or ""
+// outside the per-module trees (see moduleAliasPrefix).
 func moduleOf(p string) string {
 	for tree := range moduleAliasPrefix {
 		if rest, ok := strings.CutPrefix(p, tree+"/"); ok {
@@ -489,9 +483,8 @@ func crossesModules(dir, importPath string) bool {
 	return from != "" && to != "" && from != to
 }
 
-// TestModulesDoNotImportEachOther: location must not import media nor media
-// location, whatever the layer; modules meet only in internal/router and
-// internal/app. Test files are held to the same rule.
+// Modules must not import each other in any layer, tests included; they meet only
+// in internal/router and internal/app.
 func TestModulesDoNotImportEachOther(t *testing.T) {
 	goFiles(t, func(p string, file *ast.File) {
 		for _, imp := range file.Imports {
@@ -529,9 +522,8 @@ func TestCrossModuleRuleDetectsViolations(t *testing.T) {
 	}
 }
 
-// constructorTrees are the layers whose exported New* functions must return a
-// concrete type. internal/infrastructure is exempt: its factories select an
-// implementation and may return an interface (storage.NewStorageProvider).
+// constructorTrees are the layers whose exported New* must return a concrete type;
+// internal/infrastructure factories may return an interface.
 var constructorTrees = []string{"internal/services", "internal/repositories", "internal/handlers"}
 
 func isConstructorName(name string) bool {
@@ -539,9 +531,8 @@ func isConstructorName(name string) bool {
 	return ok && (rest == "" || rest[0] >= 'A' && rest[0] <= 'Z')
 }
 
-// constructorViolations checks the exported New* functions of one package: each
-// returns a pointer to a struct declared in the package, optionally followed by
-// an error. A returned interface, a struct value, or any other type is reported.
+// constructorViolations reports New* functions that do not return a pointer to a
+// struct of the package, optionally followed by an error.
 func constructorViolations(files []*ast.File) []string {
 	structs := map[string]bool{}
 	for _, f := range files {

@@ -1,6 +1,5 @@
-// Package router builds the HTTP engine: global middleware, health checks and
-// every module's routes, from explicit configuration and connections. It
-// opens nothing; the caller passes in every connection and provider.
+// Package router builds the HTTP engine: middleware, health checks and module
+// routes. It opens nothing; callers pass in every connection.
 package router
 
 import (
@@ -17,9 +16,8 @@ import (
 	servicemedia "starter-kit/internal/services/media"
 )
 
-// Deps is everything the routes need. Redis is nil when Redis is not used;
-// Storage is nil when media is disabled. Lifecycle collects the shutdown hooks
-// of background work the modules start; the caller closes it.
+// Deps is everything the routes need. Redis is nil when unused, Storage when media
+// is disabled; the caller closes Lifecycle.
 type Deps struct {
 	Config  config.Config
 	DB      *gorm.DB
@@ -43,9 +41,8 @@ var rootRegistrars = []registrar{
 	{"health", registerHealth},
 }
 
-// apiRegistrars are mounted under /api, after authkit's own routes. A new
-// module's routes must also be added to the expected route list in the router
-// tests, or the route-table test fails.
+// apiRegistrars mount under /api after authkit's routes; a new module must also be
+// added to the router tests' expected route list.
 var apiRegistrars = []registrar{
 	{"location", registerLocation},
 	{"media", registerMedia},

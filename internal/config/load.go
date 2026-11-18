@@ -18,9 +18,8 @@ const (
 	defaultAllowedContentTypes    = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
 )
 
-// FromEnv reads the process environment as it is. It does not load .env or
-// Consul; the caller does that first. Values it cannot parse fall back to
-// their defaults and are reported later by Validate.
+// FromEnv reads the environment as it is (callers load .env and Consul first).
+// Unparseable values fall back to defaults and are reported by Validate.
 func FromEnv() Config {
 	var l loader
 
@@ -122,10 +121,8 @@ func (l *loader) duration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-// megabytes reads a size in whole megabytes and returns it in bytes. The raw
-// number is checked before it is shifted so a huge value cannot wrap around
-// to a small one; an out-of-range value is recorded for Validate and the
-// default is used.
+// megabytes reads whole megabytes and returns bytes. It range-checks before
+// shifting so huge values cannot wrap; invalid values are recorded and the default is used.
 func (l *loader) megabytes(key string, def int) int64 {
 	n := l.integer(key, def)
 	if n < 1 || n > maxSizeMB {
@@ -168,10 +165,8 @@ func locationCacheTTL() time.Duration {
 	return ttl
 }
 
-// smtpFromEnv reads the SMTP_* variables (and the mail labels) with the names
-// and defaults authkit's own env helper uses; an unset value stays empty so
-// the mailer applies its default. A port that is not a number is reported
-// through the second result and read as unset.
+// smtpFromEnv reads the SMTP settings; unset values stay empty so the mailer
+// applies its defaults. A non-numeric port is reported via portInvalid.
 func smtpFromEnv() (s SMTP, portInvalid bool) {
 	s = SMTP{
 		Host:         gokit.GetEnv("SMTP_HOST", ""),

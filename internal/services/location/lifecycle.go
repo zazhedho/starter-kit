@@ -11,9 +11,8 @@ import (
 // background work.
 var ErrClosed = errors.New("location service is closed")
 
-// Messages recorded on a job that did not run to completion. Both end in the
-// state FailActiveSyncJobs leaves behind: status failed, message "Location sync
-// interrupted".
+// Messages for jobs that did not complete; both match the state FailActiveSyncJobs
+// leaves (failed, "Location sync interrupted").
 const (
 	restartedMessage = "Service restarted before the previous location sync completed."
 	shutdownMessage  = "Application shut down before the location sync completed."
@@ -23,9 +22,8 @@ const (
 	settleTimeout = 10 * time.Second
 )
 
-// RecoverInterruptedJobs marks every queued or running sync job as failed. Call
-// it once when the process starts: such a job belongs to a process that no
-// longer exists.
+// RecoverInterruptedJobs fails every queued or running job; call once at startup,
+// since such jobs belong to a dead process.
 func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
 	if err := s.repo.FailActiveSyncJobs(ctx, restartedMessage); err != nil {
 		return fmt.Errorf("mark interrupted location sync jobs: %w", err)
@@ -33,11 +31,9 @@ func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
 	return nil
 }
 
-// Close cancels the running sync job, if any, and waits for it until ctx ends
-// or the job returns. The job's final write is bounded by ctx's deadline (when
-// it has one) and by settleTimeout, and is skipped once that deadline has
-// passed. It is safe to call more than once; after the first call StartSync
-// fails with ErrClosed.
+// Close cancels the running sync job and waits until ctx ends or the job returns.
+// The job's final write is bounded by ctx's deadline and settleTimeout.
+// Safe to call twice; afterwards StartSync fails with ErrClosed.
 func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true
@@ -71,10 +67,9 @@ func (s *Service) startJob() bool {
 	return true
 }
 
-// settleContext returns a bounded context that survives cancellation of the
-// lifecycle context, for the writes that record a job's final state. It lasts
-// settleTimeout at most, and never past the deadline Close was given; when that
-// deadline has passed it reports false and the write must be skipped.
+// settleContext returns a bounded context that outlives lifecycle cancellation
+// for the final-state write: at most settleTimeout, never past Close's deadline;
+// false means that deadline passed and the write must be skipped.
 func (s *Service) settleContext() (context.Context, context.CancelFunc, bool) {
 	s.mu.Lock()
 	by := s.settleBy

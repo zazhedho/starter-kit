@@ -7,10 +7,8 @@ import (
 	"github.com/zazhedho/gokit"
 )
 
-// bodyLimit caps request bodies. A declared Content-Length over the limit is
-// answered with 413 up front; a body without a declared length is wrapped in
-// http.MaxBytesReader, so reading past the limit fails and the handler answers
-// (most JSON handlers with 400, the media handler with 413).
+// bodyLimit caps request bodies: a declared Content-Length over the limit gets
+// 413; otherwise the body is wrapped in http.MaxBytesReader so reads past it fail.
 func bodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.ContentLength > maxBytes {

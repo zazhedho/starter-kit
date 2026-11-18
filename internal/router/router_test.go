@@ -104,10 +104,8 @@ func accessLogLines(output string) []string {
 	return lines
 }
 
-// TestMiddlewareOrderAndSingleAccessLog proves the order through behavior:
-// the access-log line carries the request id, so the id was set before the
-// logger ran; an over-limit request still carries the CORS headers, so CORS
-// runs before the body limit; and each request is logged exactly once.
+// TestMiddlewareOrderAndSingleAccessLog checks that the request id precedes the
+// logger, CORS precedes the body limit, and each request is logged once.
 func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"

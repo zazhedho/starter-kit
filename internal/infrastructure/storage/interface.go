@@ -8,9 +8,8 @@ import (
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-// Provider is the full set of operations the storage adapters offer. The media
-// service depends only on the two-method servicemedia.Storage port, which
-// Provider satisfies.
+// Provider is the full set of storage operations; the media service depends only
+// on the two-method servicemedia.Storage port it satisfies.
 type Provider interface {
 	// UploadFile stores a multipart file under folder; the object name is generated.
 	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error)

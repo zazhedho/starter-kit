@@ -1,8 +1,5 @@
-// Package config holds the typed application configuration and is the only
-// package that reads the environment. LoadDotEnv and LoadRemote fill the
-// environment from .env and from Consul or a config file, FromEnv builds the
-// typed Config from it once, Validate checks it once, and the rest of the
-// service receives the result instead of reading the environment itself.
+// Package config holds the typed configuration and is the only package that
+// reads the environment; the rest of the service receives the validated Config.
 package config
 
 import (
@@ -35,9 +32,8 @@ type Config struct {
 	smtpPortInvalid bool // SMTP_PORT was set but is not a port number
 }
 
-// SMTP is the outgoing mail setting for OTP and password-reset emails. Empty
-// values mean "use the mailer's default"; only Host, Password and From are
-// required, and only when mail is used at all.
+// SMTP is the mail setting for OTP and password-reset emails. Empty means the
+// mailer's default; Host, Password and From are required only when mail is used.
 type SMTP struct {
 	Host         string // SMTP_HOST
 	Port         int    // SMTP_PORT; 0 when unset
@@ -71,10 +67,8 @@ type Database struct {
 	ConnMaxLifetime, ConnMaxIdleTime                   time.Duration
 }
 
-// DSN returns DATABASE_URL when set, otherwise a key=value DSN that pgx parses.
-// Every value is single-quoted with \ and ' escaped, so a space, quote or
-// backslash in a user name or password neither breaks the DSN nor splits it
-// into pieces that an error message could echo.
+// DSN returns DATABASE_URL when set, else a key=value DSN with every value
+// single-quoted and escaped so special characters cannot break or split it.
 func (d Database) DSN(timezone string) string {
 	if d.URL != "" {
 		return d.URL

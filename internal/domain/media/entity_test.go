@@ -12,9 +12,8 @@ func TestMediaTableName(t *testing.T) {
 	}
 }
 
-// Media is returned to clients as-is, so renaming a json tag is an API
-// change. This pins the exported shape, and that the soft-delete column is
-// never serialized.
+// Media is serialized as-is, so a json tag rename is an API change; pins the shape
+// and that the soft-delete column is never serialized.
 func TestMediaJSONShape(t *testing.T) {
 	raw, err := json.Marshal(Media{ID: "m-1", CreatedAt: time.Unix(0, 0).UTC()})
 	if err != nil {
