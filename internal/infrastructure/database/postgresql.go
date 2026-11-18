@@ -104,7 +104,6 @@ func urlNamesTimeZone(raw string) bool {
 	return strings.Contains(strings.ToLower(raw), "timezone=")
 }
 
-// failed logs msg and returns it as an error.
 func failed(msg, logPrefix string) error {
 	logus.WriteLog(logus.LogLevelError, logPrefix+msg)
 	return errors.New(msg)

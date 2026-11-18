@@ -75,7 +75,6 @@ func (a *App) Serve(ctx context.Context) error {
 	return err
 }
 
-// closeAfter closes the App and joins any close error to err.
 func (a *App) closeAfter(err error) error {
 	if closeErr := a.Close(); closeErr != nil {
 		return errors.Join(err, closeErr)

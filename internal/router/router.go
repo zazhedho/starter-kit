@@ -44,8 +44,8 @@ var rootRegistrars = []registrar{
 }
 
 // apiRegistrars are mounted under /api, after authkit's own routes. A new
-// module's routes must also be added to the expected list in routes_test.go
-// (ownRoutesWithoutMedia), or TestRouteTable fails.
+// module's routes must also be added to the expected route list in the router
+// tests, or the route-table test fails.
 var apiRegistrars = []registrar{
 	{"location", registerLocation},
 	{"media", registerMedia},
@@ -74,7 +74,8 @@ func (d Deps) validate() error {
 	return nil
 }
 
-// New builds the engine with its global middleware and all routes.
+// New returns the engine, or an error when Deps is incomplete or a registrar
+// fails.
 func New(d Deps) (*gin.Engine, error) {
 	if err := d.validate(); err != nil {
 		return nil, err

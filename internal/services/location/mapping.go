@@ -9,7 +9,6 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// normalizeKey is the comparison form of a name: trimmed and lower-cased.
 func normalizeKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
 
 func mapProvinces(rows []domainlocation.Province) []dtolocation.Location {

@@ -10,8 +10,8 @@ import (
 	servicemedia "starter-kit/internal/services/media"
 )
 
-// registerMedia mounts the media routes, or nothing when media is disabled.
-// The storage provider arrives in Deps; New has already checked it is there.
+// registerMedia mounts nothing when media is disabled. The storage provider
+// arrives in Deps; New has already checked it is there.
 func registerMedia(r gin.IRouter, d Deps) error {
 	m := d.Config.Media
 	if !m.Enabled {

@@ -36,8 +36,7 @@ func authkitRoutes(t *testing.T, d Deps) map[string]bool {
 }
 
 // ownRoutesWithMedia and ownRoutesWithoutMedia are written by hand from the
-// registrars: health.go, location.go and media.go. A new route must be added
-// here on purpose; an accidental one fails the test.
+// registrars. A new route must be added here on purpose; an accidental one fails the test.
 var (
 	ownRoutesWithoutMedia = []string{
 		"GET /healthcheck",

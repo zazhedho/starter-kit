@@ -98,9 +98,8 @@ func FromEnv() Config {
 	return cfg
 }
 
-// loader reads the variables introduced with this config. Unlike the legacy
-// seconds forms, they take Go durations, and anything unparsable is recorded
-// for Validate instead of being dropped silently.
+// loader reads variables that take Go durations; anything unparsable is
+// recorded for Validate instead of being dropped silently.
 type loader struct{ problems []string }
 
 func (l *loader) str(key, def string) string {
@@ -149,8 +148,8 @@ func (l *loader) integer(key string, def int) int {
 	return n
 }
 
-// locationTimeout keeps the seconds form LOCATION_SERVICE_TIMEOUT_SECONDS has
-// always accepted; a non-positive value means the default.
+// locationTimeout reads LOCATION_SERVICE_TIMEOUT_SECONDS as whole seconds; a
+// non-positive value means the default.
 func locationTimeout() time.Duration {
 	sec := gokit.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", defaultLocationTimeoutSeconds)
 	if sec <= 0 {
@@ -159,8 +158,8 @@ func locationTimeout() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-// locationCacheTTL keeps every form LOCATION_CACHE_TTL has always accepted
-// (Go duration, plain seconds, "eod"); a non-positive value means the default.
+// locationCacheTTL accepts a Go duration, plain seconds or "eod"; a
+// non-positive value means the default.
 func locationCacheTTL() time.Duration {
 	ttl := gokit.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
 	if ttl <= 0 {
@@ -194,7 +193,7 @@ func smtpFromEnv() (s SMTP, portInvalid bool) {
 }
 
 // redisDB returns REDIS_DB and whether it was set to something that is not an
-// integer, which the old startup validation reported.
+// integer, which Validate reports.
 func redisDB() (db int, invalid bool) {
 	raw := strings.TrimSpace(os.Getenv("REDIS_DB"))
 	if raw == "" {

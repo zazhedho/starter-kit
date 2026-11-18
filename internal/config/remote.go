@@ -16,7 +16,7 @@ import (
 )
 
 // remoteConfigCacheKey is the Redis key under which the remote configuration is
-// cached. Its value is part of the cache layout shared with earlier releases.
+// cached. Changing it orphans entries written by running instances.
 const remoteConfigCacheKey = "cache:config:app"
 
 // LoadRemote applies the optional remote or file configuration: Consul when

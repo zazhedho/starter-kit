@@ -261,7 +261,6 @@ func violates(r rule, ip string, isTest bool) bool {
 	return false
 }
 
-// TestImportRule asserts the dependency rule has zero violations.
 func TestImportRule(t *testing.T) {
 	violations := collectViolations(t)
 	found := make([]string, 0, len(violations))
