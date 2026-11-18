@@ -94,7 +94,9 @@ starter-kit/
 ├── internal/
 │   ├── app/                       # lifecycle and composition: Run, New, Migrate, Serve, Close
 │   ├── config/                    # the one config package: Config, FromEnv, Validate, LoadDotEnv, LoadRemote (Consul/file)
-│   ├── router/                    # gin engine, global middleware, one register<Module> per module; wires repository -> service -> handler
+│   ├── router/                    # gin engine, global middleware, probes; modules.go lists the mounted modules
+│   │   ├── module/                # leaf: Deps, Lifecycle, Entry (imports no feature module)
+│   │   └── <module>/              # wire.go builds repository -> service -> handler; register.go mounts the routes; routes_test.go pins them
 │   ├── domain/<module>/           # entities and domain errors; no framework except gorm.DeletedAt
 │   ├── dto/<module>/              # request and response shapes shared by handler and service
 │   ├── services/<module>/         # business rules; declares the ports it needs (Repository, Cache, Storage) in ports.go
@@ -106,7 +108,7 @@ starter-kit/
 │   │   ├── database/              # PostgreSQL pool, Redis client
 │   │   └── storage/               # object storage providers (MinIO, Cloudflare R2) and InitStorage
 │   ├── architecture/              # guard tests: the dependency rule, import aliases, package names
-│   └── testutil/                  # test helpers (log capture)
+│   └── testutil/                  # test helpers: logcapture, routertest (shared router test Deps and helpers)
 ├── migrations/                    # this project's own migrations (start at 000005)
 ├── deploy/entrypoint.sh           # container entrypoint (runs the migration when asked)
 ├── docs/                          # smoke-test.md, postman/ (API collection)
@@ -169,15 +171,18 @@ A package is named after its directory (`package location` in `domain/location`,
 | `internal/repositories/location` | `repositorylocation` |
 | `internal/handlers/http/location` | `httplocation` (transport plus module) |
 | `internal/infrastructure/cache/location` | `cachelocation` |
+| `internal/router/location` | `routerlocation` |
+
+Handler aliases follow the transport directory, so `internal/handlers/grpc/location` is `grpclocation` with no guard edit. `internal/router/module` is the shared leaf, not a module: import it as `module`.
 
 The same applies to `media` and to every module you add. goimports and gopls suggest the bare name `location`; the alias is a convention that `internal/architecture` checks, so a wrong alias fails `go test`. Import groups are standard library, third party, then `starter-kit/...`; `make fmt` (`golangci-lint fmt`) keeps them that way.
 
 Rules that keep the structure uniform:
-- Nothing outside `cmd/` calls `os.Exit` or `log.Fatal` (the guard checks this); everything else returns errors. Nothing outside `internal/config` reads the environment. Connections are opened only from `internal/app`, through `internal/infrastructure/database`; the router and modules receive a `router.Deps` value.
+- Nothing outside `cmd/` calls `os.Exit` or `log.Fatal` (the guard checks this); everything else returns errors. Nothing outside `internal/config` reads the environment. Connections are opened only from `internal/app`, through `internal/infrastructure/database`; the router and modules receive a `module.Deps` value (`internal/router/module`).
 - A repository can embed the generic `gokit.Repository` from `github.com/zazhedho/gokit`, built with `gokit.NewRepository[T](db)`, for common CRUD and list queries. `internal/repositories/media` does this and overrides `GetByID` to translate the ORM's not-found error. Keep a module's own repository methods for what the generic one does not cover (joins, aggregates, transactions, error translation); `internal/repositories/location` has no embedded `gokit.Repository` and only custom methods.
-- Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`. `d.Kit` is the `*authkit.Kit` in `router.Deps`.
+- Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`. `d.Kit` is the `*authkit.Kit` in `module.Deps`.
 - For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods; `internal/handlers/http/media/handler.go` is the example.
-- Background work a module starts (the location sync job) stops through `router.Deps.Lifecycle`. Register a hook with `d.Lifecycle.OnClose(name, fn)`, where `fn` is a `func(context.Context) error` that must return when its context ends; `internal/router/location.go` registers the sync service's `Close` this way. `App.Close` runs the hooks in reverse order of registration with the shutdown context, before it closes Redis and the database.
+- Background work a module starts (the location sync job) stops through `module.Deps.Lifecycle`. Register a hook with `d.Lifecycle.OnClose(name, fn)`, where `fn` is a `func(context.Context) error` that must return when its context ends; `internal/router/location/wire.go` registers the sync service's `Close` this way. `App.Close` runs the hooks in reverse order of registration with the shutdown context, before it closes Redis and the database.
 
 ## Startup Flow
 
@@ -215,7 +220,7 @@ cmd/api/main.go
            HTTP_SHUTDOWN_TIMEOUT counted from the signal; then close Redis, close the database
 ```
 
-The routes are built after the migrations because some modules read their tables when they are registered (`registerLocation` calls `RecoverInterruptedJobs`, which marks sync jobs left over from a previous run as failed), and it gives up after 10 seconds. If that write fails or times out, route registration fails and the service does not start.
+The routes are built after the migrations because some modules read their tables when they are registered (`internal/router/location/wire.go` calls `RecoverInterruptedJobs`, which marks sync jobs left over from a previous run as failed), and it gives up after 10 seconds. If that write fails or times out, route registration fails and the service does not start.
 
 With `RUN_MIGRATION=false` the schema must already exist: otherwise startup stops at location recovery, because the `location_sync_jobs` table is missing.
 
@@ -805,26 +810,48 @@ func (h *Handler) Create(ctx *gin.Context) {
 }
 ```
 
-### 7. Route registrar
+### 7. Router package
 
-`internal/router/projects.go` is one function with the registrar signature `func(r gin.IRouter, d Deps) error`. It builds its own repository, service, and handler from `Deps` (`Config`, `DB`, `SQLDB`, `Redis` which may be nil, `Kit`, `Storage` which is nil when media is disabled, `Lifecycle`), mounts routes relative to the group it receives, and returns an error instead of panicking or exiting. It opens no connections. The router is the one place that passes `gokit.CreateUUID` as the ID generator. Protect routes with `d.Kit.Auth()` first, then `d.Kit.Can(resource, action)`:
+`internal/router/projects/` has two files. `wire.go` is `func wire(d module.Deps) (*wired, error)`: it builds the repository, service and handler from `module.Deps` (`Config`, `DB`, `SQLDB`, `Redis` which may be nil, `Kit`, `Storage` which is nil when media is disabled, `Lifecycle`), runs any startup recovery and registers shutdown hooks, opens no connections, and is the one place that passes `gokit.CreateUUID` as the ID generator. `register.go` is `func Register(r gin.IRouter, d module.Deps) error`: it calls `wire`, mounts routes relative to the group it receives, and returns an error instead of panicking or exiting. Protect routes with `d.Kit.Auth()` first, then `d.Kit.Can(resource, action)`. Import it elsewhere as `routerprojects`.
 
 ```go
-package router
+// internal/router/projects/wire.go
+package projects
 
 import (
-	"github.com/gin-gonic/gin"
 	"github.com/zazhedho/gokit"
 
 	httpprojects "starter-kit/internal/handlers/http/projects"
 	repositoryprojects "starter-kit/internal/repositories/projects"
+	"starter-kit/internal/router/module"
 	serviceprojects "starter-kit/internal/services/projects"
 )
 
-func registerProjects(r gin.IRouter, d Deps) error {
+type wired struct{ handler *httpprojects.Handler }
+
+func wire(d module.Deps) (*wired, error) {
 	repo := repositoryprojects.NewRepository(d.DB)
 	svc := serviceprojects.NewService(repo, gokit.CreateUUID)
-	h := httpprojects.New(svc, d.Kit.Audit(), d.Config.Projects.PageSize)
+	return &wired{handler: httpprojects.New(svc, d.Kit.Audit(), d.Config.Projects.PageSize)}, nil
+}
+```
+
+```go
+// internal/router/projects/register.go
+package projects
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"starter-kit/internal/router/module"
+)
+
+func Register(r gin.IRouter, d module.Deps) error {
+	w, err := wire(d)
+	if err != nil {
+		return err
+	}
+	h := w.handler
 
 	projects := r.Group("/projects").Use(d.Kit.Auth())
 	{
@@ -835,17 +862,17 @@ func registerProjects(r gin.IRouter, d Deps) error {
 }
 ```
 
-If the module starts background work, register its stop function with `d.Lifecycle.OnClose("projects job", svc.Close)`, and call any startup recovery (like `registerLocation` does with `RecoverInterruptedJobs`) in the registrar, never in the constructor. Avoid role-name checks for module access (`d.Kit.Role(...)`) unless the case is explicitly special, like `superadmin`.
+If the module starts background work, register its stop function in `wire` with `d.Lifecycle.OnClose("projects job", svc.Close)`, and call any startup recovery (like `internal/router/location/wire.go` does with `RecoverInterruptedJobs`) there, never in the constructor. Avoid role-name checks for module access (`d.Kit.Role(...)`) unless the case is explicitly special, like `superadmin`.
 
-### 8. One line in `router.New`
+### 8. One line in `modules.go`
 
-Add the module to the registrar list in `internal/router/router.go`. Modules under `/api` go in `apiRegistrars` (mounted after authkit's own routes); only probes belong in `rootRegistrars`. A registrar error stops startup with `register projects routes: ...`.
+Add the module to the list in `internal/router/modules.go`, alphabetically. Everything in it is mounted under `/api` after authkit's own routes; probes live in `router.go`. A registration error stops startup with `register projects routes: ...`.
 
 ```go
-var apiRegistrars = []registrar{
-	{"location", registerLocation},
-	{"media", registerMedia},
-	{"projects", registerProjects},
+var modules = []module.Entry{
+	{Name: "location", Register: routerlocation.Register},
+	{Name: "media", Register: routermedia.Register},
+	{Name: "projects", Register: routerprojects.Register},
 }
 ```
 
@@ -881,17 +908,17 @@ If the module needs settings, add them to `internal/config`, never read the envi
    problems = append(problems, c.validateProjects()...)
    ```
 
-4. document the variable, with its default as a comment, in `.env.example`, and use it from the registrar as `d.Config.Projects.PageSize`.
+4. document the variable, with its default as a comment, in `.env.example`, and use it from `wire` as `d.Config.Projects.PageSize`.
 
-### 10. Add the routes to the route-table test
+### 10. Pin the routes in the module's own test
 
-`internal/router/routes_test.go` lists this service's own routes by hand, in the variables `ownRoutesWithoutMedia` (and `mediaRoutes` for the media routes). A new module's routes make `TestRouteTable` fail until they are added there, so add them on purpose:
+`internal/router/projects/routes_test.go` lists the module's exact routes and checks which are protected; build the test Deps with `internal/testutil/routertest` (`NewDeps`, `Mount`, `RouteSet`, `Serve`). The central `TestRouteTable` in `internal/router` derives its expectation from `modules.go`, so it needs no edit; it fails if a module mounts a route another module or authkit already owns.
 
 ```go
-ownRoutesWithoutMedia = []string{
-	// ...existing routes...
-	"GET /api/projects",
-	"POST /api/projects",
+func TestProjectsMountsExactlyItsRoutes(t *testing.T) {
+	d := routertest.NewDeps(t, nil)
+	got := routertest.SortedKeys(routertest.RouteSet(routertest.Mount(t, Register, d)))
+	// compare with the pinned list: "GET /api/projects", "POST /api/projects"
 }
 ```
 
