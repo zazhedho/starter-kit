@@ -14,3 +14,17 @@ CREATE TABLE IF NOT EXISTS media (
 
 CREATE INDEX IF NOT EXISTS idx_media_owner_user_id ON media(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_media_deleted_at ON media(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_media_owner_created_at ON media(owner_user_id, created_at DESC);
+
+-- Acting on your own files needs no permission; the _any actions cover everyone's.
+INSERT INTO permissions (id, name, display_name, resource, action) VALUES
+    (gen_random_uuid(), 'list_any_media', 'List Any Media', 'media', 'list_any'),
+    (gen_random_uuid(), 'delete_any_media', 'Delete Any Media', 'media', 'delete_any')
+ON CONFLICT (name) DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.resource = 'media' AND p.action IN ('list_any', 'delete_any')
+WHERE r.name IN ('admin', 'superadmin')
+ON CONFLICT DO NOTHING;
