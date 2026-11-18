@@ -5,9 +5,9 @@ import (
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 
-	mediaHandler "starter-kit/internal/handlers/http/media"
-	mediaRepo "starter-kit/internal/repositories/media"
-	mediaSvc "starter-kit/internal/services/media"
+	httpmedia "starter-kit/internal/handlers/http/media"
+	repositorymedia "starter-kit/internal/repositories/media"
+	servicemedia "starter-kit/internal/services/media"
 )
 
 // registerMedia mounts the media routes, or nothing when media is disabled.
@@ -19,9 +19,13 @@ func registerMedia(r gin.IRouter, d Deps) error {
 		return nil
 	}
 
-	repo := mediaRepo.NewMediaRepo(d.DB)
-	svc := mediaSvc.NewMediaService(repo, d.Storage, m.MaxFileSizeBytes, m.AllowedContentTypes)
-	h := mediaHandler.NewMediaHandler(svc, d.Kit.Audit(), m.UploadTimeout)
+	repo := repositorymedia.NewRepository(d.DB)
+	svc := servicemedia.NewService(repo, d.Storage, servicemedia.Options{
+		MaxFileSize:         m.MaxFileSizeBytes,
+		AllowedContentTypes: m.AllowedContentTypes,
+		NewID:               gokit.CreateUUID,
+	})
+	h := httpmedia.New(svc, d.Kit.Audit(), m.UploadTimeout)
 
 	media := r.Group("/media").Use(d.Kit.Auth())
 	{

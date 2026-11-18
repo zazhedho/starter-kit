@@ -1,89 +1,93 @@
-package servicelocation
+package location
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/gokit"
-	"github.com/zazhedho/logus"
-	locationcache "starter-kit/internal/cache/location"
-	domainlocation "starter-kit/internal/domain/location"
-	"starter-kit/internal/dto"
-	interfacelocation "starter-kit/internal/interfaces/location"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
+	"github.com/google/uuid"
+
+	domainlocation "starter-kit/internal/domain/location"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
-type LocationService struct {
-	Repo       interfacelocation.RepoLocationInterface
-	Redis      *redis.Client
-	HTTPClient *http.Client
+// Service holds the location use cases. Build it with NewService; a running
+// sync belongs to the Service until Close.
+type Service struct {
+	repo       Repository
+	cache      Cache
+	httpClient *http.Client
+	newID      func() string
 	syncing    atomic.Bool
 
 	baseURL    string
 	sourceYear string
 	cacheTTL   time.Duration
+
+	// lifecycle: background sync jobs run under baseCtx, which Close cancels.
+	baseCtx context.Context
+	cancel  context.CancelFunc
+	mu      sync.Mutex
+	closed  bool
+	jobs    sync.WaitGroup
+	// settleBy is the deadline Close was given: the final state write of a
+	// canceled job must end by then. Zero until Close is called with one.
+	settleBy time.Time
 }
 
-// Options is what the service needs besides its repository. Redis may be nil.
-type Options struct {
-	Redis             *redis.Client
-	BaseURL           string
-	SourceYear        string
-	Timeout, CacheTTL time.Duration
-}
-
-type syncProgress struct {
-	Message       string
-	ProvinceCount int
-	CityCount     int
-	DistrictCount int
-	VillageCount  int
-}
-
-// defaultHTTPTimeout bounds outbound calls when Options.Timeout is not positive.
-const defaultHTTPTimeout = 20 * time.Second
-
-var ErrLocationSyncRunning = errors.New("location sync is already running")
-
-func NewLocationService(repo interfacelocation.RepoLocationInterface, opts Options) *LocationService {
+// NewService builds the service. It performs no I/O: call RecoverInterruptedJobs
+// once at startup, and Close at shutdown.
+func NewService(repo Repository, opts Options) *Service {
 	// Zero would mean "no timeout" to http.Client; never allow that, so a
 	// project that builds Options by hand stays safe.
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = defaultHTTPTimeout
 	}
-	service := &LocationService{
-		Repo:       repo,
-		Redis:      opts.Redis,
-		HTTPClient: &http.Client{Timeout: timeout},
+	cache := opts.Cache
+	if cache == nil {
+		cache = noopCache{}
+	}
+	newID := opts.NewID
+	if newID == nil {
+		newID = newUUIDv7
+	}
+	baseCtx, cancel := context.WithCancel(context.Background())
+	return &Service{
+		repo:       repo,
+		cache:      cache,
+		httpClient: &http.Client{Timeout: timeout},
+		newID:      newID,
 		baseURL:    opts.BaseURL,
 		sourceYear: opts.SourceYear,
 		cacheTTL:   opts.CacheTTL,
+		baseCtx:    baseCtx,
+		cancel:     cancel,
 	}
-
-	if err := service.Repo.FailActiveSyncJobs(context.Background(), "Service restarted before the previous location sync completed."); err != nil {
-		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("failed to mark interrupted location sync jobs: %v", err))
-	}
-
-	return service
 }
 
-func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, error) {
-	cacheKey := locationcache.ProvinceKey()
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+// newUUIDv7 returns a time-ordered UUID, falling back to a random one if the
+// clock source fails. The router normally injects the same behavior.
+func newUUIDv7() string {
+	if id, err := uuid.NewV7(); err == nil {
+		return id.String()
+	}
+	return uuid.NewString()
+}
+
+func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
+	cacheKey := provinceKey()
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
 	}
 
-	rows, err := s.Repo.ListProvinces(ctx)
+	rows, err := s.repo.ListProvinces(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +98,7 @@ func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, erro
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
-		if err := s.Repo.UpsertProvinces(ctx, fetched); err != nil {
+		if err := s.repo.UpsertProvinces(ctx, fetched); err != nil {
 			return nil, err
 		}
 		locations = mapProvinces(fetched)
@@ -103,15 +107,15 @@ func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, erro
 	return locations, nil
 }
 
-func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error) {
-	cacheKey := locationcache.CityKey(provinceCode)
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocation.Location, error) {
+	cacheKey := cityKey(provinceCode)
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
 	}
 
-	rows, err := s.Repo.ListCitiesByProvince(ctx, provinceCode)
+	rows, err := s.repo.ListCitiesByProvince(ctx, provinceCode)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +126,7 @@ func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]d
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
-		if err := s.Repo.UpsertCities(ctx, fetched); err != nil {
+		if err := s.repo.UpsertCities(ctx, fetched); err != nil {
 			return nil, err
 		}
 		locations = mapCities(fetched)
@@ -131,22 +135,22 @@ func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]d
 	return locations, nil
 }
 
-func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error) {
-	cacheKey := locationcache.DistrictKey(cityCode)
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocation.Location, error) {
+	cacheKey := districtKey(cityCode)
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
 	}
 
-	rows, err := s.Repo.ListDistrictsByCity(ctx, cityCode)
+	rows, err := s.repo.ListDistrictsByCity(ctx, cityCode)
 	if err != nil {
 		return nil, err
 	}
 
 	locations := mapDistricts(rows)
 	if len(locations) == 0 {
-		city, cityErr := s.Repo.GetCityByCode(ctx, cityCode)
+		city, cityErr := s.repo.GetCityByCode(ctx, cityCode)
 		if cityErr != nil {
 			return nil, cityErr
 		}
@@ -154,7 +158,7 @@ func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]d
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
-		if err := s.Repo.UpsertDistricts(ctx, fetched); err != nil {
+		if err := s.repo.UpsertDistricts(ctx, fetched); err != nil {
 			return nil, err
 		}
 		locations = mapDistricts(fetched)
@@ -163,26 +167,26 @@ func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]d
 	return locations, nil
 }
 
-func (s *LocationService) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
-	cacheKey := locationcache.VillageKey(districtCode)
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error) {
+	cacheKey := villageKey(districtCode)
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
 	}
 
-	rows, err := s.Repo.ListVillagesByDistrict(ctx, districtCode)
+	rows, err := s.repo.ListVillagesByDistrict(ctx, districtCode)
 	if err != nil {
 		return nil, err
 	}
 
 	locations := mapVillages(rows)
 	if len(locations) == 0 {
-		district, districtErr := s.Repo.GetDistrictByCode(ctx, districtCode)
+		district, districtErr := s.repo.GetDistrictByCode(ctx, districtCode)
 		if districtErr != nil {
 			return nil, districtErr
 		}
-		city, cityErr := s.Repo.GetCityByCode(ctx, district.CityCode)
+		city, cityErr := s.repo.GetCityByCode(ctx, district.CityCode)
 		if cityErr != nil {
 			return nil, cityErr
 		}
@@ -190,7 +194,7 @@ func (s *LocationService) GetVillage(ctx context.Context, districtCode string) (
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
-		if err := s.Repo.UpsertVillages(ctx, fetched); err != nil {
+		if err := s.repo.UpsertVillages(ctx, fetched); err != nil {
 			return nil, err
 		}
 		locations = mapVillages(fetched)
@@ -199,55 +203,63 @@ func (s *LocationService) GetVillage(ctx context.Context, districtCode string) (
 	return locations, nil
 }
 
-func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationRequest) (dto.LocationSyncJob, error) {
+// StartSync queues a sync job and runs it in the background. requestedBy is the
+// id of the user who asked for it.
+func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, requestedBy string) (dtolocation.SyncJob, error) {
 	normalizedReq, err := s.normalizeAndValidateRequest(req)
 	if err != nil {
-		return dto.LocationSyncJob{}, err
+		return dtolocation.SyncJob{}, err
 	}
-	requestedByUserID := authkit.ScopeFrom(ctx).ActorUserID()
 
-	activeJob, err := s.Repo.GetActiveSyncJob(ctx)
+	activeJob, err := s.repo.GetActiveSyncJob(ctx)
 	switch {
 	case err == nil:
-		return mapSyncJob(activeJob), ErrLocationSyncRunning
-	case !errors.Is(err, gorm.ErrRecordNotFound):
-		return dto.LocationSyncJob{}, err
+		return mapSyncJob(activeJob), domainlocation.ErrSyncRunning
+	case !errors.Is(err, domainlocation.ErrNotFound):
+		return dtolocation.SyncJob{}, err
 	}
 
 	now := time.Now()
 	job := domainlocation.SyncJob{
-		ID:           gokit.CreateUUID(),
+		ID:           s.newID(),
 		Status:       "queued",
 		Level:        normalizedReq.Level,
 		Year:         normalizedReq.Year,
 		ProvinceCode: normalizedReq.ProvinceCode,
 		CityCode:     normalizedReq.CityCode,
 		DistrictCode: normalizedReq.DistrictCode,
-		RequestedBy:  requestedByUserID,
+		RequestedBy:  requestedBy,
 		Message:      "Location sync queued",
 		CreatedAt:    now,
 		UpdatedAt:    &now,
 	}
 
-	if err := s.Repo.CreateSyncJob(ctx, &job); err != nil {
-		return dto.LocationSyncJob{}, err
+	if !s.startJob() {
+		return dtolocation.SyncJob{}, ErrClosed
+	}
+	if err := s.repo.CreateSyncJob(ctx, &job); err != nil {
+		s.jobs.Done()
+		return dtolocation.SyncJob{}, err
 	}
 
-	go s.runSyncJob(job.ID, normalizedReq)
+	go func() {
+		defer s.jobs.Done()
+		s.runSyncJob(job.ID, normalizedReq)
+	}()
 
 	return mapSyncJob(job), nil
 }
 
-func (s *LocationService) GetSyncJob(ctx context.Context, id string) (dto.LocationSyncJob, error) {
-	job, err := s.Repo.GetSyncJobByID(ctx, id)
+func (s *Service) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error) {
+	job, err := s.repo.GetSyncJobByID(ctx, id)
 	if err != nil {
-		return dto.LocationSyncJob{}, err
+		return dtolocation.SyncJob{}, err
 	}
 
 	return mapSyncJob(job), nil
 }
 
-func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationRequest) (dto.SyncLocationRequest, error) {
+func (s *Service) normalizeAndValidateRequest(req dtolocation.SyncRequest) (dtolocation.SyncRequest, error) {
 	req.Level = normalizeSyncLevel(req.Level)
 	req.Year = s.normalizeSyncYear(req.Year)
 
@@ -256,362 +268,24 @@ func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationReques
 		return req, nil
 	case "city":
 		if req.ProvinceCode == "" {
-			return dto.SyncLocationRequest{}, errors.New("province_code is required for city sync")
+			return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("province_code is required for city sync")
 		}
 		return req, nil
 	case "district":
 		if req.ProvinceCode == "" || req.CityCode == "" {
-			return dto.SyncLocationRequest{}, errors.New("province_code and city_code are required for district sync")
+			return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("province_code and city_code are required for district sync")
 		}
 		return req, nil
 	case "village":
 		if req.ProvinceCode == "" || req.CityCode == "" || req.DistrictCode == "" {
-			return dto.SyncLocationRequest{}, errors.New("province_code, city_code, and district_code are required for village sync")
+			return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("province_code, city_code, and district_code are required for village sync")
 		}
 		return req, nil
 	case "all":
 		return req, nil
 	default:
-		return dto.SyncLocationRequest{}, errors.New("invalid sync level")
+		return dtolocation.SyncRequest{}, domainlocation.NewInvalidSync("invalid sync level")
 	}
-}
-
-func (s *LocationService) runSyncJob(jobID string, req dto.SyncLocationRequest) {
-	jobCtx := context.Background()
-	if !s.syncing.CompareAndSwap(false, true) {
-		s.markSyncJobFailed(jobCtx, jobID, "Another location sync is already running in this service instance.")
-		return
-	}
-	defer s.syncing.Store(false)
-
-	job, err := s.Repo.GetSyncJobByID(jobCtx, jobID)
-	if err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s: %v", jobID, err))
-		return
-	}
-
-	startedAt := time.Now()
-	job.Status = "running"
-	job.Message = "Location sync is running"
-	job.StartedAt = &startedAt
-	job.UpdatedAt = &startedAt
-	if err := s.Repo.UpdateSyncJob(jobCtx, &job); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as running: %v", jobID, err))
-		return
-	}
-
-	result, err := s.sync(jobCtx, req, func(progress syncProgress) {
-		s.applySyncProgress(&job, progress)
-		if updateErr := s.Repo.UpdateSyncJob(jobCtx, &job); updateErr != nil {
-			logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("failed to update location sync job progress %s: %v", job.ID, updateErr))
-		}
-	})
-	if err != nil {
-		s.markSyncJobFailed(jobCtx, job.ID, err.Error())
-		return
-	}
-
-	s.applySyncProgress(&job, result)
-	finishedAt := time.Now()
-	job.Status = "completed"
-	job.Message = "Location sync completed"
-	job.ErrorMessage = ""
-	job.FinishedAt = &finishedAt
-	job.UpdatedAt = &finishedAt
-	if err := s.Repo.UpdateSyncJob(jobCtx, &job); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as completed: %v", job.ID, err))
-	}
-}
-
-func (s *LocationService) markSyncJobFailed(ctx context.Context, jobID, errorMessage string) {
-	job, err := s.Repo.GetSyncJobByID(ctx, jobID)
-	if err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
-		return
-	}
-
-	finishedAt := time.Now()
-	job.Status = "failed"
-	job.Message = "Location sync failed"
-	job.ErrorMessage = errorMessage
-	job.FinishedAt = &finishedAt
-	job.UpdatedAt = &finishedAt
-	if err := s.Repo.UpdateSyncJob(ctx, &job); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as failed: %v", job.ID, err))
-	}
-}
-
-func (s *LocationService) applySyncProgress(job *domainlocation.SyncJob, progress syncProgress) {
-	job.Message = progress.Message
-	job.ProvinceCount = progress.ProvinceCount
-	job.CityCount = progress.CityCount
-	job.DistrictCount = progress.DistrictCount
-	job.VillageCount = progress.VillageCount
-	job.UpdatedAt = new(time.Now())
-}
-
-func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest, progress func(syncProgress)) (syncProgress, error) {
-	switch req.Level {
-	case "province":
-		progress(syncProgress{Message: "Fetching provinces"})
-		provinces, err := s.fetchProvinces(ctx, req.Year)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.Repo.UpsertProvinces(ctx, provinces); err != nil {
-			return syncProgress{}, err
-		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.ProvinceKey())
-		return syncProgress{
-			Message:       "Province sync completed",
-			ProvinceCount: len(provinces),
-		}, nil
-	case "city":
-		progress(syncProgress{Message: fmt.Sprintf("Fetching cities for province %s", req.ProvinceCode)})
-		cities, err := s.fetchCities(ctx, req.Year, req.ProvinceCode)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.Repo.UpsertCities(ctx, cities); err != nil {
-			return syncProgress{}, err
-		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.CityKey(req.ProvinceCode))
-		return syncProgress{
-			Message:   "City sync completed",
-			CityCount: len(cities),
-		}, nil
-	case "district":
-		progress(syncProgress{Message: fmt.Sprintf("Fetching districts for city %s", req.CityCode)})
-		districts, err := s.fetchDistricts(ctx, req.Year, req.ProvinceCode, req.CityCode)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
-			return syncProgress{}, err
-		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.DistrictKey(req.CityCode))
-		return syncProgress{
-			Message:       "District sync completed",
-			DistrictCount: len(districts),
-		}, nil
-	case "village":
-		progress(syncProgress{Message: fmt.Sprintf("Fetching villages for district %s", req.DistrictCode)})
-		villages, err := s.fetchVillages(ctx, req.Year, req.ProvinceCode, req.CityCode, req.DistrictCode)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
-			return syncProgress{}, err
-		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.VillageKey(req.DistrictCode))
-		return syncProgress{
-			Message:      "Village sync completed",
-			VillageCount: len(villages),
-		}, nil
-	case "all":
-		return s.syncAll(ctx, req.Year, progress)
-	default:
-		return syncProgress{}, errors.New("invalid sync level")
-	}
-}
-
-func (s *LocationService) syncAll(ctx context.Context, year string, progress func(syncProgress)) (syncProgress, error) {
-	progress(syncProgress{Message: "Fetching provinces"})
-	provinces, err := s.fetchProvinces(ctx, year)
-	if err != nil {
-		return syncProgress{}, err
-	}
-	if err := s.Repo.UpsertProvinces(ctx, provinces); err != nil {
-		return syncProgress{}, err
-	}
-	locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.ProvinceKey())
-
-	totals := syncProgress{ProvinceCount: len(provinces)}
-	progress(syncProgress{
-		Message:       "Provinces synced",
-		ProvinceCount: len(provinces),
-	})
-
-	for provinceIndex, province := range provinces {
-		if err := s.syncProvince(ctx, year, provinces, provinceIndex, province, &totals, progress); err != nil {
-			return syncProgress{}, err
-		}
-	}
-
-	locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.Prefix())
-	return syncProgress{
-		Message:       "Full location sync completed",
-		ProvinceCount: len(provinces),
-		CityCount:     totals.CityCount,
-		DistrictCount: totals.DistrictCount,
-		VillageCount:  totals.VillageCount,
-	}, nil
-}
-
-func (s *LocationService) syncProvince(ctx context.Context, year string, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
-	cities, err := s.fetchCities(ctx, year, province.Code)
-	if err != nil {
-		return err
-	}
-	if len(cities) > 0 {
-		if err := s.Repo.UpsertCities(ctx, cities); err != nil {
-			return err
-		}
-		totals.CityCount += len(cities)
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.CityKey(province.Code))
-	}
-	progress(syncProgress{
-		Message:       fmt.Sprintf("Processed province %d/%d: %s", index+1, len(provinces), province.Name),
-		ProvinceCount: totals.ProvinceCount,
-		CityCount:     totals.CityCount,
-		DistrictCount: totals.DistrictCount,
-		VillageCount:  totals.VillageCount,
-	})
-
-	for cityIndex, city := range cities {
-		if err := s.syncCity(ctx, year, province, city, totals); err != nil {
-			return err
-		}
-		progress(syncProgress{
-			Message:       fmt.Sprintf("Processed city %d/%d in province %s", cityIndex+1, len(cities), province.Name),
-			ProvinceCount: totals.ProvinceCount,
-			CityCount:     totals.CityCount,
-			DistrictCount: totals.DistrictCount,
-			VillageCount:  totals.VillageCount,
-		})
-	}
-	return nil
-}
-
-func (s *LocationService) syncCity(ctx context.Context, year string, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
-	districts, err := s.fetchDistricts(ctx, year, province.Code, city.Code)
-	if err != nil {
-		return err
-	}
-	if len(districts) > 0 {
-		if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
-			return err
-		}
-		totals.DistrictCount += len(districts)
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.DistrictKey(city.Code))
-	}
-	for _, district := range districts {
-		villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
-		if err != nil {
-			return err
-		}
-		if len(villages) == 0 {
-			continue
-		}
-		if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
-			return err
-		}
-		totals.VillageCount += len(villages)
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.VillageKey(district.Code))
-	}
-	return nil
-}
-
-func (s *LocationService) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
-	_ = year
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/provinces", nil), "province")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.Province, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.Province{
-			Code:      code,
-			Name:      name,
-			CreatedAt: now,
-		})
-	}
-
-	return sortProvinces(items), nil
-}
-
-func (s *LocationService) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
-	_ = year
-	cleanProvinceCode := normalizeCodeSegment(provinceCode)
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/regencies", map[string]string{
-		"province_code": cleanProvinceCode,
-		"code_format":   "short",
-	}), "city")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.City, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.City{
-			Code:         normalizeChildCode(cleanProvinceCode, code),
-			ProvinceCode: cleanProvinceCode,
-			Name:         name,
-			CreatedAt:    now,
-		})
-	}
-
-	return sortCities(items), nil
-}
-
-func (s *LocationService) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
-	_ = year
-	cleanProvinceCode := normalizeCodeSegment(provinceCode)
-	cleanCityCode := normalizeCodeSegment(cityCode)
-	cityParam := childCodeParam(cleanProvinceCode, cleanCityCode)
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/districts", map[string]string{
-		"province_code": cleanProvinceCode,
-		"regency_code":  cityParam,
-		"code_format":   "short",
-	}), "district")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.District, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.District{
-			Code:      normalizeChildCode(cleanCityCode, code),
-			CityCode:  cleanCityCode,
-			Name:      name,
-			CreatedAt: now,
-		})
-	}
-
-	return sortDistricts(items), nil
-}
-
-func (s *LocationService) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
-	_ = year
-	cleanProvinceCode := normalizeCodeSegment(provinceCode)
-	cleanCityCode := normalizeCodeSegment(cityCode)
-	cleanDistrictCode := normalizeCodeSegment(districtCode)
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/villages", map[string]string{
-		"province_code": cleanProvinceCode,
-		"regency_code":  childCodeParam(cleanProvinceCode, cleanCityCode),
-		"district_code": childCodeParam(cleanCityCode, cleanDistrictCode),
-		"code_format":   "short",
-	}), "village")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.Village, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.Village{
-			Code:         normalizeChildCode(cleanDistrictCode, code),
-			DistrictCode: cleanDistrictCode,
-			Name:         name,
-			CreatedAt:    now,
-		})
-	}
-
-	return sortVillages(items), nil
 }
 
 func normalizeSyncLevel(level string) string {
@@ -625,7 +299,7 @@ func normalizeSyncLevel(level string) string {
 	}
 }
 
-func (s *LocationService) normalizeSyncYear(year string) string {
+func (s *Service) normalizeSyncYear(year string) string {
 	if year != "" {
 		return year
 	}
@@ -636,5 +310,3 @@ func (s *LocationService) normalizeSyncYear(year string) string {
 
 	return fmt.Sprintf("%d", time.Now().Year())
 }
-
-var _ interfacelocation.ServiceLocationInterface = (*LocationService)(nil)

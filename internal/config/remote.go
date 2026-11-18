@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zazhedho/gokit"
-	"github.com/zazhedho/logus"
 	"os"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
+	"github.com/zazhedho/gokit"
+	"github.com/zazhedho/logus"
 )
 
 // remoteConfigCacheKey is the Redis key under which the remote configuration is

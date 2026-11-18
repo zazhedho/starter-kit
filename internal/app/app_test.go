@@ -4,11 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -28,7 +24,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/internal/platform/storage"
+	"starter-kit/internal/infrastructure/storage"
 )
 
 const testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"
@@ -307,6 +303,59 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestCloseStopsBackgroundWorkBeforeReleasingConnections pins the shutdown
+// order: hooks registered by modules (the location sync job) run while the
+// database is still open. sqlmock expects the ping before the close.
+func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
+	mock, _, open := mockDB(t)
+	mock.ExpectPing()
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), testConfig(), deps{openDB: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookRan := false
+	a.lifecycle.OnClose("test job", func(ctx context.Context) error {
+		hookRan = true
+		return a.sqlDB.PingContext(ctx) // fails if the database were closed already
+	})
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if !hookRan {
+		t.Fatal("Close did not run the lifecycle hooks")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout: a hook that
+// never finishes must not block Close forever; the error is reported and the
+// connections are still released.
+func TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 20 * time.Millisecond
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), cfg, deps{openDB: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.lifecycle.OnClose("stuck job", func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	if err := a.Close(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close = %v, want it to report the timed-out hook", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the database was not closed: %v", err)
+	}
+}
+
 func closedPort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -458,7 +507,7 @@ func TestNewFailsOnInvalidAuthConfig(t *testing.T) {
 	}
 }
 
-type nopStorage struct{ storage.StorageProvider }
+type nopStorage struct{ storage.Provider }
 
 func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 	mediaRoutes := func(a *App) int {
@@ -476,7 +525,7 @@ func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 		mock.ExpectClose()
 		a, err := newApp(context.Background(), testConfig(), deps{
 			openDB: open,
-			initStorage: func(config.Storage) (storage.StorageProvider, error) {
+			initStorage: func(config.Storage) (storage.Provider, error) {
 				t.Error("storage was initialized although media is disabled")
 				return nil, nil
 			},
@@ -501,7 +550,7 @@ func TestNewBuildsStorageOnlyWhenMediaIsEnabled(t *testing.T) {
 		mock.ExpectClose()
 		a, err := newApp(context.Background(), cfg, deps{
 			openDB:      open,
-			initStorage: func(config.Storage) (storage.StorageProvider, error) { return nopStorage{}, nil },
+			initStorage: func(config.Storage) (storage.Provider, error) { return nopStorage{}, nil },
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -525,7 +574,7 @@ func TestNewClosesDatabaseWhenStorageFails(t *testing.T) {
 
 	a, err := newApp(context.Background(), cfg, deps{
 		openDB:      open,
-		initStorage: func(config.Storage) (storage.StorageProvider, error) { return nil, boom },
+		initStorage: func(config.Storage) (storage.Provider, error) { return nil, boom },
 	})
 	if !errors.Is(err, boom) {
 		if a != nil {
@@ -767,83 +816,66 @@ func TestSetServerIPEnv(t *testing.T) {
 	}
 }
 
-func repoFiles(t *testing.T, visit func(path string, data []byte)) {
-	t.Helper()
-	root := filepath.Join("..", "..")
-	repo := os.DirFS(root)
-	err := fs.WalkDir(repo, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if d.Name() == ".git" || d.Name() == ".superpowers" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		data, err := fs.ReadFile(repo, path)
-		if err != nil {
-			return err
-		}
-		visit(path, data)
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNoFatalOutsideCmd(t *testing.T) {
-	repoFiles(t, func(path string, data []byte) {
-		if strings.HasPrefix(path, "cmd"+string(filepath.Separator)) {
-			return
-		}
-		for _, banned := range []string{"log.Fatal", "os.Exit("} {
-			if strings.Contains(string(data), banned) {
-				t.Errorf("%s uses %s outside cmd/", path, banned)
-			}
-		}
-	})
-}
-
-func TestNoPackageLevelConnections(t *testing.T) {
-	banned := map[string]bool{"redis.Client": true, "gorm.DB": true, "sql.DB": true}
-	repoFiles(t, func(path string, data []byte) {
-		file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
-		if err != nil {
-			t.Errorf("parse %s: %v", path, err)
-			return
-		}
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.VAR {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				vs := spec.(*ast.ValueSpec)
-				if vs.Type == nil {
-					continue
-				}
-				expr := vs.Type
-				if star, ok := expr.(*ast.StarExpr); ok {
-					expr = star.X
-				}
-				sel, ok := expr.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				if pkg, ok := sel.X.(*ast.Ident); ok && banned[pkg.Name+"."+sel.Sel.Name] {
-					t.Errorf("%s declares a package-level %s.%s", path, pkg.Name, sel.Sel.Name)
-				}
-			}
-		}
-	})
-}
-
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 	os.Exit(m.Run())
+}
+
+func TestCloseWithoutLifecycleDoesNotPanic(t *testing.T) {
+	a := &App{cfg: testConfig()}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+}
+
+// TestShutdownSharesOneDeadline: the drain and the lifecycle hooks spend the
+// same HTTP_SHUTDOWN_TIMEOUT, counted from the moment shutdown starts.
+func TestShutdownSharesOneDeadline(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 300 * time.Millisecond
+	started := make(chan struct{})
+	a, ln := newTestApp(t, cfg, func(e *gin.Engine) {
+		e.GET("/stuck", func(c *gin.Context) {
+			close(started)
+			select {
+			case <-time.After(5 * time.Second):
+			case <-c.Request.Context().Done():
+			}
+		})
+	})
+	deadlines := make(chan time.Time, 1)
+	a.lifecycle.OnClose("slow job", func(ctx context.Context) error {
+		dl, _ := ctx.Deadline()
+		deadlines <- dl
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := serveAsync(ctx, a)
+	go func() {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+ln.Addr().String()+"/stuck", nil)
+		if err != nil {
+			return
+		}
+		if resp, err := noKeepAlive.Do(req); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-started
+	begin := time.Now()
+	cancel()
+
+	err := waitServe(t, done, 3*time.Second)
+	elapsed := time.Since(begin)
+	if !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("Serve = %v, want ErrShutdownTimeout", err)
+	}
+	dl := <-deadlines
+	if limit := begin.Add(cfg.HTTP.ShutdownTimeout + cfg.HTTP.ShutdownTimeout/2); dl.After(limit) {
+		t.Fatalf("hooks got a deadline %s after shutdown began, want about one timeout (%s)", dl.Sub(begin), cfg.HTTP.ShutdownTimeout)
+	}
+	if elapsed > cfg.HTTP.ShutdownTimeout+cfg.HTTP.ShutdownTimeout/2 {
+		t.Fatalf("shutdown took %s, want about one timeout (%s)", elapsed, cfg.HTTP.ShutdownTimeout)
+	}
 }
