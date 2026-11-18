@@ -1,100 +1,71 @@
 # Starter Kit
 
-Backend starter template for Go services with:
-- Gin HTTP router
-- PostgreSQL via GORM
-- JWT authentication
-- permission-first RBAC
-- runtime application configurations from database
-- optional Redis-based session management and rate limiting
+A Go service template to start a project from. It gives you:
+
+- Gin HTTP router and PostgreSQL through GORM
+- JWT authentication and permission-first RBAC, provided by [`authkit`](https://github.com/zazhedho/authkit)
+- runtime application configuration stored in the database (`app_configs`)
+- optional Redis for sessions, rate limiting and caches
 - one explicit startup and shutdown flow (`cmd/api` -> `internal/app`)
+- a layered module structure whose dependency rule is enforced by tests
 
-This repository is intended to be the foundation for future projects. The current structure is generic on purpose and should be extended by adding new business modules on top of the existing patterns (see [Adding a module](#adding-a-module)).
+Two example modules show the pattern: [`location`](docs/modules/location.md) (reference data and a background
+sync job) and [`media`](docs/modules/media.md) (authenticated file upload to object storage). Build your own
+business features the same way; see [Adding a module](docs/adding-a-module.md). Per-module routes,
+permissions, environment variables and operational notes are in [`docs/modules/`](docs/modules/).
 
-## Core Principles
+Shared plumbing comes from three modules, each imported through one path: [`gokit`](https://github.com/zazhedho/gokit)
+(responses, filters, generic repository, middlewares, utils), [`authkit`](https://github.com/zazhedho/authkit)
+(authentication, RBAC, audit, mailer) and [`logus`](https://github.com/zazhedho/logus) (logging). They are pinned
+to tagged versions in `go.mod`; upgrade them deliberately with `go get <module>@<version>`.
 
-### Permission-First RBAC
+## Quick start
 
-RBAC in this starter kit is designed with these rules:
-- `permission` is the runtime source of truth for access control
-- `role` is a label and a grouping mechanism for permissions
-- `superadmin` is the only exception and bypasses permission checks
-- menu visibility is derived from permissions, not from manual menu assignment
+You need Go (the version in `go.mod`) and a PostgreSQL database.
 
-Practical implications:
-- endpoint access is checked by `d.Kit.Can(resource, action)` (authkit's permission middleware)
-- `/api/menus/me` is built from the permissions owned by the current user
-- if a role has at least one permission for a module resource, the menu for that module can appear automatically
-- parent menus are included automatically when a permitted child menu exists
+```bash
+cp .env.example .env              # then adjust APP_NAME, DB_*, JWT_KEY
+make run                          # same as: go run ./cmd/api
+curl -s localhost:8080/healthcheck
+```
 
-### Runtime Configuration
+The first start migrates the database (`RUN_MIGRATION` defaults to `true`), including authkit's core tables
+(users, roles, permissions, menus, audit trails, app configs). Register a user with `POST /api/user/register`
+and log in with `POST /api/user/login`. The [Postman collection](docs/postman/README.md) has a request for
+every route. `docs/smoke-test.md` is a full check of a fresh checkout.
 
-Application configuration values can be stored in `app_configs` and changed without restarting the service.
+## Core principles
 
-Use this for values such as:
-- external URLs
-- feature toggles
-- integration settings
-- module-specific runtime configuration
+### Permission-first RBAC
 
-Built-in auth feature flags:
-- `auth.public_registration_enabled`: enable or disable public self-registration endpoints
-- `auth.register_otp_enabled`: require OTP verification for public registration
-- `auth.password_reset_email_enabled`: send password reset tokens through the email sender instead of returning a development token in the API response
+- `permission` is the runtime source of truth for access control; `role` is a label that groups permissions.
+- `superadmin` is the only exception and bypasses permission checks.
+- Menu visibility is derived from permissions, not assigned by hand: `/api/menus/me` is built from the
+  permissions of the current user, and a parent menu appears when a permitted child exists.
+- Endpoints are protected with `d.Kit.Auth()` and `d.Kit.Can(resource, action)` (authkit's middleware).
 
-The starter kit now includes a typed helper on top of `app_configs`, so services do not need to parse raw strings manually for common cases such as:
-- `GetString`
-- `GetBool`
-- `GetInt`
-- `GetDuration`
-- `IsEnabled`
-- `DecodeJSON`
+Admin flow: create a role, assign it permissions, and let menus follow. Menus are defined in code and
+migrations (a module's migration seeds its menu and permissions); the admin API does not create or delete them.
 
-Behavior:
-- if a config key does not exist, the helper returns the provided fallback
-- if a config exists but `is_active = false`, the helper also returns the fallback
-- parsing errors are returned only when an active config exists but contains an invalid value
+### Runtime configuration
 
-For feature flags, `is_active` controls whether the stored config overrides the code fallback. The actual on/off value is stored in `value`.
+Values in `app_configs` change without a restart: external URLs, feature toggles, integration settings.
+The built-in auth flags are `auth.public_registration_enabled`, `auth.register_otp_enabled` and
+`auth.password_reset_email_enabled`, seeded by authkit's migrations. A key that is missing or has
+`is_active = false` falls back to the value in code; an active row overrides it through its `value`.
 
-Public registration example:
-- missing config: allowed, because code fallback is `true`
-- `is_active = false`: allowed, because the config is ignored and fallback `true` is used
-- `is_active = true`, `value = true`: allowed
-- `is_active = true`, `value = false`: disabled
-
-Default auth config rows are seeded by authkit's embedded baseline, applied by `kit.Migrate`:
-- `auth.public_registration_enabled`: active, value `true`
-- `auth.register_otp_enabled`: active, value `false`
-- `auth.password_reset_email_enabled`: active, value `false`
-
-## Current Modules
-
-Provided by [`authkit`](https://github.com/zazhedho/authkit) (mounted with `Kit.Mount(api)`, tables created by `Kit.Migrate`):
-- Authentication and user profile
-- Users
-- Roles
-- Permissions
-- Menus
-- Configurations
-- Audit trails
-- Sessions when Redis is enabled
-
-Implemented in this project:
-- Locations
-- Media upload and owner-controlled deletion when `MEDIA_ENABLED=true`
-
-Shared plumbing comes from three modules, each imported through one path: [`github.com/zazhedho/gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils), [`github.com/zazhedho/authkit`](https://github.com/zazhedho/authkit) (authentication, RBAC, audit, mailer) and [`github.com/zazhedho/logus`](https://github.com/zazhedho/logus) (logging). They are pinned to tagged versions in `go.mod`; upgrade them deliberately with `go get <module>@<version>`.
-
-## Project Structure
+## Project structure
 
 ```text
 starter-kit/
 ├── cmd/api/                       # main(): signal handling, exit code (nothing else)
 ├── internal/
 │   ├── app/                       # lifecycle and composition: Run, New, Migrate, Serve, Close
-│   ├── config/                    # the one config package: Config, FromEnv, Validate, LoadDotEnv, LoadRemote (Consul/file)
-│   ├── router/                    # gin engine, global middleware, probes; modules.go lists the mounted modules
+│   ├── config/                    # the one config package: Config, FromEnv, Validate, LoadDotEnv, LoadRemote
+│   │   ├── config.go load.go validate.go   # shared sections, composition, shared validators
+│   │   └── <module>.go            # one file (and _test.go) per module with settings: type, parsing, validation
+│   ├── router/                    # gin engine, global middleware, probes
+│   │   ├── modules.go             # the alphabetical list of mounted modules
 │   │   ├── module/                # leaf: Deps, Lifecycle, Entry (imports no feature module)
 │   │   └── <module>/              # wire.go builds repository -> service -> handler; register.go mounts the routes; routes_test.go pins them
 │   ├── domain/<module>/           # entities and domain errors; no framework except gorm.DeletedAt
@@ -107,11 +78,16 @@ starter-kit/
 │   │   ├── cache/<module>/        # Redis implementations of a service's Cache port
 │   │   ├── database/              # PostgreSQL pool, Redis client
 │   │   └── storage/               # object storage providers (MinIO, Cloudflare R2) and InitStorage
-│   ├── architecture/              # guard tests: the dependency rule, import aliases, package names
+│   ├── architecture/              # guard tests: the dependency rule, import aliases, package names, migration names
 │   └── testutil/                  # test helpers: logcapture, routertest (shared router test Deps and helpers)
-├── migrations/                    # this project's own migrations, named <UTC timestamp>_<module>_<change>
+├── migrations/                    # this project's migrations: <UTC timestamp>_<module>_<change>.{up,down}.sql, see migrations/README.md
 ├── deploy/entrypoint.sh           # container entrypoint (runs the migration when asked)
-├── docs/                          # smoke-test.md, postman/ (API collection)
+├── docs/
+│   ├── adding-a-module.md         # checklist and a worked example
+│   ├── modules/<module>.md        # routes, permissions, env variables, operational notes per module
+│   ├── postman/                   # API collection (see its README)
+│   └── smoke-test.md              # end-to-end check of a fresh checkout
+├── .env.example                   # every variable, grouped by section and by module
 ├── Dockerfile
 ├── Makefile
 └── go.mod
@@ -119,7 +95,7 @@ starter-kit/
 
 All Go code lives under `cmd/` or `internal/`; the repository root has no other Go packages.
 
-Pattern for each module:
+Every module has the same shape:
 
 ```text
 route -> handler -> service -> repository -> database
@@ -184,7 +160,8 @@ Rules that keep the structure uniform:
 - For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods; `internal/handlers/http/media/handler.go` is the example.
 - Background work a module starts (the location sync job) stops through `module.Deps.Lifecycle`. Register a hook with `d.Lifecycle.OnClose(name, fn)`, where `fn` is a `func(context.Context) error` that must return when its context ends; `internal/router/location/wire.go` registers the sync service's `Close` this way. `App.Close` runs the hooks in reverse order of registration with the shutdown context, before it closes Redis and the database.
 
-## Startup Flow
+
+## Startup, shutdown and migrations
 
 ```text
 cmd/api/main.go
@@ -220,105 +197,29 @@ cmd/api/main.go
            HTTP_SHUTDOWN_TIMEOUT counted from the signal; then close Redis, close the database
 ```
 
-The routes are built after the migrations because some modules read their tables when they are registered (`internal/router/location/wire.go` calls `RecoverInterruptedJobs`, which marks sync jobs left over from a previous run as failed), and it gives up after 10 seconds. If that write fails or times out, route registration fails and the service does not start.
+The routes are built after the migrations because a module may read its tables while it is registered (the
+location module fails sync jobs a previous process left behind; see [`docs/modules/location.md`](docs/modules/location.md)).
+A module whose registration fails stops the service with `register <module> routes: ...`. With
+`RUN_MIGRATION=false` the schema must already exist.
 
-With `RUN_MIGRATION=false` the schema must already exist: otherwise startup stops at location recovery, because the `location_sync_jobs` table is missing.
+### Migrations
 
-Run a single instance of the location sync, or deploy accordingly: recovery in a new instance marks the sync jobs of instances that are still running as interrupted.
+- This project's migrations (`migrations/`) are named `<UTC YYYYMMDDHHMMSS>_<module>_<change>.{up,down}.sql`; the
+  rules (naming, one change per pair, rebase rule) are in [`migrations/README.md`](migrations/README.md), and
+  `TestMigrationsAreWellFormed` enforces the format.
+- Authkit's core tables (users, RBAC, audit trails, app configs) come from `Kit.Migrate`, which runs first and
+  keeps its own version table (`authkit_schema_migrations`). The project's migrations use the default
+  `schema_migrations` table and run through the already open database pool, under golang-migrate's advisory lock.
+- A module's migration also seeds its menu and permissions (`go run github.com/zazhedho/authkit/cmd/module-seed`,
+  see [Adding a module](docs/adding-a-module.md)).
 
-## Environment
-
-Copy `.env.example` to `.env` and adjust the values as needed. The `.env` file is optional when `APP_ENV` is already set in the environment (this is how containers run). Variables that are already set always win over `.env`.
-
-Minimum required variables:
-- `APP_NAME` (unique per application; authkit binds tokens to it)
-- `APP_ENV`
-- `PORT` (no default)
-- `DATABASE_URL` (used as it is), or these database parts when `DATABASE_URL` is empty (values may contain spaces, quotes, backslashes, `@`, `:` and `/`):
-  - `DB_HOST`
-  - `DB_PORT`
-  - `DB_USERNAME`
-  - `DB_NAME`
-  - `DB_PASS`
-  - `DB_SSLMODE` (default `disable`)
-- `JWT_KEY` (minimum 32 characters; use a random secret for production)
-- `JWT_EXP`
-- `OTP_SECRET` and `RESET_SECRET`, only when both Redis and SMTP are configured (no defaults)
-- `PATH_MIGRATE` (default `file://migrations`)
-
-Configuration is validated once at startup. An invalid value stops the service with exit code 1 and a message that names the variable but never prints its value, for example `HTTP_READ_TIMEOUT must be a duration such as 30s or 2m`.
-
-### HTTP, time zone, and database pool
-
-Durations use Go syntax (`30s`, `2m`, `1h`). Every duration must be greater than zero.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `APP_TIMEZONE` | `Asia/Jakarta` | IANA time zone of the process and the database session |
-| `HTTP_READ_HEADER_TIMEOUT` | `5s` | time to read request headers |
-| `HTTP_READ_TIMEOUT` | `30s` | time to read the whole request |
-| `HTTP_WRITE_TIMEOUT` | `30s` | time to write the response |
-| `HTTP_IDLE_TIMEOUT` | `60s` | keep-alive idle time |
-| `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time the whole shutdown gets after SIGINT/SIGTERM: running requests and background work (a location sync job) share this one deadline, counted from the signal; closing Redis and the database comes after it |
-| `HTTP_MAX_BODY_MB` | `10` | largest request body, 1-1024 MB; must exceed `MEDIA_MAX_FILE_SIZE_MB` when media is enabled |
-| `MEDIA_UPLOAD_TIMEOUT` | `2m` | read deadline for one `POST /api/media` (replaces `HTTP_READ_TIMEOUT` for that route) |
-| `DB_MAX_OPEN_CONNS` | `100` | pool: open connections, greater than zero |
-| `DB_MAX_IDLE_CONNS` | `10` | pool: idle connections, zero or more |
-| `DB_CONN_MAX_LIFETIME` | `1h` | pool: longest life of a connection |
-| `DB_CONN_MAX_IDLE_TIME` | `5m` | pool: longest idle time of a connection |
-
-A request whose declared `Content-Length` exceeds `HTTP_MAX_BODY_MB` is answered with `413`. A body without a declared length is cut off at the limit while it is read, and the handler answers (most JSON handlers with `400`, the media handler with `413`).
-
-### Database connection
-
-The connection is made with pgx. With the `DB_*` parts the session time zone is always `APP_TIMEZONE`, even if the process environment sets `PGTZ`; with `DATABASE_URL` it is `APP_TIMEZONE` too, unless the URL itself sets its own (`?timezone=...`), which then wins.
-
-`DB_SSLMODE` defaults to `disable` and must be one of `disable`, `allow`, `prefer`, `require`, `verify-ca`, or `verify-full`. Use `require` or stricter outside local development.
-
-After startup, SQL errors and slow queries (200ms or more) are logged at warn level through the service logger. The log shows the SQL with its placeholders (`$1`, `$2`) and never the parameter values; a query that finds no row is not logged.
-
-A failed connection is reported without the driver's text, which can quote the connection string, and without any credential. The message names the kind of problem, so a configuration error can be told from a network one:
-
-| Message | Meaning |
-|---|---|
-| `connect to database: invalid configuration` | `DATABASE_URL` or the `DB_*` parts cannot be parsed |
-| `connect to database: authentication failed` | the server answered and refused the user, the password, or the host (host-access rules also produce this) |
-| `connect to database: server rejected the connection parameters` | the server answered and refused something else, such as an unknown database |
-| `connect to database: connection refused` | nothing is listening at that host and port |
-| `connect to database: timed out` | the host did not answer in time |
-| `connect to database: unreachable` | any other failure to reach the server (for example an unknown host name) |
-
-### Redis
-
-Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is not empty (`REDIS_PORT` defaults to `6379`; `REDIS_PASSWORD` and `REDIS_DB` are optional).
-
-- Not configured: no connection is attempted, startup is immediate, and the features that need Redis are off (sessions and their routes, login/register rate limiting, OTP, email password reset, the permission cache, the media upload rate limit). authkit logs one `WARN` that says so.
-- Configured but unreachable (or wrong password): the service refuses to start, exit code 1, with `open redis: ping redis: connection refused` (or the matching reason). The URL and password are never logged.
-- Configured: the format of `REDIS_URL`, `REDIS_PORT`, and `REDIS_DB` is validated.
-
-`.env.example` ships with the Redis lines commented out; uncomment them to enable Redis.
-
-### Optional settings
-
-- Permission cache settings such as `PERMISSION_CACHE_TTL` or `PERMISSION_CACHE_TTL_SECONDS` (default `5m`). These only apply when Redis is available; otherwise permission checks read from the database. Cache entries are invalidated after role-permission, permission, user-role, and user-delete mutations; TTL remains the fallback when Redis invalidation fails.
-- Location Service settings: `LOCATION_SERVICE_BASE_URL` (default `https://location-service-y7si.onrender.com`) and `LOCATION_SERVICE_TIMEOUT_SECONDS` (default `20`). Location sync imports from this shared service.
-- Media/storage settings for file upload use cases. Set `MEDIA_ENABLED=true` to register media routes. Storage remains optional while disabled; enabling media requires valid MinIO or Cloudflare R2 credentials and an explicit `STORAGE_BASE_URL`; a storage provider that cannot start is a startup failure.
-- `MEDIA_MAX_FILE_SIZE_MB` controls maximum file size (default `5`). `MEDIA_ALLOWED_CONTENT_TYPES` controls accepted MIME types after server-side byte sniffing; client extensions and `Content-Type` headers are not trusted.
-- Media upload rate limiting uses Redis when available. Configure `MEDIA_UPLOAD_RATE_LIMIT` and `MEDIA_UPLOAD_RATE_WINDOW_SECONDS`; without Redis it degrades safely to no distributed rate limit.
-- `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS` for Google login
-- SMTP settings for register OTP and password reset email flows, read into the `SMTP` section of `Config`: `SMTP_HOST`, `SMTP_PORT` (default `587`), `SMTP_USER` (default `apikey`), `SMTP_PASS`, `SMTP_FROM`, `SMTP_SUBJECT`, `RESET_SUBJECT`, `AUTH_EMAIL_APP_NAME`. These stay optional; as soon as one of `SMTP_HOST`, `SMTP_PASS` or `SMTP_FROM` is set, all three are required and `SMTP_PORT` and `SMTP_FROM` are validated. The mailer is only passed to authkit when Redis is configured too; if it cannot be built, the service logs a warning and continues without it. The password never appears in `String`/`%+v` output of the configuration.
-
-## Run Locally
-
-Install dependencies and prepare `.env`, then:
+### Run flags and exit codes
 
 ```bash
 go run ./cmd/api                  # migrate (RUN_MIGRATION, default true), then serve
 go run ./cmd/api -migrate=false   # serve without migrating
 go run ./cmd/api -migrate-only    # migrate, then exit 0 without serving or opening a port
 ```
-
-Flags (all optional; the environment supplies the defaults):
 
 | Flag | Meaning |
 |---|---|
@@ -328,17 +229,16 @@ Flags (all optional; the environment supplies the defaults):
 | `-migrate-only` | run migrations and exit |
 | `-h` | print usage and exit 0 |
 
-`make run` is the same as `go run ./cmd/api`. In Docker, `deploy/entrypoint.sh` (copied to `/app/entrypoint.sh` in the image) adds `-migrate` when `RUN_MIGRATION` is `true` or `1`.
-
-### Exit codes
+In Docker, `deploy/entrypoint.sh` (copied to `/app/entrypoint.sh` in the image) adds `-migrate` when
+`RUN_MIGRATION` is `true` or `1`.
 
 | Code | When |
 |---|---|
 | `0` | clean shutdown after SIGINT/SIGTERM; `-migrate-only` finished; `-h` |
-| `1` | invalid configuration, unreachable database, or Redis configured but unreachable; migration failure; listen/serve error; running requests still open when `HTTP_SHUTDOWN_TIMEOUT` ran out. The log line is `service exited with error: <cause>` for every one of these; the cause says whether it happened during startup, serving, or shutdown |
-| killed by the signal | a second SIGINT/SIGTERM while the graceful shutdown is still waiting (see below) |
+| `1` | invalid configuration, unreachable database, or Redis configured but unreachable; migration failure; listen/serve error; running requests still open when `HTTP_SHUTDOWN_TIMEOUT` ran out. The log line is `service exited with error: <cause>` for every one of these |
+| killed by the signal | a second SIGINT/SIGTERM while the graceful shutdown is still waiting |
 
-### Health, readiness, and shutdown
+### Health, readiness and shutdown
 
 Both probes are on the engine root, outside `/api`:
 
@@ -347,610 +247,108 @@ Both probes are on the engine root, outside `/api`:
 | `GET /healthcheck` | nothing; the process is up | `200 {"message":"OK!!"}` |
 | `GET /readyz` | `PING` on PostgreSQL, and on Redis when configured, within 2 s | `200 {"status":"ok"}`, or `503 {"status":"unavailable"}` |
 
-Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the log (`readyz; database ping failed: ...`), never in the response.
+Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the
+log (`readyz; database ping failed: ...`), never in the response.
 
-On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it stops background work, still inside that one deadline, closes Redis and the database, and logs `Shutdown complete`, exit code `0`. A location sync that is still running is canceled and, if its final write fits in the deadline, marked failed with the message `Location sync interrupted` (the state a restart would give it); the service waits for that write before it closes the connections, but only within the same `HTTP_SHUTDOWN_TIMEOUT` that the request drain uses (the write is skipped if the deadline has passed). If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT` plus a few seconds for closing Redis and the database (the code does not bound those closes). If the HTTP drain uses the whole budget, a running location sync's final state write is skipped, and the next startup's recovery marks that job failed with `Location sync interrupted`.
+On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive
+connections and waits up to `HTTP_SHUTDOWN_TIMEOUT` for running requests. Then it stops background work (the
+`Lifecycle` hooks, in reverse order of registration), still inside that one deadline, closes Redis and the
+database, logs `Shutdown complete` and exits `0`. If requests are still running when the limit passes they are cut
+off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM
+while the service is still waiting ends the process at once. Set the orchestrator's termination grace period above
+`HTTP_SHUTDOWN_TIMEOUT` plus a few seconds for closing Redis and the database (those closes are not bounded).
 
-### Tests
+## Environment
 
-```bash
-go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
-```
+Copy `.env.example` to `.env`; it lists every variable, grouped by section and by module, with the defaults noted
+in comments. The `.env` file is optional when `APP_ENV` is already set in the environment (this is how containers
+run). Variables that are already set always win over `.env`. Module variables (`LOCATION_*`, `MEDIA_*`,
+`STORAGE_*`) are documented in [`docs/modules/`](docs/modules/).
 
-`make fmt` formats the code and the import groups (`golangci-lint fmt`). `internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong import alias, imports another module, returns an interface from a constructor, or declares a package name that differs from its directory.
+Required: `APP_NAME` (unique per application; authkit binds tokens to it), `APP_ENV`, `PORT` (no default),
+`DATABASE_URL` or the `DB_*` parts (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_NAME`, `DB_PASS`; `DB_SSLMODE`
+defaults to `disable`), `JWT_KEY` (at least 32 characters) and `JWT_EXP`. `OTP_SECRET` and `RESET_SECRET` are
+required only when both Redis and SMTP are configured. `PATH_MIGRATE` defaults to `file://migrations`.
 
-The unit tests need no services. `internal/infrastructure/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
+Configuration is validated once at startup. An invalid value stops the service with exit code 1 and a message
+that names the variable but never prints its value, for example `HTTP_READ_TIMEOUT must be a duration such as 30s or 2m`.
 
-### Migrations
+### HTTP, time zone and database pool
 
-- This project's own migrations (`migrations/`) are named `<UTC YYYYMMDDHHMMSS>_<module>_<change>.{up,down}.sql` (see `migrations/README.md`). The core tables (users, RBAC, audit trails, app configs) come from `Kit.Migrate`, which runs first and keeps its own version table (`authkit_schema_migrations`). The project's migrations use the default `schema_migrations` table and run through the already open database pool, under golang-migrate's advisory lock.
-- The three modules (`authkit`, `gokit`, `logus`) are fetched as ordinary public Go modules, so Docker and CI builds need no extra credentials. Upgrade them deliberately with `go get <module>@<version>`.
+Durations use Go syntax (`30s`, `2m`, `1h`) and must be greater than zero.
 
-## Main Routes
+| Variable | Default | Meaning |
+|---|---|---|
+| `APP_TIMEZONE` | `Asia/Jakarta` | IANA time zone of the process and the database session |
+| `HTTP_READ_HEADER_TIMEOUT` | `5s` | time to read request headers |
+| `HTTP_READ_TIMEOUT` | `30s` | time to read the whole request |
+| `HTTP_WRITE_TIMEOUT` | `30s` | time to write the response |
+| `HTTP_IDLE_TIMEOUT` | `60s` | keep-alive idle time |
+| `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time the whole shutdown gets after SIGINT/SIGTERM, counted from the signal |
+| `HTTP_MAX_BODY_MB` | `10` | largest request body, 1-1024 MB |
+| `DB_MAX_OPEN_CONNS` | `100` | pool: open connections, greater than zero |
+| `DB_MAX_IDLE_CONNS` | `10` | pool: idle connections, zero or more |
+| `DB_CONN_MAX_LIFETIME` | `1h` | pool: longest life of a connection |
+| `DB_CONN_MAX_IDLE_TIME` | `5m` | pool: longest idle time of a connection |
 
-The current route set includes:
+A request whose declared `Content-Length` exceeds `HTTP_MAX_BODY_MB` is answered with `413`; a body without a
+declared length is cut off at the limit while it is read.
 
-- `POST /api/user/register`
-- `POST /api/user/register/otp/send`
-- `POST /api/user/login`
-- `POST /api/user/google/login`
-- `POST /api/user/refresh-token`
-- `POST /api/user/forgot-password`
-- `POST /api/user/reset-password`
-- `POST /api/user/logout`
-- `GET /api/user`
-- `GET /api/users`
+### Database connection
 
-- `GET /api/roles`
-- `POST /api/role`
-- `GET /api/role/:id`
-- `PUT /api/role/:id`
-- `DELETE /api/role/:id`
-- `POST /api/role/:id/permissions`
+The connection is made with pgx. With the `DB_*` parts the session time zone is always `APP_TIMEZONE`; with
+`DATABASE_URL` it is `APP_TIMEZONE` too, unless the URL sets its own (`?timezone=...`). `DB_SSLMODE` must be one of
+`disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`; use `require` or stricter outside local
+development. SQL errors and slow queries (200 ms or more) are logged at warn level with placeholders, never with
+parameter values.
 
-- `GET /api/permissions`
-- `GET /api/permissions/me`
-- `POST /api/permission`
-- `GET /api/permission/:id`
-- `PUT /api/permission/:id`
-- `DELETE /api/permission/:id`
+A failed connection is reported without the driver's text (which can quote the connection string) and without any
+credential:
 
-- `GET /api/menus/active`
-- `GET /api/menus/me`
-- `GET /api/menus`
-- `GET /api/menu/:id`
-- `PUT /api/menu/:id`
+| Message | Meaning |
+|---|---|
+| `connect to database: invalid configuration` | `DATABASE_URL` or the `DB_*` parts cannot be parsed |
+| `connect to database: authentication failed` | the server refused the user, the password, or the host |
+| `connect to database: server rejected the connection parameters` | the server refused something else, such as an unknown database |
+| `connect to database: connection refused` | nothing is listening at that host and port |
+| `connect to database: timed out` | the host did not answer in time |
+| `connect to database: unreachable` | any other failure to reach the server |
 
-- `GET /api/configs`
-- `GET /api/config/:id`
-- `PUT /api/config/:id`
+### Redis
 
-- `GET /api/location/province`
-- `GET /api/location/city?province_code=11`
-- `GET /api/location/district?city_code=1101`
-- `GET /api/location/village?district_code=110101`
-- `POST /api/location/sync`
-- `GET /api/location/sync/:id`
+Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is not empty (`REDIS_PORT` defaults to
+`6379`; `REDIS_PASSWORD` and `REDIS_DB` are optional).
 
-- `GET /api/audits`
-- `GET /api/audit/:id`
+- Not configured: no connection is attempted and the features that need Redis are off (sessions and their routes,
+  login/register rate limiting, OTP, email password reset, the permission cache, module caches and rate limits).
+  authkit logs one `WARN` that says so.
+- Configured but unreachable (or wrong password): the service refuses to start, exit code 1, with
+  `open redis: ping redis: connection refused` (or the matching reason). The URL and password are never logged.
 
-Media routes are registered only when `MEDIA_ENABLED=true`:
-- `POST /api/media` using multipart field `file`
-- `DELETE /api/media/:id`
+`.env.example` ships with the Redis lines commented out.
 
-Uploaded media metadata is stored in PostgreSQL. Object names are generated by the server. Delete accepts only a media UUID; the owner or `superadmin` may delete it. A failed metadata insert triggers storage cleanup, and upload/delete attempts are written to the audit trail.
-
-Additional session routes are registered only when Redis is available:
-- `GET /api/user/sessions`
-- `DELETE /api/user/session/:session_id`
-- `POST /api/user/sessions/revoke-others`
-
-Location architecture:
-- PostgreSQL is the source of truth for provinces, cities, districts, and villages
-- Redis is used only as runtime cache
-- shared Location Service is used only for sync/import to the database
-- location sync runs asynchronously; start the job with `POST /api/location/sync` and poll its status via `GET /api/location/sync/:id`
-- use scoped sync for regular updates; `level=all` is intended for initial bootstrap because it performs a full hierarchical import
-- the sync job belongs to the running process: on shutdown it is canceled and recorded as failed (`Location sync interrupted`), and a job left queued or running by a crashed process is failed the same way when the next one starts
-
-## Adding a module
-
-Follow these steps in order. The example adds a `projects` module: a user with `projects:list` can list projects, and a user with `projects:create` can create one. The Go code below was compiled, vetted and tested (including `internal/architecture` and `TestRouteTable`) in a scratch copy of this repository on 2026-11-18; it is a recipe to copy and adapt, not part of this repository.
-
-The module name `projects` is used for the menu name, the permission resource, the table, and the audit resource. Keep them identical, because menus are derived from permissions by that name. Every package of the module is named `projects` and imported under the alias `<layer>projects` (see [Names and import aliases](#names-and-import-aliases)).
-
-### 1. Migration: table, menu, and permissions
-
-Generate a timestamp with `date -u +%Y%m%d%H%M%S`. Create `migrations/<timestamp>_projects_create_table.up.sql` with the table, then append the menu and permission seed that authkit generates:
+## Development
 
 ```bash
-go run github.com/zazhedho/authkit/cmd/module-seed \
-  --name projects \
-  --display-name "Projects" \
-  --path /projects \
-  --icon bi-folder \
-  --order-index 905 \
-  >> migrations/<timestamp>_projects_create_table.up.sql
+make test        # go build ./... && go vet ./... && go test -race -count=1 ./...
+make lint        # golangci-lint (install with: make lint-install)
+make fmt         # golangci-lint fmt: formats the code and the import groups
+make hook-install   # git hooks: lint on commit, lint and tests on push
 ```
 
-The command prints SQL for one `menu_items` row, the `permissions` rows for the resource (`list`, `view`, `create`, `update`, `delete` unless `--actions` says otherwise), and default `role_permissions` grants (`admin,superadmin` unless `--grant-roles` says otherwise). Other flags: `--parent-name` for a nested menu, `--resource` when the permission resource differs from the name.
-
-```sql
--- migrations/<timestamp>_projects_create_table.up.sql (before the generated seed)
-CREATE TABLE IF NOT EXISTS projects (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id UUID NOT NULL,
-    name VARCHAR(200) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_projects_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT
-);
-
-CREATE INDEX IF NOT EXISTS idx_projects_owner_user_id ON projects(owner_user_id);
-```
-
-```sql
--- migrations/<timestamp>_projects_create_table.down.sql
-DELETE FROM permissions WHERE resource = 'projects';
-DELETE FROM menu_items WHERE name = 'projects';
-DROP TABLE IF EXISTS projects;
-```
-
-The migration runs on the next start (or with `-migrate-only`).
-
-### 2. Domain
-
-`internal/domain/projects/entity.go`:
-
-```go
-package projects
-
-import "time"
-
-func (Project) TableName() string { return "projects" }
-
-type Project struct {
-	ID          string    `json:"id" gorm:"column:id;primaryKey"`
-	OwnerUserID string    `json:"owner_user_id" gorm:"column:owner_user_id"`
-	Name        string    `json:"name" gorm:"column:name"`
-	CreatedAt   time.Time `json:"created_at" gorm:"column:created_at"`
-}
-```
-
-`internal/domain/projects/errors.go` holds the errors callers match with `errors.Is`. A repository that looks a row up returns a domain `ErrNotFound` instead of the ORM's error (see `internal/domain/media`):
-
-```go
-package projects
-
-import "errors"
-
-// ErrNameRequired is returned when a project is created without a name.
-var ErrNameRequired = errors.New("project name is required")
-```
-
-### 3. DTO
-
-`internal/dto/projects/projects.go` holds request shapes that the handler and the service share. Add it only when they share something; it must not import gin or gorm:
-
-```go
-// Package projects holds the request shapes the projects handler and service
-// share. It must not import gin or gorm.
-package projects
-
-// ListRequest is a parsed list query: the handler fills it from the URL, the
-// repository applies it.
-type ListRequest struct {
-	Search         string
-	OrderBy        string
-	OrderDirection string
-	Page           int
-	Limit          int
-	Offset         int
-}
-```
-
-### 4. Service
-
-The service declares the ports it needs in `ports.go`, next to the code that uses them, and holds the business rules. It imports only `domain` and `dto` from this project and no framework: the ID generator is injected, and the caller's identity is a plain argument.
-
-`internal/services/projects/ports.go`:
-
-```go
-package projects
-
-import (
-	"context"
-
-	domainprojects "starter-kit/internal/domain/projects"
-	dtoprojects "starter-kit/internal/dto/projects"
-)
-
-// Repository is the persistence the service needs. The GORM adapter in
-// internal/repositories/projects satisfies it by method set.
-type Repository interface {
-	Store(ctx context.Context, p domainprojects.Project) error
-	List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error)
-}
-```
-
-`internal/services/projects/service.go`:
-
-```go
-package projects
-
-import (
-	"context"
-	"strings"
-	"time"
-
-	domainprojects "starter-kit/internal/domain/projects"
-	dtoprojects "starter-kit/internal/dto/projects"
-)
-
-// Service holds the projects business rules. It imports no framework: ids are
-// injected, and the caller's identity arrives as a plain argument.
-type Service struct {
-	repo  Repository
-	newID func() string
-}
-
-// NewService builds the service. newID returns a new row id; the router passes
-// gokit.CreateUUID, which issues UUIDv7.
-func NewService(repo Repository, newID func() string) *Service {
-	return &Service{repo: repo, newID: newID}
-}
-
-func (s *Service) Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return domainprojects.Project{}, domainprojects.ErrNameRequired
-	}
-	p := domainprojects.Project{ID: s.newID(), OwnerUserID: ownerUserID, Name: name, CreatedAt: time.Now()}
-	if err := s.repo.Store(ctx, p); err != nil {
-		return domainprojects.Project{}, err
-	}
-	return p, nil
-}
-
-func (s *Service) List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
-	return s.repo.List(ctx, req)
-}
-```
-
-Unit-test the service with a fake of its port, no database (`internal/services/projects/service_test.go`):
-
-```go
-package projects
-
-import (
-	"context"
-	"errors"
-	"testing"
-
-	domainprojects "starter-kit/internal/domain/projects"
-	dtoprojects "starter-kit/internal/dto/projects"
-)
-
-// fakeRepository satisfies Repository; services are tested without a database.
-type fakeRepository struct {
-	stored domainprojects.Project
-	err    error
-}
-
-func (f *fakeRepository) Store(_ context.Context, p domainprojects.Project) error {
-	f.stored = p
-	return f.err
-}
-
-func (f *fakeRepository) List(context.Context, dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
-	return nil, 0, f.err
-}
-
-func TestCreateTrimsTheNameAndUsesTheInjectedID(t *testing.T) {
-	repo := &fakeRepository{}
-	svc := NewService(repo, func() string { return "p-1" })
-
-	p, err := svc.Create(context.Background(), "u-1", "  First  ")
-	if err != nil {
-		t.Fatalf("Create = %v", err)
-	}
-	if p.ID != "p-1" || p.Name != "First" || repo.stored.OwnerUserID != "u-1" {
-		t.Fatalf("unexpected project %+v, stored %+v", p, repo.stored)
-	}
-}
-
-func TestCreateRejectsABlankName(t *testing.T) {
-	svc := NewService(&fakeRepository{}, func() string { return "p-1" })
-	if _, err := svc.Create(context.Background(), "u-1", "   "); !errors.Is(err, domainprojects.ErrNameRequired) {
-		t.Fatalf("Create = %v, want ErrNameRequired", err)
-	}
-}
-```
-
-### 5. Repository
-
-`internal/repositories/projects/repository.go` is the adapter that satisfies the service's `Repository` port by method set. It returns a concrete `*Repository`; nothing declares an interface for it here. It embeds the generic repository for `Store`, `GetByID`, `Update` and `Delete`, and adds only the list query. Test it with sqlmock like `internal/repositories/media/repository_test.go`.
-
-```go
-package projects
-
-import (
-	"context"
-
-	"github.com/zazhedho/gokit"
-	"gorm.io/gorm"
-
-	domainprojects "starter-kit/internal/domain/projects"
-	dtoprojects "starter-kit/internal/dto/projects"
-)
-
-// Repository is the GORM adapter for the projects table. It embeds the generic
-// gokit repository for Store, GetByID, Update and Delete, and adds only the
-// list query. Translate gorm.ErrRecordNotFound into a domain ErrNotFound for
-// any lookup the service exposes, as repositories/media does.
-type Repository struct {
-	*gokit.Repository[domainprojects.Project]
-}
-
-func NewRepository(db *gorm.DB) *Repository {
-	return &Repository{Repository: gokit.NewRepository[domainprojects.Project](db)}
-}
-
-func (r *Repository) List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
-	params := gokit.BaseParams{
-		Search:         req.Search,
-		OrderBy:        req.OrderBy,
-		OrderDirection: req.OrderDirection,
-		Page:           req.Page,
-		Limit:          req.Limit,
-		Offset:         req.Offset,
-	}
-	return r.GetAll(ctx, params, gokit.QueryOptions{
-		Search:              gokit.BuildSearchFunc("name"),
-		AllowedOrderColumns: []string{"name", "created_at"},
-		DefaultOrders:       []string{"created_at DESC"},
-	})
-}
-```
-
-Searchable columns, allowed filters, and sortable columns are configured through `gokit.QueryOptions`; add custom repository methods only for business-specific queries.
-
-### 6. Handler
-
-The handler declares the `Service` interface it calls, in `ports.go`, so it never imports the service package.
-
-`internal/handlers/http/projects/ports.go`:
-
-```go
-package projects
-
-import (
-	"context"
-
-	domainprojects "starter-kit/internal/domain/projects"
-	dtoprojects "starter-kit/internal/dto/projects"
-)
-
-// Service is what the handlers call. The concrete service is in
-// internal/services/projects; the router wires it in.
-type Service interface {
-	Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error)
-	List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error)
-}
-```
-
-`internal/handlers/http/projects/handler.go` embeds `authkit.AuditWriter` and writes an audit event for the success and failure of every mutation. The caller comes from `authkit.ScopeFrom`, which `d.Kit.Auth()` fills in, and is passed to the service as a plain value. Domain errors become status codes here. Test the handler with a fake `Service` and `httptest`, as `internal/handlers/http/media/handler_test.go` does.
-
-```go
-package projects
-
-import (
-	"errors"
-	"net/http"
-
-	"github.com/gin-gonic/gin"
-	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/gokit"
-
-	domainprojects "starter-kit/internal/domain/projects"
-	dtoprojects "starter-kit/internal/dto/projects"
-)
-
-// Handler embeds authkit.AuditWriter to record every mutation.
-type Handler struct {
-	service  Service
-	pageSize int
-	authkit.AuditWriter
-}
-
-func New(svc Service, audit authkit.AuditService, pageSize int) *Handler {
-	return &Handler{
-		service:     svc,
-		pageSize:    pageSize,
-		AuditWriter: authkit.NewAuditWriter(audit, "ProjectsHandler"),
-	}
-}
-
-type createRequest struct {
-	Name string `json:"name" binding:"required"`
-}
-
-func (h *Handler) List(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
-	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", h.pageSize)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
-		return
-	}
-	items, total, err := h.service.List(ctx.Request.Context(), dtoprojects.ListRequest{
-		Search:         params.Search,
-		OrderBy:        params.OrderBy,
-		OrderDirection: params.OrderDirection,
-		Page:           params.Page,
-		Limit:          params.Limit,
-		Offset:         params.Offset,
-	})
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
-		return
-	}
-	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, items))
-}
-
-func (h *Handler) Create(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
-	var req createRequest
-	if !gokit.BindJSON(ctx, logID, "[ProjectsHandler][Create]", &req) {
-		return
-	}
-
-	// The handler turns the authenticated scope into the plain input the
-	// service needs; services never import authkit.
-	scope := authkit.ScopeFrom(ctx.Request.Context())
-	p, err := h.service.Create(ctx.Request.Context(), scope.UserID, req.Name)
-	if err != nil {
-		h.WriteAudit(ctx, authkit.AuditEvent{
-			Action: authkit.ActionCreate, Resource: "projects",
-			Status: authkit.StatusFailed, Message: "Failed to create project", ErrorMessage: err.Error(),
-		})
-		if errors.Is(err, domainprojects.ErrNameRequired) {
-			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
-		return
-	}
-
-	h.WriteAudit(ctx, authkit.AuditEvent{
-		Action: authkit.ActionCreate, Resource: "projects", ResourceID: p.ID,
-		Status: authkit.StatusSuccess, Message: "Created project", AfterData: p,
-	})
-	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Project created successfully", logID, p))
-}
-```
-
-### 7. Router package
-
-`internal/router/projects/` has two files. `wire.go` is `func wire(d module.Deps) (*wired, error)`: it builds the repository, service and handler from `module.Deps` (`Config`, `DB`, `SQLDB`, `Redis` which may be nil, `Kit`, `Storage` which is nil when media is disabled, `Lifecycle`), runs any startup recovery and registers shutdown hooks, opens no connections, and is the one place that passes `gokit.CreateUUID` as the ID generator. `register.go` is `func Register(r gin.IRouter, d module.Deps) error`: it calls `wire`, mounts routes relative to the group it receives, and returns an error instead of panicking or exiting. Protect routes with `d.Kit.Auth()` first, then `d.Kit.Can(resource, action)`. Import it elsewhere as `routerprojects`.
-
-```go
-// internal/router/projects/wire.go
-package projects
-
-import (
-	"github.com/zazhedho/gokit"
-
-	httpprojects "starter-kit/internal/handlers/http/projects"
-	repositoryprojects "starter-kit/internal/repositories/projects"
-	"starter-kit/internal/router/module"
-	serviceprojects "starter-kit/internal/services/projects"
-)
-
-type wired struct{ handler *httpprojects.Handler }
-
-func wire(d module.Deps) (*wired, error) {
-	repo := repositoryprojects.NewRepository(d.DB)
-	svc := serviceprojects.NewService(repo, gokit.CreateUUID)
-	return &wired{handler: httpprojects.New(svc, d.Kit.Audit(), d.Config.Projects.PageSize)}, nil
-}
-```
-
-```go
-// internal/router/projects/register.go
-package projects
-
-import (
-	"github.com/gin-gonic/gin"
-
-	"starter-kit/internal/router/module"
-)
-
-func Register(r gin.IRouter, d module.Deps) error {
-	w, err := wire(d)
-	if err != nil {
-		return err
-	}
-	h := w.handler
-
-	projects := r.Group("/projects").Use(d.Kit.Auth())
-	{
-		projects.GET("", d.Kit.Can("projects", "list"), h.List)
-		projects.POST("", d.Kit.Can("projects", "create"), h.Create)
-	}
-	return nil
-}
-```
-
-If the module starts background work, register its stop function in `wire` with `d.Lifecycle.OnClose("projects job", svc.Close)`, and call any startup recovery (like `internal/router/location/wire.go` does with `RecoverInterruptedJobs`) there, never in the constructor. Avoid role-name checks for module access (`d.Kit.Role(...)`) unless the case is explicitly special, like `superadmin`.
-
-### 8. One line in `modules.go`
-
-Add the module to the list in `internal/router/modules.go`, alphabetically. Everything in it is mounted under `/api` after authkit's own routes; probes live in `router.go`. A registration error stops startup with `register projects routes: ...`.
-
-```go
-var modules = []module.Entry{
-	{Name: "location", Register: routerlocation.Register},
-	{Name: "media", Register: routermedia.Register},
-	{Name: "projects", Register: routerprojects.Register},
-}
-```
-
-### 9. Optional: configuration
-
-If the module needs settings, add them to `internal/config`, never read the environment from the module:
-
-1. a type and a field on `Config` in `config.go`:
-
-   ```go
-   type Projects struct{ PageSize int }
-   // in type Config:
-   Projects Projects
-   ```
-
-2. read it in `FromEnv` in `load.go` (`l.integer`, `l.duration`, `l.str`, and `l.megabytes` record unparsable values for `Validate` and fall back to the default):
-
-   ```go
-   Projects: Projects{PageSize: l.integer("PROJECTS_PAGE_SIZE", 20)},
-   ```
-
-3. validate it in `validate.go`, naming the variable and never the value, and call it from `Validate`:
-
-   ```go
-   func (c Config) validateProjects() []string {
-   	if n := c.Projects.PageSize; n < 1 || n > 100 {
-   		return []string{"PROJECTS_PAGE_SIZE must be between 1 and 100"}
-   	}
-   	return nil
-   }
-
-   // in Validate:
-   problems = append(problems, c.validateProjects()...)
-   ```
-
-4. document the variable, with its default as a comment, in `.env.example`, and use it from `wire` as `d.Config.Projects.PageSize`.
-
-### 10. Pin the routes in the module's own test
-
-`internal/router/projects/routes_test.go` lists the module's exact routes and checks which are protected; build the test Deps with `internal/testutil/routertest` (`NewDeps`, `Mount`, `RouteSet`, `Serve`). The central `TestRouteTable` in `internal/router` derives its expectation from `modules.go`, so it needs no edit; it fails if a module mounts a route another module or authkit already owns.
-
-```go
-func TestProjectsMountsExactlyItsRoutes(t *testing.T) {
-	d := routertest.NewDeps(t, nil)
-	got := routertest.SortedKeys(routertest.RouteSet(routertest.Mount(t, Register, d)))
-	// compare with the pinned list: "GET /api/projects", "POST /api/projects"
-}
-```
-
-### 11. Check it
-
-```bash
-go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
-go run ./cmd/api -migrate-only   # applies the new migration
-go run ./cmd/api
-```
-
-`go test` runs `internal/architecture`: a wrong import, alias or package name in the new module fails there with the offending file. With the seed above, `admin` and `superadmin` hold the `projects` permissions. A new user has the `viewer` role, so `GET /api/projects` answers `401` without a token and `403` with a viewer token until a role is granted `projects:list` (see the role flow below). `POST /api/projects` with `{"name":"First project"}` answers `201`, and `GET /api/projects?search=first` lists it. The audit trail gets a `projects` / `create` entry.
-
-## Role Management Flow
-
-Recommended admin flow:
-
-1. Create a role.
-2. Assign permissions to the role.
-3. Do not assign menus manually.
-4. Let menu visibility be derived from permissions automatically.
-
-Menu management note:
-- `menus` is code-defined, but selected presentation fields may still be updated at runtime
-- do not create or delete menus through admin API
-- structural changes such as adding new menus should still go through code and migration
-
-This prevents drift between:
-- what a user can see
-- what a user can actually access
-
-## Notes
-
-- `role_menus` still exists in the base schema for compatibility, but runtime access control does not depend on it.
-- For new modules, prefer permission-based design from the start.
-- If you introduce nested menus, parent menu visibility will be resolved automatically when the child menu is permitted.
+CI runs the same lint and test steps (`.github/workflows`). The unit tests need no services.
+`internal/infrastructure/database` also has integration tests against a real PostgreSQL; they are skipped unless
+`STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable`
+against a throwaway container.
+
+`internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong
+import alias, imports another module, returns an interface from a constructor, declares a package name that
+differs from its directory, or when a migration file breaks the naming rules.
+
+## More documentation
+
+- [`docs/adding-a-module.md`](docs/adding-a-module.md): checklist and a worked example
+- [`docs/modules/`](docs/modules/): [location](docs/modules/location.md), [media](docs/modules/media.md)
+- [`docs/postman/`](docs/postman/README.md): API collection
+- [`docs/smoke-test.md`](docs/smoke-test.md): end-to-end check of a fresh checkout
+- [`migrations/README.md`](migrations/README.md): migration naming and rules
