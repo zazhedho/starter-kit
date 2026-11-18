@@ -662,11 +662,13 @@ holds its type, how it is read and how it is validated, and the three shared fil
 ```go
 package config
 
+import "github.com/zazhedho/gokit"
+
 // Projects is the projects module's setting.
 type Projects struct{ PageSize int }
 
-func projectsFromEnv(l *loader) Projects {
-	return Projects{PageSize: l.integer("PROJECTS_PAGE_SIZE", 20)}
+func projectsFromEnv() Projects {
+	return Projects{PageSize: gokit.GetEnv("PROJECTS_PAGE_SIZE", 20)}
 }
 
 // validateProjects names the variable and never its value.
@@ -704,14 +706,17 @@ The shared edits:
 Projects Projects
 
 // internal/config/load.go, in FromEnv, next to the other sections
-Projects: projectsFromEnv(&l),
+Projects: projectsFromEnv(),
 
 // internal/config/validate.go, in Validate
 problems = append(problems, c.validateProjects()...)
 ```
 
-`l.str`, `l.integer`, `l.duration` and `l.megabytes` record an unparsable value for `Validate` and fall
-back to the default; validation messages name the variable and never print its value. Config's `String`
+Read every value with `gokit.GetEnv(key, default)`: unset or blank gives the default, and an unparsable
+value gives the default and is reported by `gokit.EnvErrors()`, which `Validate` already includes
+(`PROJECTS_PAGE_SIZE must be a valid int`). Durations accept `60` (seconds), `30s`, `1m` and `1h`. Keep only
+business rules (ranges, required fields) in `validateProjects`; messages name the variable and never print
+its value. Config's `String`
 method lists sections one by one: add the new one to its format string if it should appear in the logged
 configuration. Skip this step when the module has no settings. The handler above uses the `defaultListLimit`
 constant; to make that default configurable, give `New` a `pageSize int`, use it in place of

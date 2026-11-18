@@ -8,12 +8,17 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zazhedho/gokit"
 )
 
 // Validate returns one error joining every problem with "; ". Problems name
 // their variable and never include a value.
 func (c Config) Validate() error {
-	problems := append([]string(nil), c.problems...)
+	var problems []string
+	// Read after FromEnv has finished reading everything, authkit included.
+	if err := gokit.EnvErrors(); err != nil {
+		problems = append(problems, strings.ReplaceAll(err.Error(), "\n", "; "))
+	}
 	problems = append(problems, c.validatePort()...)
 	problems = append(problems, c.validateApp()...)
 	problems = append(problems, c.validateHTTP()...)
@@ -69,7 +74,7 @@ func (c Config) validateHTTP() []string {
 		}
 	}
 	if c.HTTP.MaxBodyBytes <= 0 {
-		problems = append(problems, "HTTP_MAX_BODY_MB must be greater than zero")
+		problems = append(problems, "HTTP_MAX_BODY_MB must be between 1 and 1024")
 	}
 	return problems
 }
@@ -127,7 +132,7 @@ func (c Config) validateRedis() []string {
 	if r.Port != "" && !validPort(r.Port) {
 		problems = append(problems, "REDIS_PORT must be a number between 1 and 65535")
 	}
-	if r.dbInvalid || r.DB < 0 {
+	if r.DB < 0 {
 		problems = append(problems, "REDIS_DB must be a non-negative integer")
 	}
 	return problems
@@ -150,7 +155,7 @@ func (c Config) validateSMTP() []string {
 			problems = append(problems, f.key+" is required when SMTP is configured")
 		}
 	}
-	if c.smtpPortInvalid {
+	if s.Port < 0 || s.Port > 65535 {
 		problems = append(problems, "SMTP_PORT must be a number between 1 and 65535")
 	}
 	if s.From != "" {

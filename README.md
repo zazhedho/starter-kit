@@ -275,11 +275,13 @@ defaults to `disable`), `JWT_KEY` (at least 32 characters) and `JWT_EXP`. `OTP_S
 required only when both Redis and SMTP are configured. `PATH_MIGRATE` defaults to `file://migrations`.
 
 Configuration is validated once at startup. An invalid value stops the service with exit code 1 and a message
-that names the variable but never prints its value, for example `HTTP_READ_TIMEOUT must be a duration such as 30s or 2m`.
+that names the variable but never prints its value, for example `HTTP_READ_TIMEOUT must be a valid duration such as 60, 30s, 1m or 1h`.
+Config is read only through `gokit.GetEnv` (unset or blank means the default; an unparsable value falls back and is
+reported) and checked once with `gokit.EnvErrors()`, which `Validate` folds into its error.
 
 ### HTTP, time zone and database pool
 
-Durations use Go syntax (`30s`, `2m`, `1h`) and must be greater than zero.
+Durations accept bare seconds (`60`) or Go syntax (`30s`, `1m`, `1h`) and must be greater than zero.
 
 | Variable | Default | Meaning |
 |---|---|---|

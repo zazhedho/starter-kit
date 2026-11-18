@@ -19,9 +19,9 @@ type Location struct {
 	ServiceTimeout, CacheTTL   time.Duration
 }
 
-func locationFromEnv(l *loader) Location {
+func locationFromEnv() Location {
 	return Location{
-		ServiceBaseURL: strings.TrimRight(l.str("LOCATION_SERVICE_BASE_URL", defaultLocationServiceBaseURL), "/"),
+		ServiceBaseURL: strings.TrimRight(gokit.GetEnv("LOCATION_SERVICE_BASE_URL", defaultLocationServiceBaseURL), "/"),
 		SourceYear:     gokit.GetEnv("LOCATION_SOURCE_YEAR", ""),
 		ServiceTimeout: locationTimeout(),
 		CacheTTL:       locationCacheTTL(),

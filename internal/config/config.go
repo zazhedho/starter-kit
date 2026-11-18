@@ -23,12 +23,6 @@ type Config struct {
 	Auth     authkit.Config // from authkit.ConfigFromEnv(); DB, Redis and Mailer are filled in later by the app
 
 	SMTP SMTP
-
-	// problems holds environment values FromEnv could not parse; Validate
-	// reports them. Each one names the variable, never its value.
-	problems []string
-
-	smtpPortInvalid bool // SMTP_PORT was set but is not a port number
 }
 
 // SMTP is the mail setting for OTP and password-reset emails. Empty means the
@@ -97,8 +91,6 @@ func (d Database) String() string {
 type Redis struct {
 	URL, Host, Port, Password string
 	DB                        int
-
-	dbInvalid bool // REDIS_DB was set but is not an integer
 }
 
 // Configured reports whether a Redis connection should be attempted.

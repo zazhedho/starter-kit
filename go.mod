@@ -75,8 +75,8 @@ require (
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/spf13/viper v1.21.0
-	github.com/zazhedho/authkit v0.3.0
-	github.com/zazhedho/gokit v0.2.2
+	github.com/zazhedho/authkit v0.3.1
+	github.com/zazhedho/gokit v0.3.0
 	github.com/zazhedho/logus v0.2.0
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
