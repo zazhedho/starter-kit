@@ -8,7 +8,7 @@ import (
 )
 
 // Cache key formats. Deployed Redis data uses these exact strings, so they
-// must never change without a migration plan; cachekeys_test.go pins them.
+// must never change without a migration plan; cache_test.go pins them.
 const cachePrefix = "location:"
 
 func provinceKey() string { return "location:province" }

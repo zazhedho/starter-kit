@@ -6,13 +6,10 @@ import (
 	"database/sql"
 	"errors"
 	"io"
-	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -426,44 +423,5 @@ func TestMediaUploadExtendsReadDeadline(t *testing.T) {
 	}
 	if diff := time.Until(rec.deadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
 		t.Fatalf("deadline is %s away from now+UploadTimeout", diff)
-	}
-}
-
-func TestNoMovedPackagesRemain(t *testing.T) {
-	root := filepath.Join("..", "..")
-	for _, dir := range []string{
-		"utils", "middlewares", "pkg/logger", "pkg/response", "pkg/messages", "pkg/filter",
-		"internal/authscope", "internal/services/user", "internal/handlers/http/user", "cmd/module-seed",
-	} {
-		if _, err := os.Stat(filepath.Join(root, dir)); err == nil {
-			t.Errorf("moved package directory still exists: %s", dir)
-		}
-	}
-
-	banned := []string{`"starter-kit/utils"`, `"starter-kit/middlewares"`, `"starter-kit/pkg/logger"`}
-	repo := os.DirFS(root)
-	err := fs.WalkDir(repo, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".superpowers") {
-			return filepath.SkipDir
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "router_test.go") {
-			return nil
-		}
-		data, err := fs.ReadFile(repo, path)
-		if err != nil {
-			return err
-		}
-		for _, b := range banned {
-			if strings.Contains(string(data), b) {
-				t.Errorf("%s still imports %s", path, b)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }

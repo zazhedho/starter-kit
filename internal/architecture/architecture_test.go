@@ -98,9 +98,12 @@ func TestNoPackageLevelConnections(t *testing.T) {
 // internal entries are prefixes relative to the module ("internal/services");
 // external entries are import-path prefixes.
 type rule struct {
-	tree            string
-	forbidInternal  []string
-	forbidExternal  []string
+	tree           string
+	forbidInternal []string
+	forbidExternal []string
+	// internalAllowed, when non-nil, replaces forbidInternal: only these
+	// prefixes of the module's own packages may be imported.
+	internalAllowed []string
 	externalAllowed []string // when non-nil, only stdlib plus these exact paths may be imported
 	// testsToo applies the external bans to _test.go files as well.
 	testsToo bool
@@ -125,10 +128,10 @@ var rules = []rule{
 		testsToo:        true,
 	},
 	{
-		tree:           "internal/dto",
-		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/router", "internal/app", "internal/config"},
-		forbidExternal: []string{ginPkg, gormPkg, redisPkg},
-		testsToo:       true,
+		tree:            "internal/dto",
+		internalAllowed: []string{"internal/domain"},
+		externalAllowed: []string{}, // standard library only
+		testsToo:        true,
 	},
 	{
 		tree:           "internal/services",
@@ -218,6 +221,14 @@ func violates(r rule, ip string, isTest bool) bool {
 		if isTest {
 			return false
 		}
+		if r.internalAllowed != nil {
+			for _, a := range r.internalAllowed {
+				if matchesPrefix(internal, a) {
+					return false
+				}
+			}
+			return true
+		}
 		for _, f := range r.forbidInternal {
 			if f == "internal/" {
 				return true
@@ -264,13 +275,15 @@ func TestImportRule(t *testing.T) {
 }
 
 func TestRulesDetectViolations(t *testing.T) {
-	var services, domain rule
+	var services, domain, dto rule
 	for _, r := range rules {
 		switch r.tree {
 		case "internal/services":
 			services = r
 		case "internal/domain":
 			domain = r
+		case "internal/dto":
+			dto = r
 		}
 	}
 	cases := []struct {
@@ -293,6 +306,13 @@ func TestRulesDetectViolations(t *testing.T) {
 		{"domain imports gorm", domain, "gorm.io/gorm", false, false},
 		{"domain imports gin", domain, "github.com/gin-gonic/gin", false, true},
 		{"domain imports dto", domain, "starter-kit/internal/dto", false, true},
+		{"dto imports domain", dto, "starter-kit/internal/domain/location", false, false},
+		{"dto imports stdlib", dto, "time", false, false},
+		{"dto imports services", dto, "starter-kit/internal/services/location", false, true},
+		{"dto imports another dto", dto, "starter-kit/internal/dto/media", false, true},
+		{"dto imports config", dto, "starter-kit/internal/config", false, true},
+		{"dto imports uuid", dto, "github.com/google/uuid", false, true},
+		{"dto imports gin", dto, "github.com/gin-gonic/gin", false, true},
 	}
 	for _, c := range cases {
 		if got := violates(c.r, c.ip, c.isTest); got != c.want {
@@ -444,4 +464,219 @@ func TestPackageNameMatchesDirectory(t *testing.T) {
 			t.Errorf("%s declares package %s; the directory name is %s", p, file.Name.Name, want)
 		}
 	})
+}
+
+// moduleOf returns the business module a module-relative path ("internal/
+// services/media", or a file's directory) belongs to, or "" when it is not
+// inside a per-module tree. The trees are those of moduleAliasPrefix.
+func moduleOf(p string) string {
+	for tree := range moduleAliasPrefix {
+		if rest, ok := strings.CutPrefix(p, tree+"/"); ok {
+			module, _, _ := strings.Cut(rest, "/")
+			return module
+		}
+	}
+	return ""
+}
+
+// crossesModules reports whether a file in directory dir (module-relative)
+// imports a package of a different business module.
+func crossesModules(dir, importPath string) bool {
+	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
+	if !ok {
+		return false
+	}
+	from, to := moduleOf(dir), moduleOf(internal)
+	return from != "" && to != "" && from != to
+}
+
+// TestModulesDoNotImportEachOther: location must not import media nor media
+// location, whatever the layer; modules meet only in internal/router and
+// internal/app. Test files are held to the same rule.
+func TestModulesDoNotImportEachOther(t *testing.T) {
+	goFiles(t, func(p string, file *ast.File) {
+		for _, imp := range file.Imports {
+			ip, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Errorf("%s: %v", p, err)
+				continue
+			}
+			if crossesModules(path.Dir(p), ip) {
+				t.Errorf("%s imports %s: a module must not import another module", p, ip)
+			}
+		}
+	})
+}
+
+func TestCrossModuleRuleDetectsViolations(t *testing.T) {
+	cases := []struct {
+		name, dir, ip string
+		want          bool
+	}{
+		{"media service imports location service", "internal/services/media", "starter-kit/internal/services/location", true},
+		{"media handler imports location domain", "internal/handlers/http/media", "starter-kit/internal/domain/location", true},
+		{"location repository imports media dto", "internal/repositories/location", "starter-kit/internal/dto/media", true},
+		{"cache of location imports media", "internal/infrastructure/cache/location", "starter-kit/internal/domain/media", true},
+		{"media service imports its own domain", "internal/services/media", "starter-kit/internal/domain/media", false},
+		{"nested package imports its own module", "internal/services/media/upload", "starter-kit/internal/domain/media", false},
+		{"media service imports infrastructure", "internal/services/media", "starter-kit/internal/infrastructure/storage", false},
+		{"router imports both modules", "internal/router", "starter-kit/internal/services/location", false},
+		{"media service imports a third party", "internal/services/media", "github.com/google/uuid", false},
+	}
+	for _, c := range cases {
+		if got := crossesModules(c.dir, c.ip); got != c.want {
+			t.Errorf("%s: crossesModules=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// constructorTrees are the layers whose exported New* functions must return a
+// concrete type. internal/infrastructure is exempt: its factories select an
+// implementation and may return an interface (storage.NewStorageProvider).
+var constructorTrees = []string{"internal/services", "internal/repositories", "internal/handlers"}
+
+func isConstructorName(name string) bool {
+	rest, ok := strings.CutPrefix(name, "New")
+	return ok && (rest == "" || rest[0] >= 'A' && rest[0] <= 'Z')
+}
+
+// constructorViolations checks the exported New* functions of one package: each
+// returns a pointer to a struct declared in the package, optionally followed by
+// an error. A returned interface, a struct value, or any other type is reported.
+func constructorViolations(files []*ast.File) []string {
+	structs := map[string]bool{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				if ts := spec.(*ast.TypeSpec); ts != nil {
+					_, isStruct := ts.Type.(*ast.StructType)
+					structs[ts.Name.Name] = isStruct
+				}
+			}
+		}
+	}
+
+	var out []string
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !fn.Name.IsExported() || !isConstructorName(fn.Name.Name) {
+				continue
+			}
+			var results []ast.Expr
+			if fn.Type.Results != nil {
+				for _, field := range fn.Type.Results.List {
+					n := max(len(field.Names), 1)
+					for range n {
+						results = append(results, field.Type)
+					}
+				}
+			}
+			if !returnsConcretePointer(results, structs) {
+				out = append(out, fn.Name.Name)
+			}
+		}
+	}
+	return out
+}
+
+func returnsConcretePointer(results []ast.Expr, structs map[string]bool) bool {
+	if len(results) == 0 || len(results) > 2 {
+		return false
+	}
+	star, ok := results[0].(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	target, ok := star.X.(*ast.Ident)
+	if !ok || !structs[target.Name] {
+		return false
+	}
+	if len(results) == 2 {
+		errIdent, ok := results[1].(*ast.Ident)
+		return ok && errIdent.Name == "error"
+	}
+	return true
+}
+
+func parseSources(t *testing.T, sources ...string) []*ast.File {
+	t.Helper()
+	fset := token.NewFileSet()
+	files := make([]*ast.File, 0, len(sources))
+	for _, src := range sources {
+		f, err := parser.ParseFile(fset, "x.go", src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// TestConstructorsReturnConcreteTypes: a service, repository or handler
+// constructor hands back *Struct (and optionally an error), never an interface.
+func TestConstructorsReturnConcreteTypes(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for _, tree := range constructorTrees {
+		err := fs.WalkDir(os.DirFS(root), tree, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || !d.IsDir() {
+				return err
+			}
+			entries, err := os.ReadDir(filepath.Join(root, p))
+			if err != nil {
+				return err
+			}
+			fset := token.NewFileSet()
+			var files []*ast.File
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+					continue
+				}
+				f, err := parser.ParseFile(fset, filepath.Join(root, p, e.Name()), nil, 0)
+				if err != nil {
+					return err
+				}
+				files = append(files, f)
+			}
+			for _, name := range constructorViolations(files) {
+				t.Errorf("%s: %s must return a pointer to a struct (and optionally an error), not an interface", p, name)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConstructorRuleDetectsViolations(t *testing.T) {
+	const decls = "package p\ntype Service interface{ Do() }\ntype impl struct{}\ntype Options struct{}\n"
+	cases := []struct {
+		name string
+		fn   string
+		want int
+	}{
+		{"pointer to struct", "func NewService() *impl { return nil }", 0},
+		{"pointer to struct and error", "func NewService() (*impl, error) { return nil, nil }", 0},
+		{"unexported constructor is ignored", "func newService() Service { return nil }", 0},
+		{"not a constructor name", "func Newest() Service { return nil }", 0},
+		{"method is ignored", "func (i *impl) NewThing() Service { return nil }", 0},
+		{"returns an interface", "func NewService() Service { return nil }", 1},
+		{"returns an interface and an error", "func NewService() (Service, error) { return nil, nil }", 1},
+		{"returns a struct value", "func NewOptions() Options { return Options{} }", 1},
+		{"returns a pointer to an interface", "func NewService() *Service { return nil }", 1},
+		{"returns an interface from another package", "func New() io.Reader { return nil }", 1},
+		{"returns nothing", "func New() {}", 1},
+		{"error comes first", "func NewService() (error, *impl) { return nil, nil }", 1},
+	}
+	for _, c := range cases {
+		files := parseSources(t, decls+c.fn)
+		if got := len(constructorViolations(files)); got != c.want {
+			t.Errorf("%s: %d violations, want %d", c.name, got, c.want)
+		}
+	}
 }
