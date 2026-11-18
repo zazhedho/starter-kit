@@ -1,13 +1,13 @@
 package config
 
 import (
-	"github.com/zazhedho/gokit"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 )
 
 const (

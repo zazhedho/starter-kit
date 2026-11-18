@@ -2,11 +2,12 @@ package config
 
 import (
 	"fmt"
-	"github.com/jackc/pgx/v5/pgconn"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var managedEnv = []string{

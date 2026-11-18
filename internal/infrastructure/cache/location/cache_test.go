@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	dtolocation "starter-kit/internal/dto/location"
-
 	"github.com/alicebob/miniredis/v2"
 	redismock "github.com/go-redis/redismock/v9"
 	"github.com/redis/go-redis/v9"
+
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 func TestGetSetDeleteUseRedis(t *testing.T) {

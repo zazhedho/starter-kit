@@ -6,19 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/gokit"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
-
-	domainlocation "starter-kit/internal/domain/location"
-	dtolocation "starter-kit/internal/dto/location"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
+
+	domainlocation "starter-kit/internal/domain/location"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 type locationServiceTestDouble struct {

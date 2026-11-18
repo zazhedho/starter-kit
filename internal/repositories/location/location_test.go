@@ -3,12 +3,13 @@ package location
 import (
 	"context"
 	"errors"
-	domainlocation "starter-kit/internal/domain/location"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	domainlocation "starter-kit/internal/domain/location"
 )
 
 func newDryRunDB(t *testing.T) *gorm.DB {

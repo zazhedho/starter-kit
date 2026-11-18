@@ -3,12 +3,13 @@ package location
 import (
 	"context"
 	"errors"
-	"github.com/zazhedho/gokit"
-	domainlocation "starter-kit/internal/domain/location"
 	"time"
 
+	"github.com/zazhedho/gokit"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	domainlocation "starter-kit/internal/domain/location"
 )
 
 // Repository is the GORM adapter for the location tables.

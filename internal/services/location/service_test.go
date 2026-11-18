@@ -6,12 +6,12 @@ import (
 	"io"
 	"net/http"
 	"reflect"
-
-	domainlocation "starter-kit/internal/domain/location"
-	dtolocation "starter-kit/internal/dto/location"
 	"strings"
 	"testing"
 	"time"
+
+	domainlocation "starter-kit/internal/domain/location"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 type locationRepoTestDouble struct {

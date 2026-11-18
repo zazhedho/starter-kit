@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	domainlocation "starter-kit/internal/domain/location"
-	dtolocation "starter-kit/internal/dto/location"
 	"strings"
 	"time"
+
+	domainlocation "starter-kit/internal/domain/location"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 type locationServiceEnvelope struct {

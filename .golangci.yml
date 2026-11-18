@@ -50,3 +50,9 @@ linters:
 formatters:
   enable:
     - gofmt
+    - goimports
+  settings:
+    goimports:
+      # Import groups: standard library, third party, then this module.
+      local-prefixes:
+        - starter-kit

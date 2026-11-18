@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
+
 	domainmedia "starter-kit/internal/domain/media"
 )
 

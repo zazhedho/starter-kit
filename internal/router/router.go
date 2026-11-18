@@ -6,11 +6,11 @@ package router
 import (
 	"database/sql"
 	"fmt"
-	"github.com/zazhedho/gokit"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"

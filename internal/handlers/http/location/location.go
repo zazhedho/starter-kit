@@ -3,14 +3,15 @@ package location
 import (
 	"errors"
 	"fmt"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
-	"net/http"
+
 	domainlocation "starter-kit/internal/domain/location"
 	dtolocation "starter-kit/internal/dto/location"
-
-	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {

@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zazhedho/logus"
-	dtolocation "starter-kit/internal/dto/location"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zazhedho/logus"
+
+	dtolocation "starter-kit/internal/dto/location"
 )
 
 const scanCount = int64(100)
