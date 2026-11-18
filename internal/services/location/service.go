@@ -9,19 +9,16 @@ import (
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
-	locationcache "starter-kit/internal/cache/location"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	interfacelocation "starter-kit/internal/interfaces/location"
 	"sync/atomic"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 type LocationService struct {
 	Repo       interfacelocation.RepoLocationInterface
-	Redis      *redis.Client
+	cache      Cache
 	HTTPClient *http.Client
 	syncing    atomic.Bool
 
@@ -30,9 +27,10 @@ type LocationService struct {
 	cacheTTL   time.Duration
 }
 
-// Options is what the service needs besides its repository. Redis may be nil.
+// Options is what the service needs besides its repository. Cache may be nil,
+// which disables caching.
 type Options struct {
-	Redis             *redis.Client
+	Cache             Cache
 	BaseURL           string
 	SourceYear        string
 	Timeout, CacheTTL time.Duration
@@ -58,7 +56,7 @@ func NewLocationService(repo interfacelocation.RepoLocationInterface, opts Optio
 	}
 	service := &LocationService{
 		Repo:       repo,
-		Redis:      opts.Redis,
+		cache:      opts.Cache,
 		HTTPClient: &http.Client{Timeout: timeout},
 		baseURL:    opts.BaseURL,
 		sourceYear: opts.SourceYear,
@@ -73,8 +71,8 @@ func NewLocationService(repo interfacelocation.RepoLocationInterface, opts Optio
 }
 
 func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, error) {
-	cacheKey := locationcache.ProvinceKey()
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+	cacheKey := provinceKey()
+	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -101,8 +99,8 @@ func (s *LocationService) GetProvince(ctx context.Context) ([]dto.Location, erro
 }
 
 func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error) {
-	cacheKey := locationcache.CityKey(provinceCode)
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+	cacheKey := cityKey(provinceCode)
+	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -129,8 +127,8 @@ func (s *LocationService) GetCity(ctx context.Context, provinceCode string) ([]d
 }
 
 func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error) {
-	cacheKey := locationcache.DistrictKey(cityCode)
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+	cacheKey := districtKey(cityCode)
+	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -161,8 +159,8 @@ func (s *LocationService) GetDistrict(ctx context.Context, cityCode string) ([]d
 }
 
 func (s *LocationService) GetVillage(ctx context.Context, districtCode string) ([]dto.Location, error) {
-	cacheKey := locationcache.VillageKey(districtCode)
-	if data, ok := locationcache.Get(ctx, s.Redis, cacheKey); ok {
+	cacheKey := villageKey(districtCode)
+	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -358,7 +356,7 @@ func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest,
 		if err := s.Repo.UpsertProvinces(ctx, provinces); err != nil {
 			return syncProgress{}, err
 		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.ProvinceKey())
+		s.cacheOrNoop().DeleteKeys(context.Background(), provinceKey())
 		return syncProgress{
 			Message:       "Province sync completed",
 			ProvinceCount: len(provinces),
@@ -372,7 +370,7 @@ func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest,
 		if err := s.Repo.UpsertCities(ctx, cities); err != nil {
 			return syncProgress{}, err
 		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.CityKey(req.ProvinceCode))
+		s.cacheOrNoop().DeleteKeys(context.Background(), cityKey(req.ProvinceCode))
 		return syncProgress{
 			Message:   "City sync completed",
 			CityCount: len(cities),
@@ -386,7 +384,7 @@ func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest,
 		if err := s.Repo.UpsertDistricts(ctx, districts); err != nil {
 			return syncProgress{}, err
 		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.DistrictKey(req.CityCode))
+		s.cacheOrNoop().DeleteKeys(context.Background(), districtKey(req.CityCode))
 		return syncProgress{
 			Message:       "District sync completed",
 			DistrictCount: len(districts),
@@ -400,7 +398,7 @@ func (s *LocationService) sync(ctx context.Context, req dto.SyncLocationRequest,
 		if err := s.Repo.UpsertVillages(ctx, villages); err != nil {
 			return syncProgress{}, err
 		}
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.VillageKey(req.DistrictCode))
+		s.cacheOrNoop().DeleteKeys(context.Background(), villageKey(req.DistrictCode))
 		return syncProgress{
 			Message:      "Village sync completed",
 			VillageCount: len(villages),
@@ -421,7 +419,7 @@ func (s *LocationService) syncAll(ctx context.Context, year string, progress fun
 	if err := s.Repo.UpsertProvinces(ctx, provinces); err != nil {
 		return syncProgress{}, err
 	}
-	locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.ProvinceKey())
+	s.cacheOrNoop().DeleteKeys(context.Background(), provinceKey())
 
 	totals := syncProgress{ProvinceCount: len(provinces)}
 	progress(syncProgress{
@@ -435,7 +433,7 @@ func (s *LocationService) syncAll(ctx context.Context, year string, progress fun
 		}
 	}
 
-	locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.Prefix())
+	s.cacheOrNoop().DeleteKeys(context.Background(), cachePrefix)
 	return syncProgress{
 		Message:       "Full location sync completed",
 		ProvinceCount: len(provinces),
@@ -455,7 +453,7 @@ func (s *LocationService) syncProvince(ctx context.Context, year string, provinc
 			return err
 		}
 		totals.CityCount += len(cities)
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.CityKey(province.Code))
+		s.cacheOrNoop().DeleteKeys(context.Background(), cityKey(province.Code))
 	}
 	progress(syncProgress{
 		Message:       fmt.Sprintf("Processed province %d/%d: %s", index+1, len(provinces), province.Name),
@@ -490,7 +488,7 @@ func (s *LocationService) syncCity(ctx context.Context, year string, province do
 			return err
 		}
 		totals.DistrictCount += len(districts)
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.DistrictKey(city.Code))
+		s.cacheOrNoop().DeleteKeys(context.Background(), districtKey(city.Code))
 	}
 	for _, district := range districts {
 		villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
@@ -504,7 +502,7 @@ func (s *LocationService) syncCity(ctx context.Context, year string, province do
 			return err
 		}
 		totals.VillageCount += len(villages)
-		locationcache.DeleteKeys(context.Background(), s.Redis, locationcache.VillageKey(district.Code))
+		s.cacheOrNoop().DeleteKeys(context.Background(), villageKey(district.Code))
 	}
 	return nil
 }

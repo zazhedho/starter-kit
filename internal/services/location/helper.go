@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	locationcache "starter-kit/internal/cache/location"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	"strings"
@@ -86,7 +85,7 @@ func (s *LocationService) setLocationCache(ctx context.Context, cacheKey string,
 	if len(locations) == 0 || s.cacheTTL <= 0 {
 		return
 	}
-	locationcache.Set(ctx, s.Redis, cacheKey, locations, s.cacheTTL)
+	s.cacheOrNoop().Set(ctx, cacheKey, locations, s.cacheTTL)
 }
 
 func decodeLocationMap(body []byte) (map[string]string, error) {

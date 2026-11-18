@@ -101,8 +101,8 @@ starter-kit/
 │   ├── repositories/
 │   ├── services/
 │   ├── handlers/http/
-│   ├── cache/
 │   ├── infrastructure/
+│   │   ├── cache/location/  # Redis implementation of the location cache port
 │   │   ├── database/        # PostgreSQL pool, Redis client
 │   │   └── storage/         # object storage providers (MinIO, Cloudflare R2) and InitStorage
 │   └── testutil/            # test helpers (log capture)

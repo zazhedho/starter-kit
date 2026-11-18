@@ -167,10 +167,8 @@ var rules = []rule{
 // that is not listed and on any listed edge that no longer exists, so the map
 // can only shrink. Each refactoring step deletes its entries.
 var knownViolations = map[string]string{
-	"internal/services/location -> github.com/redis/go-redis/v9":        "step 6: cache port",
-	"internal/services/location -> starter-kit/internal/cache/location": "step 6: cache port",
-	"internal/services/location -> github.com/zazhedho/gokit":           "step 9: services stop importing gokit",
-	"internal/services/media -> github.com/zazhedho/gokit":              "step 9: services stop importing gokit",
+	"internal/services/location -> github.com/zazhedho/gokit": "step 9: services stop importing gokit",
+	"internal/services/media -> github.com/zazhedho/gokit":    "step 9: services stop importing gokit",
 }
 
 func isStdlib(importPath string) bool {

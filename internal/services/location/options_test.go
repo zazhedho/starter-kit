@@ -5,9 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
-
 	"starter-kit/internal/dto"
 )
 
@@ -24,26 +21,44 @@ func TestNewLocationServiceNeverDisablesTheHTTPTimeout(t *testing.T) {
 	}
 }
 
+// fakeCache records writes so service rules can be tested without Redis.
+type fakeCache struct {
+	entries map[string]time.Duration
+}
+
+func newFakeCache() *fakeCache { return &fakeCache{entries: map[string]time.Duration{}} }
+
+func (f *fakeCache) Get(context.Context, string) ([]dto.Location, bool) { return nil, false }
+func (f *fakeCache) Set(_ context.Context, key string, _ []dto.Location, ttl time.Duration) {
+	f.entries[key] = ttl
+}
+func (f *fakeCache) DeleteKeys(context.Context, string) {}
+
 func TestLocationCacheIsSkippedWithoutPositiveTTL(t *testing.T) {
-	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
+	cache := newFakeCache()
 	locations := []dto.Location{{Code: "11", Name: "Aceh"}}
 
 	for _, ttl := range []time.Duration{0, -time.Minute} {
-		svc := NewLocationService(&locationRepoTestDouble{}, Options{Redis: client, CacheTTL: ttl})
+		svc := NewLocationService(&locationRepoTestDouble{}, Options{Cache: cache, CacheTTL: ttl})
 		svc.setLocationCache(context.Background(), "location:province", locations)
-		if mr.Exists("location:province") {
-			t.Fatalf("CacheTTL %v: an entry was written to Redis", ttl)
+		if _, ok := cache.entries["location:province"]; ok {
+			t.Fatalf("CacheTTL %v: an entry was written to the cache", ttl)
 		}
 	}
 
-	svc := NewLocationService(&locationRepoTestDouble{}, Options{Redis: client, CacheTTL: time.Minute})
+	svc := NewLocationService(&locationRepoTestDouble{}, Options{Cache: cache, CacheTTL: time.Minute})
 	svc.setLocationCache(context.Background(), "location:province", locations)
-	if !mr.Exists("location:province") {
+	if ttl, ok := cache.entries["location:province"]; !ok {
 		t.Fatal("a positive TTL must cache")
+	} else if ttl != time.Minute {
+		t.Fatalf("cached entry has ttl %v, want %v", ttl, time.Minute)
 	}
-	if ttl := mr.TTL("location:province"); ttl <= 0 {
-		t.Fatalf("cached entry has no expiry: %v", ttl)
+}
+
+func TestNewLocationServiceWithoutCacheAlwaysMisses(t *testing.T) {
+	svc := NewLocationService(&locationRepoTestDouble{}, Options{CacheTTL: time.Minute})
+	svc.setLocationCache(context.Background(), "location:province", []dto.Location{{Code: "11", Name: "Aceh"}})
+	if _, ok := svc.cacheOrNoop().Get(context.Background(), "location:province"); ok {
+		t.Fatal("a service without a cache must always miss")
 	}
 }

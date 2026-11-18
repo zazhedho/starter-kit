@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	locationHandler "starter-kit/internal/handlers/http/location"
+	cachelocation "starter-kit/internal/infrastructure/cache/location"
 	locationRepo "starter-kit/internal/repositories/location"
 	locationSvc "starter-kit/internal/services/location"
 )
@@ -12,7 +13,7 @@ func registerLocation(r gin.IRouter, d Deps) error {
 	loc := d.Config.Location
 	repo := locationRepo.NewLocationRepo(d.DB)
 	svc := locationSvc.NewLocationService(repo, locationSvc.Options{
-		Redis:      d.Redis,
+		Cache:      cachelocation.New(d.Redis),
 		BaseURL:    loc.ServiceBaseURL,
 		SourceYear: loc.SourceYear,
 		Timeout:    loc.ServiceTimeout,
