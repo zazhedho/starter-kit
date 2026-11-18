@@ -125,7 +125,7 @@ func expectCount(mock sqlmock.Sqlmock, total int) {
 func TestRepositoryListAppliesSearchFiltersAndOrder(t *testing.T) {
 	db, mock := newMockRepo(t)
 	expectCount(mock, 41)
-	mock.ExpectQuery(`SELECT \* FROM "media" WHERE .*LOWER\(original_name\) LIKE LOWER\(.*owner_user_id = .*"media"."deleted_at" IS NULL ORDER BY size ASC LIMIT .* OFFSET`).
+	mock.ExpectQuery(`SELECT \* FROM "media" WHERE .*LOWER\(original_name\) LIKE LOWER\(.*owner_user_id = .*"media"."deleted_at" IS NULL ORDER BY size ASC,id ASC LIMIT .* OFFSET`).
 		WillReturnRows(listRows())
 
 	items, total, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{
@@ -164,7 +164,7 @@ func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) 
 		t.Run(orderBy, func(t *testing.T) {
 			db, mock := newMockRepo(t)
 			expectCount(mock, 1)
-			mock.ExpectQuery(`ORDER BY created_at DESC LIMIT`).WillReturnRows(listRows())
+			mock.ExpectQuery(`ORDER BY created_at DESC,id DESC LIMIT`).WillReturnRows(listRows())
 
 			if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: orderBy, OrderDirection: "asc", Limit: 20}); err != nil {
 				t.Fatalf("List = %v", err)
@@ -179,7 +179,7 @@ func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) 
 func TestRepositoryListFallsBackToDefaultOrderForBadDirection(t *testing.T) {
 	db, mock := newMockRepo(t)
 	expectCount(mock, 1)
-	mock.ExpectQuery(`ORDER BY created_at DESC LIMIT`).WillReturnRows(listRows())
+	mock.ExpectQuery(`ORDER BY created_at DESC,id DESC LIMIT`).WillReturnRows(listRows())
 
 	if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: "size", OrderDirection: "sideways; DROP", Limit: 20}); err != nil {
 		t.Fatalf("List = %v", err)
@@ -196,5 +196,32 @@ func TestRepositoryListReturnsDatabaseErrors(t *testing.T) {
 
 	if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{Limit: 20}); !errors.Is(err, boom) {
 		t.Fatalf("List = %v, want the database error", err)
+	}
+}
+
+// The generated ORDER BY is pinned in full: the id tie-breaker keeps pages from
+// skipping or repeating rows that share the sort value.
+func TestRepositoryListOrderByPinsTheTieBreaker(t *testing.T) {
+	cases := []struct {
+		name, orderBy, direction, want string
+	}{
+		{"default", "", "", `ORDER BY created_at DESC,id DESC LIMIT`},
+		{"explicit ascending", "size", "asc", `ORDER BY size ASC,id ASC LIMIT`},
+		{"explicit descending", "original_name", "DESC", `ORDER BY original_name DESC,id DESC LIMIT`},
+		{"column without direction", "size", "", `ORDER BY created_at DESC,id DESC LIMIT`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			db, mock := newMockRepo(t)
+			expectCount(mock, 1)
+			mock.ExpectQuery(regexp.QuoteMeta(c.want)).WillReturnRows(listRows())
+
+			if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: c.orderBy, OrderDirection: c.direction, Limit: 20}); err != nil {
+				t.Fatalf("List = %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

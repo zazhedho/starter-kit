@@ -39,9 +39,11 @@ func (r *Repository) GetByID(ctx context.Context, id string) (domainmedia.Media,
 	return media, err
 }
 
-// List returns one page of media and the total count. gokit rejects an order
-// column outside the allow list; here it falls back to the default order, so
-// a bad order_by never turns into a 500.
+// List returns one page of media and the total count. This repository is the
+// authority for what may be filtered and sorted: an order column or direction
+// outside the allow list falls back to created_at DESC instead of failing, so a
+// bad order_by never turns into a 500. id is always the last sort key, so rows
+// that share the sort value keep one order and pages never skip or repeat rows.
 func (r *Repository) List(ctx context.Context, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
 	filters := map[string]any{}
 	if req.OwnerUserID != "" {
@@ -51,23 +53,23 @@ func (r *Repository) List(ctx context.Context, req dtomedia.ListRequest) ([]doma
 		filters["content_type"] = req.ContentType
 	}
 
-	orderBy, direction := req.OrderBy, strings.ToLower(req.OrderDirection)
-	if !slices.Contains(listOrderColumns, orderBy) || (direction != "asc" && direction != "desc") {
-		orderBy, direction = "", ""
+	orderBy, direction := req.OrderBy, strings.ToUpper(req.OrderDirection)
+	if !slices.Contains(listOrderColumns, orderBy) || (direction != "ASC" && direction != "DESC") {
+		orderBy, direction = "created_at", "DESC"
 	}
 
+	// gokit appends DefaultOrders only when the params carry no explicit
+	// order, so the chosen order goes through DefaultOrders to get the
+	// tie-breaker after it.
 	return r.GetAll(ctx, gokit.BaseParams{
-		Search:         req.Search,
-		Filters:        filters,
-		OrderBy:        orderBy,
-		OrderDirection: direction,
-		Page:           req.Page,
-		Limit:          req.Limit,
-		Offset:         req.Offset,
+		Search:  req.Search,
+		Filters: filters,
+		Page:    req.Page,
+		Limit:   req.Limit,
+		Offset:  req.Offset,
 	}, gokit.QueryOptions{
-		Search:              gokit.BuildSearchFunc("original_name"),
-		AllowedFilters:      listFilterKeys,
-		AllowedOrderColumns: listOrderColumns,
-		DefaultOrders:       []string{"created_at DESC"},
+		Search:         gokit.BuildSearchFunc("original_name"),
+		AllowedFilters: listFilterKeys,
+		DefaultOrders:  []string{orderBy + " " + direction, "id " + direction},
 	})
 }
