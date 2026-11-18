@@ -48,6 +48,5 @@ func locationCacheTTL() time.Duration {
 	return ttl
 }
 
-// validateLocation has nothing to check today; the hook exists so a future
-// location rule has one place to live.
+// validateLocation is the per-module validation hook; it has no rules yet.
 func (c Config) validateLocation() []string { return nil }
