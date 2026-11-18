@@ -696,11 +696,9 @@ func underAny(p string, trees []string) bool {
 	return false
 }
 
-// crossesModules reports whether a file in directory dir (module-relative)
-// imports a package of a different business module, other than another
-// module's domain or dto package imported from a higher layer (service,
-// repository, handler, cache, router). domain and dto never import another
-// module, and a shared package imports no business module at all.
+// crossesModules reports whether a file in dir (module-relative) imports
+// another business module, except that module's domain or dto from a higher
+// layer. domain, dto and shared packages never import a business module.
 func crossesModules(dir, importPath string) bool {
 	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
 	if !ok {
