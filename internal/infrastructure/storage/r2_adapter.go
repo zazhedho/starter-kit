@@ -9,8 +9,6 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-
-	domainmedia "starter-kit/internal/domain/media"
 )
 
 // R2Adapter is the Cloudflare R2 implementation of Provider.
@@ -54,7 +52,7 @@ func NewR2Adapter(config Config) (*R2Adapter, error) {
 	}, nil
 }
 
-func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
+func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (StoredFile, error) {
 	objectName := buildObjectName(fileHeader.Filename, folder)
 
 	fileSize := fileHeader.Size
@@ -68,13 +66,13 @@ func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHea
 		ContentType: contentType,
 	})
 	if err != nil {
-		return domainmedia.StoredFile{}, fmt.Errorf("failed to upload file to R2: %w", err)
+		return StoredFile{}, fmt.Errorf("failed to upload file to R2: %w", err)
 	}
 
-	return domainmedia.StoredFile{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
+	return StoredFile{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
 }
 
-func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (domainmedia.StoredFile, error) {
+func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (StoredFile, error) {
 	objectName := buildObjectName(filename, folder)
 
 	if contentType == "" {
@@ -86,10 +84,10 @@ func (r *R2Adapter) UploadFileFromBytes(ctx context.Context, data []byte, filena
 		ContentType: contentType,
 	})
 	if err != nil {
-		return domainmedia.StoredFile{}, fmt.Errorf("failed to upload file to R2: %w", err)
+		return StoredFile{}, fmt.Errorf("failed to upload file to R2: %w", err)
 	}
 
-	return domainmedia.StoredFile{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
+	return StoredFile{ObjectName: objectName, URL: r.GetFileURL(objectName)}, nil
 }
 
 func (r *R2Adapter) DeleteFile(ctx context.Context, fileURL string) error {

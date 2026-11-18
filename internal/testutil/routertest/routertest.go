@@ -21,7 +21,6 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	domainmedia "starter-kit/internal/domain/media"
 	"starter-kit/internal/infrastructure/storage"
 	"starter-kit/internal/router/module"
 )
@@ -145,12 +144,12 @@ type FakeStorage struct{}
 
 var _ storage.Provider = FakeStorage{}
 
-func (FakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
-	return domainmedia.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
+func (FakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (storage.StoredFile, error) {
+	return storage.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
 }
 
-func (FakeStorage) UploadFileFromBytes(_ context.Context, _ []byte, filename, folder, _ string) (domainmedia.StoredFile, error) {
-	return domainmedia.StoredFile{ObjectName: folder + "/" + filename, URL: "https://files.example.test/" + folder + "/" + filename}, nil
+func (FakeStorage) UploadFileFromBytes(_ context.Context, _ []byte, filename, folder, _ string) (storage.StoredFile, error) {
+	return storage.StoredFile{ObjectName: folder + "/" + filename, URL: "https://files.example.test/" + folder + "/" + filename}, nil
 }
 
 func (FakeStorage) DeleteFile(context.Context, string) error { return nil }
