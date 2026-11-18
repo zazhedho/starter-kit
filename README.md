@@ -141,36 +141,19 @@ Dependencies point inward only: everything depends on `domain` (and `dto`), and 
                                         handler(service(repository)), so Go checks every fit at compile time
 ```
 
-- `domain` imports nothing from the project, and nothing outside the standard library except `gorm.io/gorm`, for `gorm.DeletedAt`. Entities double as persistence models (gorm and json tags); this is the one documented exception.
-- `dto` imports `domain` at most, never gin, gorm or go-redis.
-- `services` import `domain` and `dto`, never gin, gorm, go-redis, a storage SDK, `gokit`, `authkit`, `config`, `router`, `app`, or anything in `repositories`, `handlers` or `infrastructure`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
-- `handlers` never import `services`, `repositories`, gorm or `infrastructure`; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
-- `repositories` and `infrastructure` never import `services` or `handlers`; they satisfy the services' ports by method set, so Go checks the fit when the router wires them together.
-- Constructors return concrete structs (`NewService`, `NewRepository`, `New`); interfaces live with their consumer, never in a shared `interfaces` package.
+What `internal/architecture` checks on every `go test ./...` (it parses the source with `go/parser`; no extra dependency):
 
-`internal/architecture` enforces all of this on every `go test ./...` with `go/parser`, with no extra dependency.
+- `domain` imports no other package of this module and nothing outside the standard library except `gorm.io/gorm`, for `gorm.DeletedAt`. Entities double as persistence models (gorm and json tags); this is the one documented exception. gin and go-redis are not allowed.
+- `dto` imports only the standard library and `domain`.
+- `services` import neither `infrastructure`, `repositories`, `handlers`, `router`, `app` nor `config`, and none of gin, gorm, go-redis, a storage SDK, `gokit` or `authkit`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
+- `handlers` import neither `services`, `repositories`, `infrastructure`, `router`, `app` nor `config`, and neither gorm, go-redis nor a storage SDK; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
+- `repositories` import neither `services`, `handlers`, `infrastructure`, `router`, `app` nor `config`, and not gin. `infrastructure` imports neither `services`, `handlers`, `repositories`, `router` nor `app`. `config` imports nothing from this module, and `router` does not import `app`.
+- A module's packages never import another module's packages: nothing under `media` imports `location`, in any layer, and the reverse. Modules meet only in `router` and `app`.
+- Exported `New*` constructors in `services`, `repositories` and `handlers` return a pointer to a struct (and optionally an error), never an interface. Interfaces live with their consumer: there is no shared `interfaces` package and no `Interface` suffix.
 
-### Names and import aliases
+Infrastructure factories such as `storage.NewStorageProvider` may return an interface, because they select an implementation.
 
-A package is named after its directory (`package location` in `domain/location`, `services/location`, ...), and module names are not repeated inside it: `location.Service`, `location.NewService`, `location.NewRepository`, `location.New` for a handler. Because every module package has the same name, importers always use one alias, `<layer><module>`:
-
-| Directory | Alias for module `location` |
-|---|---|
-| `internal/domain/location` | `domainlocation` |
-| `internal/dto/location` | `dtolocation` |
-| `internal/services/location` | `servicelocation` |
-| `internal/repositories/location` | `repositorylocation` |
-| `internal/handlers/http/location` | `httplocation` (transport plus module) |
-| `internal/infrastructure/cache/location` | `cachelocation` |
-
-The same applies to `media` and to every module you add. goimports and gopls suggest the bare name `location`; the alias is a convention that `internal/architecture` checks, so a wrong alias fails `go test`. Import groups are standard library, third party, then `starter-kit/...`; `make fmt` (`golangci-lint fmt`) keeps them that way.
-
-Rules that keep the structure uniform:
-- Only `cmd/api` calls `os.Exit`; everything else returns errors. Nothing outside `internal/config` reads the environment, and nothing outside `internal/app` opens connections: the router and modules receive a `router.Deps` value.
-- Repositories use the generic repository `gokit.Repository` (`gokit.NewRepository`) from `github.com/zazhedho/gokit` for common CRUD and list queries; module repository files hold only custom queries (joins, aggregates, transactions).
-- Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`.
-- For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods.
-- Background work a module starts (the location sync job) stops through `router.Deps.Lifecycle`: register a hook with `d.Lifecycle.OnClose(name, fn)` and `App.Close` runs it before closing Redis and the database.
+Also checked: no `log.Fatal` or `os.Exit` outside `cmd/`, no package-level gorm, sql or Redis connections, the import aliases, and package names matching their directories.
 
 ## Startup Flow
 
@@ -203,12 +186,16 @@ cmd/api/main.go
     |      and the http.Server with the HTTP_* timeouts
     |
     `- 5. serve until SIGINT/SIGTERM, then shut down gracefully
-           stop accepting connections, wait up to HTTP_SHUTDOWN_TIMEOUT for running
-           requests, stop background work (a running location sync is canceled and
-           waited for, at most HTTP_SHUTDOWN_TIMEOUT), close Redis, close the database
+           stop accepting connections, wait for running requests, stop background work
+           (a running location sync is canceled and waited for), all within one
+           HTTP_SHUTDOWN_TIMEOUT counted from the signal; then close Redis, close the database
 ```
 
-The routes are built after the migrations because some modules read their tables when they are registered (`registerLocation` calls `RecoverInterruptedJobs`, which marks sync jobs left over from a previous run as failed), so the first start against an empty database is as quiet as every other start. If that write fails, route registration fails and the service does not start.
+The routes are built after the migrations because some modules read their tables when they are registered (`registerLocation` calls `RecoverInterruptedJobs`, which marks sync jobs left over from a previous run as failed), and it gives up after 10 seconds. If that write fails or times out, route registration fails and the service does not start.
+
+With `RUN_MIGRATION=false` the schema must already exist: otherwise startup stops at location recovery, because the `location_sync_jobs` table is missing.
+
+Run a single instance of the location sync, or deploy accordingly: recovery in a new instance marks the sync jobs of instances that are still running as interrupted.
 
 ## Environment
 
@@ -243,7 +230,7 @@ Durations use Go syntax (`30s`, `2m`, `1h`). Every duration must be greater than
 | `HTTP_READ_TIMEOUT` | `30s` | time to read the whole request |
 | `HTTP_WRITE_TIMEOUT` | `30s` | time to write the response |
 | `HTTP_IDLE_TIMEOUT` | `60s` | keep-alive idle time |
-| `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time running requests get to finish after SIGINT/SIGTERM |
+| `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time the whole shutdown gets after SIGINT/SIGTERM: running requests and background work (a location sync job) share this one deadline, counted from the signal; closing Redis and the database comes after it |
 | `HTTP_MAX_BODY_MB` | `10` | largest request body, 1-1024 MB; must exceed `MEDIA_MAX_FILE_SIZE_MB` when media is enabled |
 | `MEDIA_UPLOAD_TIMEOUT` | `2m` | read deadline for one `POST /api/media` (replaces `HTTP_READ_TIMEOUT` for that route) |
 | `DB_MAX_OPEN_CONNS` | `100` | pool: open connections, greater than zero |
@@ -333,7 +320,7 @@ Both probes are on the engine root, outside `/api`:
 
 Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the log (`readyz; database ping failed: ...`), never in the response.
 
-On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it stops background work, closes Redis and the database, and logs `Shutdown complete`, exit code `0`. A location sync that is still running is canceled and marked failed with the message `Location sync interrupted` (the state a restart would give it); the service waits for that write, at most `HTTP_SHUTDOWN_TIMEOUT` again, before it closes the connections. If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
+On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it stops background work, still inside that one deadline, closes Redis and the database, and logs `Shutdown complete`, exit code `0`. A location sync that is still running is canceled and marked failed with the message `Location sync interrupted` (the state a restart would give it); the service waits for that write before it closes the connections, but only within the same `HTTP_SHUTDOWN_TIMEOUT` that the request drain uses (the write is skipped if the deadline has passed). If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
 
 ### Tests
 
@@ -341,7 +328,7 @@ On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connec
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
 ```
 
-`make fmt` formats the code and the import groups (`golangci-lint fmt`). `internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong import alias, or declares a package name that differs from its directory.
+`make fmt` formats the code and the import groups (`golangci-lint fmt`). `internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong import alias, imports another module, returns an interface from a constructor, or declares a package name that differs from its directory.
 
 The unit tests need no services. `internal/infrastructure/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
 
