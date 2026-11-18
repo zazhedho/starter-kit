@@ -109,7 +109,7 @@ starter-kit/
 │   │   └── storage/               # object storage providers (MinIO, Cloudflare R2) and InitStorage
 │   ├── architecture/              # guard tests: the dependency rule, import aliases, package names
 │   └── testutil/                  # test helpers: logcapture, routertest (shared router test Deps and helpers)
-├── migrations/                    # this project's own migrations (start at 000005)
+├── migrations/                    # this project's own migrations, named <UTC timestamp>_<module>_<change>
 ├── deploy/entrypoint.sh           # container entrypoint (runs the migration when asked)
 ├── docs/                          # smoke-test.md, postman/ (API collection)
 ├── Dockerfile
@@ -363,8 +363,7 @@ The unit tests need no services. `internal/infrastructure/database` also has int
 
 ### Migrations
 
-- This project's own migrations (`migrations/`) start at `000005`. The core tables (users, RBAC, audit trails, app configs) come from `Kit.Migrate`, which runs first and keeps its own version table (`authkit_schema_migrations`). The project's migrations use the default `schema_migrations` table and run through the already open database pool, under golang-migrate's advisory lock.
-- A database whose `schema_migrations` version is 1 to 4 (it never reached 5) cannot be started with this version. Bring it to version 6 with the previous release first, then upgrade.
+- This project's own migrations (`migrations/`) are named `<UTC YYYYMMDDHHMMSS>_<module>_<change>.{up,down}.sql` (see `migrations/README.md`). The core tables (users, RBAC, audit trails, app configs) come from `Kit.Migrate`, which runs first and keeps its own version table (`authkit_schema_migrations`). The project's migrations use the default `schema_migrations` table and run through the already open database pool, under golang-migrate's advisory lock.
 - The three modules (`authkit`, `gokit`, `logus`) are fetched as ordinary public Go modules, so Docker and CI builds need no extra credentials. Upgrade them deliberately with `go get <module>@<version>`.
 
 ## Main Routes
@@ -443,7 +442,7 @@ The module name `projects` is used for the menu name, the permission resource, t
 
 ### 1. Migration: table, menu, and permissions
 
-The next free number after the existing files is `000007`. Create `migrations/000007_create_projects_table.up.sql` with the table, then append the menu and permission seed that authkit generates:
+Generate a timestamp with `date -u +%Y%m%d%H%M%S`. Create `migrations/<timestamp>_projects_create_table.up.sql` with the table, then append the menu and permission seed that authkit generates:
 
 ```bash
 go run github.com/zazhedho/authkit/cmd/module-seed \
@@ -452,13 +451,13 @@ go run github.com/zazhedho/authkit/cmd/module-seed \
   --path /projects \
   --icon bi-folder \
   --order-index 905 \
-  >> migrations/000007_create_projects_table.up.sql
+  >> migrations/<timestamp>_projects_create_table.up.sql
 ```
 
 The command prints SQL for one `menu_items` row, the `permissions` rows for the resource (`list`, `view`, `create`, `update`, `delete` unless `--actions` says otherwise), and default `role_permissions` grants (`admin,superadmin` unless `--grant-roles` says otherwise). Other flags: `--parent-name` for a nested menu, `--resource` when the permission resource differs from the name.
 
 ```sql
--- migrations/000007_create_projects_table.up.sql (before the generated seed)
+-- migrations/<timestamp>_projects_create_table.up.sql (before the generated seed)
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_user_id UUID NOT NULL,
@@ -471,7 +470,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_owner_user_id ON projects(owner_user_id)
 ```
 
 ```sql
--- migrations/000007_create_projects_table.down.sql
+-- migrations/<timestamp>_projects_create_table.down.sql
 DELETE FROM permissions WHERE resource = 'projects';
 DELETE FROM menu_items WHERE name = 'projects';
 DROP TABLE IF EXISTS projects;
@@ -926,7 +925,7 @@ func TestProjectsMountsExactlyItsRoutes(t *testing.T) {
 
 ```bash
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
-go run ./cmd/api -migrate-only   # applies migration 000007
+go run ./cmd/api -migrate-only   # applies the new migration
 go run ./cmd/api
 ```
 
