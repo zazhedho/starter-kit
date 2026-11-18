@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/google/uuid"
 	"github.com/zazhedho/authkit"
+	"github.com/zazhedho/gokit"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
-	servicelocation "starter-kit/internal/services/location"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -139,13 +143,13 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 		t.Fatalf("expected actor user id, got %q", service.requested)
 	}
 
-	handler = NewLocationHandler(&locationServiceTestDouble{err: servicelocation.ErrLocationSyncRunning, job: dto.LocationSyncJob{ID: "job-1"}})
+	handler = NewLocationHandler(&locationServiceTestDouble{err: domainlocation.ErrSyncRunning, job: dto.LocationSyncJob{ID: "job-1"}})
 	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, nil)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", rec.Code)
 	}
 
-	handler = NewLocationHandler(&locationServiceTestDouble{err: errors.New("invalid sync level")})
+	handler = NewLocationHandler(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("invalid sync level")})
 	rec = performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
@@ -180,4 +184,71 @@ func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected missing id 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestLocationSyncMapsStartErrors(t *testing.T) {
+	req := dto.SyncLocationRequest{Level: "province"}
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{"already running", domainlocation.ErrSyncRunning, http.StatusConflict},
+		{"validation", domainlocation.NewInvalidSync("province_code is required for city sync"), http.StatusBadRequest},
+		{"wrapped validation", fmt.Errorf("start: %w", domainlocation.NewInvalidSync("invalid sync level")), http.StatusBadRequest},
+		{"unexpected", errors.New("pq: connection refused"), http.StatusInternalServerError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handler := NewLocationHandler(&locationServiceTestDouble{err: c.err})
+			rec := performLocationRequest(http.MethodPost, "/sync", "/sync", req, handler.Sync, nil)
+			if rec.Code != c.wantStatus {
+				t.Fatalf("expected %d, got %d: %s", c.wantStatus, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestLocationSyncUnexpectedErrorUsesGenericResponse(t *testing.T) {
+	handler := NewLocationHandler(&locationServiceTestDouble{err: errors.New("pq: connection refused")})
+	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "province"}, handler.Sync, nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "pq:") {
+		t.Fatalf("internal error text leaked: %s", rec.Body.String())
+	}
+	var got struct {
+		LogID uuid.UUID `json:"log_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.LogID == uuid.Nil {
+		t.Fatalf("expected a log id in the response (err=%v): %s", err, rec.Body.String())
+	}
+	want, err := json.Marshal(gokit.InternalServerError(got.LogID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !jsonEqual(t, rec.Body.Bytes(), want) {
+		t.Fatalf("expected the generic internal-error response\n got: %s\nwant: %s", rec.Body.String(), want)
+	}
+}
+
+func TestLocationSyncValidationEchoesMessage(t *testing.T) {
+	handler := NewLocationHandler(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("province_code is required for city sync")})
+	rec := performLocationRequest(http.MethodPost, "/sync", "/sync", dto.SyncLocationRequest{Level: "city"}, handler.Sync, nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "province_code is required for city sync") {
+		t.Fatalf("expected 400 with the validation message, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func jsonEqual(t *testing.T, a, b []byte) bool {
+	t.Helper()
+	var x, y any
+	if err := json.Unmarshal(a, &x); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &y); err != nil {
+		t.Fatal(err)
+	}
+	return reflect.DeepEqual(x, y)
 }

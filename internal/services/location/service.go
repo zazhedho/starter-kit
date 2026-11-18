@@ -49,8 +49,6 @@ type syncProgress struct {
 // defaultHTTPTimeout bounds outbound calls when Options.Timeout is not positive.
 const defaultHTTPTimeout = 20 * time.Second
 
-var ErrLocationSyncRunning = errors.New("location sync is already running")
-
 func NewLocationService(repo interfacelocation.RepoLocationInterface, opts Options) *LocationService {
 	// Zero would mean "no timeout" to http.Client; never allow that, so a
 	// project that builds Options by hand stays safe.
@@ -208,7 +206,7 @@ func (s *LocationService) StartSync(ctx context.Context, req dto.SyncLocationReq
 	activeJob, err := s.Repo.GetActiveSyncJob(ctx)
 	switch {
 	case err == nil:
-		return mapSyncJob(activeJob), ErrLocationSyncRunning
+		return mapSyncJob(activeJob), domainlocation.ErrSyncRunning
 	case !errors.Is(err, domainlocation.ErrNotFound):
 		return dto.LocationSyncJob{}, err
 	}
@@ -255,23 +253,23 @@ func (s *LocationService) normalizeAndValidateRequest(req dto.SyncLocationReques
 		return req, nil
 	case "city":
 		if req.ProvinceCode == "" {
-			return dto.SyncLocationRequest{}, errors.New("province_code is required for city sync")
+			return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("province_code is required for city sync")
 		}
 		return req, nil
 	case "district":
 		if req.ProvinceCode == "" || req.CityCode == "" {
-			return dto.SyncLocationRequest{}, errors.New("province_code and city_code are required for district sync")
+			return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("province_code and city_code are required for district sync")
 		}
 		return req, nil
 	case "village":
 		if req.ProvinceCode == "" || req.CityCode == "" || req.DistrictCode == "" {
-			return dto.SyncLocationRequest{}, errors.New("province_code, city_code, and district_code are required for village sync")
+			return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("province_code, city_code, and district_code are required for village sync")
 		}
 		return req, nil
 	case "all":
 		return req, nil
 	default:
-		return dto.SyncLocationRequest{}, errors.New("invalid sync level")
+		return dto.SyncLocationRequest{}, domainlocation.NewInvalidSync("invalid sync level")
 	}
 }
 

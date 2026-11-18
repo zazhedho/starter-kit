@@ -314,6 +314,13 @@ func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 	if err == nil || err.Error() != "invalid sync level" {
 		t.Fatalf("expected invalid level error, got %v", err)
 	}
+	if !errors.Is(err, domainlocation.ErrInvalidSync) {
+		t.Fatalf("expected validation errors to match domainlocation.ErrInvalidSync, got %v", err)
+	}
+	_, err = svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "city"})
+	if !errors.Is(err, domainlocation.ErrInvalidSync) {
+		t.Fatalf("expected scoped-code error to match domainlocation.ErrInvalidSync, got %v", err)
+	}
 }
 
 func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
@@ -331,8 +338,8 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 	}, Options{})
 
 	got, err := svc.StartSync(locationTestActorContext("user-1"), dto.SyncLocationRequest{Level: "all", Year: "2025"})
-	if !errors.Is(err, ErrLocationSyncRunning) {
-		t.Fatalf("expected ErrLocationSyncRunning, got %v", err)
+	if !errors.Is(err, domainlocation.ErrSyncRunning) {
+		t.Fatalf("expected domainlocation.ErrSyncRunning, got %v", err)
 	}
 	if got.ID != "job-1" || got.Status != "running" {
 		t.Fatalf("expected active job response, got %+v", got)

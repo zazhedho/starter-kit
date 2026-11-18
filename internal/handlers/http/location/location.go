@@ -9,7 +9,6 @@ import (
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
 	interfacelocation "starter-kit/internal/interfaces/location"
-	servicelocation "starter-kit/internal/services/location"
 
 	"github.com/gin-gonic/gin"
 )
@@ -126,17 +125,23 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 
 	data, err := h.Service.StartSync(reqCtx, req)
 	if err != nil {
-		if errors.Is(err, servicelocation.ErrLocationSyncRunning) {
+		if errors.Is(err, domainlocation.ErrSyncRunning) {
 			res := gokit.Response(http.StatusConflict, gokit.MsgSomethingWrong, logId, data)
 			res.Error = gokit.Errors{Code: http.StatusConflict, Message: err.Error()}
 			ctx.JSON(http.StatusConflict, res)
 			return
 		}
 
+		if errors.Is(err, domainlocation.ErrInvalidSync) {
+			res := gokit.Response(http.StatusBadRequest, gokit.MsgSomethingWrong, logId, nil)
+			res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: err.Error()}
+			ctx.JSON(http.StatusBadRequest, res)
+			return
+		}
+
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
-		res := gokit.Response(http.StatusBadRequest, gokit.MsgSomethingWrong, logId, nil)
-		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: err.Error()}
-		ctx.JSON(http.StatusBadRequest, res)
+		res := gokit.InternalServerError(logId)
+		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
 
