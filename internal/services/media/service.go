@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
+	"starter-kit/internal/infrastructure/storage"
 	interfacemedia "starter-kit/internal/interfaces/media"
-	"starter-kit/internal/platform/storage"
 )
 
 const (

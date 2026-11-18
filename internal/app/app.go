@@ -38,8 +38,8 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/internal/platform/database"
-	"starter-kit/internal/platform/storage"
+	"starter-kit/internal/infrastructure/database"
+	"starter-kit/internal/infrastructure/storage"
 	"starter-kit/internal/router"
 )
 

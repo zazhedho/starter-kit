@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
-	"starter-kit/internal/platform/storage"
+	"starter-kit/internal/infrastructure/storage"
 )
 
 type mediaTestFile struct {

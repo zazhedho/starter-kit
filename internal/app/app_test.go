@@ -28,7 +28,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/internal/platform/storage"
+	"starter-kit/internal/infrastructure/storage"
 )
 
 const testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"

@@ -102,7 +102,7 @@ starter-kit/
 │   ├── services/
 │   ├── handlers/http/
 │   ├── cache/
-│   ├── platform/
+│   ├── infrastructure/
 │   │   ├── database/        # PostgreSQL pool, Redis client
 │   │   └── storage/         # object storage providers (MinIO, Cloudflare R2) and InitStorage
 │   └── testutil/            # test helpers (log capture)
@@ -296,7 +296,7 @@ On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connec
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
 ```
 
-The unit tests need no services. `internal/platform/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
+The unit tests need no services. `internal/infrastructure/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
 
 ### Migrations
 

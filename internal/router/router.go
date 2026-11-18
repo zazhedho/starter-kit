@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	"starter-kit/internal/platform/storage"
+	"starter-kit/internal/infrastructure/storage"
 )
 
 // Deps is everything the routes need. Redis is nil when Redis is not used;
