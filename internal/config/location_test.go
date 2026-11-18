@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestFromEnvKeepsLegacySecondsForms(t *testing.T) {
+func TestFromEnvAcceptsSecondsForms(t *testing.T) {
 	clearEnv(t)
 	setRequiredEnv(t)
 	t.Setenv("LOCATION_SERVICE_TIMEOUT_SECONDS", "0")
