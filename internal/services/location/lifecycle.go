@@ -33,11 +33,11 @@ func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
 	return nil
 }
 
-// Close stops the running sync job, if any, and waits for it to record its
-// final state, or for ctx to end. The job's final write must end by ctx's
-// deadline, so it is never still writing after the caller has moved on to
-// close the database. It is safe to call more than once; after the
-// first call StartSync fails with ErrClosed.
+// Close cancels the running sync job, if any, and waits for it until ctx ends
+// or the job returns. The job's final write is bounded by ctx's deadline (when
+// it has one) and by settleTimeout, and is skipped once that deadline has
+// passed. It is safe to call more than once; after the first call StartSync
+// fails with ErrClosed.
 func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true

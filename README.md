@@ -143,17 +143,41 @@ Dependencies point inward only: everything depends on `domain` (and `dto`), and 
 
 What `internal/architecture` checks on every `go test ./...` (it parses the source with `go/parser`; no extra dependency):
 
-- `domain` imports no other package of this module and nothing outside the standard library except `gorm.io/gorm`, for `gorm.DeletedAt`. Entities double as persistence models (gorm and json tags); this is the one documented exception. gin and go-redis are not allowed.
+- `domain` imports none of `dto`, `services`, `handlers`, `repositories`, `infrastructure`, `router`, `app` or `config`, and no other module's packages. Outside the standard library it may import only `gorm.io/gorm`, for `gorm.DeletedAt`; any other external import, gin and go-redis included, is banned. Entities double as persistence models (gorm and json tags); this is the one documented exception. The guard does not list `internal/testutil`, so a domain package importing it would pass.
 - `dto` imports only the standard library and `domain`.
-- `services` import neither `infrastructure`, `repositories`, `handlers`, `router`, `app` nor `config`, and none of gin, gorm, go-redis, a storage SDK, `gokit` or `authkit`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
-- `handlers` import neither `services`, `repositories`, `infrastructure`, `router`, `app` nor `config`, and neither gorm, go-redis nor a storage SDK; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
+- `services` import neither `infrastructure`, `repositories`, `handlers`, `router`, `app` nor `config`, and none of gin, gorm, go-redis, `github.com/minio/minio-go`, `gokit` or `authkit`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
+- `handlers` import neither `services`, `repositories`, `infrastructure`, `router`, `app` nor `config`, and neither gorm, go-redis nor `github.com/minio/minio-go`; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
 - `repositories` import neither `services`, `handlers`, `infrastructure`, `router`, `app` nor `config`, and not gin. `infrastructure` imports neither `services`, `handlers`, `repositories`, `router` nor `app`. `config` imports nothing from this module, and `router` does not import `app`.
 - A module's packages never import another module's packages: nothing under `media` imports `location`, in any layer, and the reverse. Modules meet only in `router` and `app`.
 - Exported `New*` constructors in `services`, `repositories` and `handlers` return a pointer to a struct (and optionally an error), never an interface. Interfaces live with their consumer: there is no shared `interfaces` package and no `Interface` suffix.
 
+Internal-import rules apply to non-test files only. Test files are checked only against the external bans, and only for `domain`, `dto`, `services` and `handlers`. The rule that modules never import each other covers test files too.
+
 Infrastructure factories such as `storage.NewStorageProvider` may return an interface, because they select an implementation.
 
 Also checked: no `log.Fatal` or `os.Exit` outside `cmd/`, no package-level gorm, sql or Redis connections, the import aliases, and package names matching their directories.
+
+### Names and import aliases
+
+A package is named after its directory (`package location` in `domain/location`, `services/location`, ...), and module names are not repeated inside it: `location.Service`, `location.NewService`, `location.NewRepository`, `location.New` for a handler. Because every module package has the same name, importers always use one alias, `<layer><module>`:
+
+| Directory | Alias for module `location` |
+|---|---|
+| `internal/domain/location` | `domainlocation` |
+| `internal/dto/location` | `dtolocation` |
+| `internal/services/location` | `servicelocation` |
+| `internal/repositories/location` | `repositorylocation` |
+| `internal/handlers/http/location` | `httplocation` (transport plus module) |
+| `internal/infrastructure/cache/location` | `cachelocation` |
+
+The same applies to `media` and to every module you add. goimports and gopls suggest the bare name `location`; the alias is a convention that `internal/architecture` checks, so a wrong alias fails `go test`. Import groups are standard library, third party, then `starter-kit/...`; `make fmt` (`golangci-lint fmt`) keeps them that way.
+
+Rules that keep the structure uniform:
+- Nothing outside `cmd/` calls `os.Exit` or `log.Fatal` (the guard checks this); everything else returns errors. Nothing outside `internal/config` reads the environment. Connections are opened only from `internal/app`, through `internal/infrastructure/database`; the router and modules receive a `router.Deps` value.
+- A repository can embed the generic `gokit.Repository` from `github.com/zazhedho/gokit`, built with `gokit.NewRepository[T](db)`, for common CRUD and list queries. `internal/repositories/media` does this and overrides `GetByID` to translate the ORM's not-found error. Keep a module's own repository methods for what the generic one does not cover (joins, aggregates, transactions, error translation); `internal/repositories/location` has no embedded `gokit.Repository` and only custom methods.
+- Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`. `d.Kit` is the `*authkit.Kit` in `router.Deps`.
+- For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods; `internal/handlers/http/media/handler.go` is the example.
+- Background work a module starts (the location sync job) stops through `router.Deps.Lifecycle`. Register a hook with `d.Lifecycle.OnClose(name, fn)`, where `fn` is a `func(context.Context) error` that must return when its context ends; `internal/router/location.go` registers the sync service's `Close` this way. `App.Close` runs the hooks in reverse order of registration with the shutdown context, before it closes Redis and the database.
 
 ## Startup Flow
 
@@ -320,7 +344,7 @@ Both probes are on the engine root, outside `/api`:
 
 Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the log (`readyz; database ping failed: ...`), never in the response.
 
-On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it stops background work, still inside that one deadline, closes Redis and the database, and logs `Shutdown complete`, exit code `0`. A location sync that is still running is canceled and marked failed with the message `Location sync interrupted` (the state a restart would give it); the service waits for that write before it closes the connections, but only within the same `HTTP_SHUTDOWN_TIMEOUT` that the request drain uses (the write is skipped if the deadline has passed). If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
+On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it stops background work, still inside that one deadline, closes Redis and the database, and logs `Shutdown complete`, exit code `0`. A location sync that is still running is canceled and, if its final write fits in the deadline, marked failed with the message `Location sync interrupted` (the state a restart would give it); the service waits for that write before it closes the connections, but only within the same `HTTP_SHUTDOWN_TIMEOUT` that the request drain uses (the write is skipped if the deadline has passed). If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT` plus a few seconds for closing Redis and the database (the code does not bound those closes). If the HTTP drain uses the whole budget, a running location sync's final state write is skipped, and the next startup's recovery marks that job failed with `Location sync interrupted`.
 
 ### Tests
 
