@@ -4,7 +4,7 @@ Authenticated file upload to object storage (MinIO or Cloudflare R2) with metada
 list, and owner-controlled deletion. It is the reference for the ownership convention in
 [`docs/adding-a-module.md`](../adding-a-module.md#ownership-and-the-_any-permissions).
 
-- Code: `internal/{domain,services,repositories}/media`, `internal/handlers/http/media`,
+- Code: `internal/{domain,dto,services,repositories}/media`, `internal/handlers/http/media`,
   `internal/router/media` (`wire.go`, `register.go`, `storage_adapter.go`), `internal/infrastructure/storage`,
   `internal/config/media.go`.
 - Off by default: nothing is mounted unless `MEDIA_ENABLED=true`, and the storage provider is only opened
@@ -39,11 +39,11 @@ service a `domainmedia.Actor`; the service never imports authkit. The migration 
 |---|---|---|
 | `page` | `1` | page number; a value below 1 becomes 1; a non-number answers `400` |
 | `limit` | `20` | page size, at most `100`; below 1 (including `-1`) falls back to 20, above 100 becomes 100; a non-number answers `400` |
-| `search` | empty | file name contains the text, case-insensitive |
-| `order_by` | `created_at` | `created_at`, `size` or `original_name`; any other column falls back to `created_at` |
-| `order_direction` | `desc` | `asc` or `desc`; anything else falls back to `desc` |
+| `search` | empty | file name contains the text, case-insensitive; `%` and `_` in the text act as LIKE wildcards |
+| `order_by` | `created_at` | `created_at`, `size` or `original_name`; any other column, or an `order_direction` that is not `asc`/`desc` or is missing, falls back to `created_at` `desc` |
+| `order_direction` | `desc` | `asc` or `desc` (see `order_by` for the fallback); rows with equal values are ordered by `id` in the same direction, so pages never skip or repeat rows |
 | `filters[content_type]` | empty | exact content type |
-| `filters[owner_user_id]` | empty | exact owner UUID, `400` when it is not a UUID; honored only with `media:list_any`, otherwise it is overridden with your own id |
+| `filters[owner_user_id]` | empty | exact owner UUID; honored only with `media:list_any` (then `400` when it is not a UUID); without it the value is ignored and replaced with your own id |
 
 Any other `filters[...]` key is ignored. The response is gokit's paginated envelope (`total_data`,
 `total_pages`, `current_page`, `next_page`, `prev_page`, `limit`, `data`). Soft-deleted files are never listed.
