@@ -14,9 +14,7 @@ import (
 	"time"
 )
 
-// The tests re-run this test binary as the "service": when helperEnv is set,
-// TestMain runs execute with a stand-in for app.Run and exits, instead of
-// running the tests.
+// When helperEnv is set, TestMain runs execute with a stand-in for app.Run instead of the tests.
 const helperEnv = "STARTER_KIT_TEST_HELPER"
 
 func TestMain(m *testing.M) {

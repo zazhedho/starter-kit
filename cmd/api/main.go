@@ -1,7 +1,4 @@
-// Command api is the service entrypoint: it runs the application until it
-// receives SIGINT or SIGTERM, and exits non-zero if the service stops with an
-// error. A second signal during the graceful shutdown terminates the process
-// immediately.
+// Command api runs the service until SIGINT or SIGTERM; a second signal during shutdown exits immediately.
 package main
 
 import (

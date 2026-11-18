@@ -13,9 +13,8 @@ import (
 	"github.com/zazhedho/logus"
 )
 
-// Migrate brings the schema up to date: authkit's tables first, because the
-// project's migrations may reference users and roles, then the project's own
-// migrations from the configured path.
+// Migrate applies authkit's tables first (project migrations may reference users
+// and roles), then the project's migrations.
 func (a *App) Migrate(ctx context.Context) error {
 	if a.migrate != nil {
 		return a.migrate(ctx)
@@ -30,11 +29,8 @@ func (a *App) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// migrateProject applies the migrations in sourceURL through the already open
-// pool, on one dedicated connection that holds golang-migrate's advisory lock.
-// The version table is the default schema_migrations. The pool itself is never
-// closed; the connection goes back to it on every path. Errors never carry the
-// connection settings, because none are built here.
+// migrateProject runs the migrations on one dedicated connection that holds
+// golang-migrate's advisory lock. The pool is never closed; errors carry no connection settings.
 func migrateProject(ctx context.Context, db *sql.DB, sourceURL string) error {
 	src, err := source.Open(sourceURL)
 	if err != nil {

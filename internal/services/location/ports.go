@@ -8,9 +8,8 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// Repository is the persistence the location service needs. The GORM adapter
-// in internal/repositories/location satisfies it by method set and translates
-// a missing row into domainlocation.ErrNotFound.
+// Repository is the persistence the service needs; the GORM adapter satisfies it
+// and maps a missing row to domainlocation.ErrNotFound.
 type Repository interface {
 	ListProvinces(ctx context.Context) ([]domainlocation.Province, error)
 	ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error)
@@ -30,10 +29,8 @@ type Repository interface {
 	FailActiveSyncJobs(ctx context.Context, message string) error
 }
 
-// Cache is the read-through cache the location service uses. Implementations
-// live in internal/infrastructure/cache and must treat every failure as a miss
-// (Get) or a no-op (Set, DeleteKeys): the cache is an optimisation, never a
-// dependency.
+// Cache is the read-through cache. Implementations must treat every failure as
+// a miss (Get) or no-op (Set, DeleteKeys): it is an optimisation, not a dependency.
 type Cache interface {
 	Get(ctx context.Context, key string) ([]dtolocation.Location, bool)
 	Set(ctx context.Context, key string, locations []dtolocation.Location, ttl time.Duration)

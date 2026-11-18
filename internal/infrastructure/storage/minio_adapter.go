@@ -13,14 +13,15 @@ import (
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-// MinIOAdapter implements Provider for MinIO
+// MinIOAdapter is the MinIO implementation of Provider.
 type MinIOAdapter struct {
 	client     *minio.Client
 	bucketName string
 	baseURL    string
 }
 
-// NewMinIOAdapter creates a new MinIO storage adapter
+// NewMinIOAdapter connects to MinIO. A bucket that does not exist is created
+// with a public-read policy.
 func NewMinIOAdapter(config Config) (*MinIOAdapter, error) {
 	minioClient, err := minio.New(config.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, ""),

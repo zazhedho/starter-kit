@@ -13,7 +13,7 @@ import (
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-// R2Adapter implements Provider for Cloudflare R2
+// R2Adapter is the Cloudflare R2 implementation of Provider.
 type R2Adapter struct {
 	client     *minio.Client
 	bucketName string
@@ -21,7 +21,8 @@ type R2Adapter struct {
 	accountID  string
 }
 
-// NewR2Adapter creates a new Cloudflare R2 storage adapter
+// NewR2Adapter connects to R2. Without BaseURL, files are addressed under
+// https://<bucket>.r2.dev.
 func NewR2Adapter(config Config) (*R2Adapter, error) {
 	endpoint := config.Endpoint
 

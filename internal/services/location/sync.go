@@ -20,9 +20,8 @@ type syncProgress struct {
 	VillageCount  int
 }
 
-// runSyncJob runs one job under the service's lifecycle context. When Close
-// cancels it, the job ends as failed/interrupted, the same state
-// RecoverInterruptedJobs would give it after a restart.
+// runSyncJob runs one job under the lifecycle context; if Close cancels it, it ends
+// failed/interrupted, as RecoverInterruptedJobs would after a restart.
 func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	jobCtx := s.baseCtx
 	if !s.syncing.CompareAndSwap(false, true) {

@@ -8,7 +8,7 @@ import (
 	"starter-kit/internal/config"
 )
 
-// InitStorage starts the storage provider (MinIO or R2) from explicit settings.
+// InitStorage builds the provider named in cfg.
 func InitStorage(cfg config.Storage) (Provider, error) {
 	logus.WriteLog(logus.LogLevelDebug, "InitStorage; Initializing storage provider...")
 

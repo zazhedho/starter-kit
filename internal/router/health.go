@@ -13,7 +13,6 @@ import (
 
 const readyTimeout = 2 * time.Second
 
-// registerHealth mounts the probes on the router it is given (the engine root).
 func registerHealth(r gin.IRouter, d Deps) error {
 	r.GET("/healthcheck", func(ctx *gin.Context) {
 		logus.WriteLogWithContext(ctx, logus.LogLevelDebug, "ClientIP: "+ctx.ClientIP())

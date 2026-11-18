@@ -277,9 +277,7 @@ func TestServerTimeoutsComeFromConfig(t *testing.T) {
 	}
 }
 
-// TestCloseIsIdempotent holds a Redis client, because closing a go-redis
-// client twice returns an error: without the guard in Close the second call
-// would report "redis: client is closed".
+// Closing a go-redis client twice errors; Close must guard against that.
 func TestCloseIsIdempotent(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectClose()
@@ -303,9 +301,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestCloseStopsBackgroundWorkBeforeReleasingConnections pins the shutdown
-// order: hooks registered by modules (the location sync job) run while the
-// database is still open. sqlmock expects the ping before the close.
+// Pins shutdown order: module hooks run while the database is still open.
 func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectPing()
@@ -331,9 +327,7 @@ func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	}
 }
 
-// TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout: a hook that
-// never finishes must not block Close forever; the error is reported and the
-// connections are still released.
+// A hook that never finishes must not block Close forever; connections are still released.
 func TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 20 * time.Millisecond
@@ -657,9 +651,8 @@ func TestRunMigrateOnlyDoesNotListen(t *testing.T) {
 	}
 }
 
-// TestStartupOrder: dependencies are opened, then the schema is migrated, then
-// the routes are built (some of them query tables the migration creates), then
-// the server runs.
+// TestStartupOrder: open dependencies, migrate, build routes (some query migrated
+// tables), then serve.
 func TestStartupOrder(t *testing.T) {
 	cfg := testConfig()
 	cfg.Migrate.Run = true

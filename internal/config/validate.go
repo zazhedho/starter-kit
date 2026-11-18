@@ -11,9 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Validate checks the whole configuration and returns one error that joins
-// every problem with "; ". Each problem names its environment variable and
-// never includes a value.
+// Validate returns one error joining every problem with "; ". Problems name
+// their variable and never include a value.
 func (c Config) Validate() error {
 	problems := append([]string(nil), c.problems...)
 	problems = append(problems, c.validatePort()...)

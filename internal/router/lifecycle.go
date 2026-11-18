@@ -7,11 +7,8 @@ import (
 	"sync"
 )
 
-// Lifecycle collects the shutdown hooks of work that outlives a request, such as
-// a background job a module starts. A registrar adds a hook with OnClose; the
-// application calls Close once, after the HTTP server has drained and before it
-// closes the database and Redis, so that work can still use them while it
-// finishes.
+// Lifecycle collects shutdown hooks for work that outlives a request. Close
+// runs once, after the HTTP server drains and before the database and Redis close.
 type Lifecycle struct {
 	mu    sync.Mutex
 	hooks []hook

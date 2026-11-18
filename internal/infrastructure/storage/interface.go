@@ -8,27 +8,26 @@ import (
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-// Provider is the full set of operations the storage adapters offer. The media
-// service depends only on the two-method servicemedia.Storage port, which
-// Provider satisfies.
+// Provider is the full set of storage operations; the media service depends only
+// on the two-method servicemedia.Storage port it satisfies.
 type Provider interface {
-	// UploadFile uploads a file from multipart form and returns its storage metadata.
+	// UploadFile stores a multipart file under folder; the object name is generated.
 	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error)
 
-	// UploadFileFromBytes uploads file from byte array and returns its storage metadata.
+	// UploadFileFromBytes is UploadFile for in-memory data; an empty contentType
+	// is stored as application/octet-stream.
 	UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (domainmedia.StoredFile, error)
 
-	// DeleteFile deletes a file using its URL
+	// DeleteFile takes the URL the upload returned, not the object name.
 	DeleteFile(ctx context.Context, fileURL string) error
 
-	// GetFileURL returns the public URL for an object
 	GetFileURL(objectName string) string
 
-	// DownloadFile downloads a file and returns a ReadCloser
+	// DownloadFile takes the object name; the caller must close the reader.
 	DownloadFile(ctx context.Context, objectName string) (io.ReadCloser, error)
 }
 
-// Config holds the configuration for storage providers
+// Config selects and configures a storage provider.
 type Config struct {
 	Provider        string // "minio" or "r2"
 	Endpoint        string

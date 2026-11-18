@@ -18,9 +18,8 @@ const (
 	defaultAllowedContentTypes    = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
 )
 
-// FromEnv reads the process environment as it is. It does not load .env or
-// Consul; the caller does that first. Values it cannot parse fall back to
-// their defaults and are reported later by Validate.
+// FromEnv reads the environment as it is (callers load .env and Consul first).
+// Unparseable values fall back to defaults and are reported by Validate.
 func FromEnv() Config {
 	var l loader
 
@@ -98,9 +97,8 @@ func FromEnv() Config {
 	return cfg
 }
 
-// loader reads the variables introduced with this config. Unlike the legacy
-// seconds forms, they take Go durations, and anything unparsable is recorded
-// for Validate instead of being dropped silently.
+// loader reads variables that take Go durations; anything unparsable is
+// recorded for Validate instead of being dropped silently.
 type loader struct{ problems []string }
 
 func (l *loader) str(key, def string) string {
@@ -123,10 +121,8 @@ func (l *loader) duration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-// megabytes reads a size in whole megabytes and returns it in bytes. The raw
-// number is checked before it is shifted so a huge value cannot wrap around
-// to a small one; an out-of-range value is recorded for Validate and the
-// default is used.
+// megabytes reads whole megabytes and returns bytes. It range-checks before
+// shifting so huge values cannot wrap; invalid values are recorded and the default is used.
 func (l *loader) megabytes(key string, def int) int64 {
 	n := l.integer(key, def)
 	if n < 1 || n > maxSizeMB {
@@ -149,8 +145,8 @@ func (l *loader) integer(key string, def int) int {
 	return n
 }
 
-// locationTimeout keeps the seconds form LOCATION_SERVICE_TIMEOUT_SECONDS has
-// always accepted; a non-positive value means the default.
+// locationTimeout reads LOCATION_SERVICE_TIMEOUT_SECONDS as whole seconds; a
+// non-positive value means the default.
 func locationTimeout() time.Duration {
 	sec := gokit.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", defaultLocationTimeoutSeconds)
 	if sec <= 0 {
@@ -159,8 +155,8 @@ func locationTimeout() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-// locationCacheTTL keeps every form LOCATION_CACHE_TTL has always accepted
-// (Go duration, plain seconds, "eod"); a non-positive value means the default.
+// locationCacheTTL accepts a Go duration, plain seconds or "eod"; a
+// non-positive value means the default.
 func locationCacheTTL() time.Duration {
 	ttl := gokit.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
 	if ttl <= 0 {
@@ -169,10 +165,8 @@ func locationCacheTTL() time.Duration {
 	return ttl
 }
 
-// smtpFromEnv reads the SMTP_* variables (and the mail labels) with the names
-// and defaults authkit's own env helper uses; an unset value stays empty so
-// the mailer applies its default. A port that is not a number is reported
-// through the second result and read as unset.
+// smtpFromEnv reads the SMTP settings; unset values stay empty so the mailer
+// applies its defaults. A non-numeric port is reported via portInvalid.
 func smtpFromEnv() (s SMTP, portInvalid bool) {
 	s = SMTP{
 		Host:         gokit.GetEnv("SMTP_HOST", ""),
@@ -194,7 +188,7 @@ func smtpFromEnv() (s SMTP, portInvalid bool) {
 }
 
 // redisDB returns REDIS_DB and whether it was set to something that is not an
-// integer, which the old startup validation reported.
+// integer, which Validate reports.
 func redisDB() (db int, invalid bool) {
 	raw := strings.TrimSpace(os.Getenv("REDIS_DB"))
 	if raw == "" {

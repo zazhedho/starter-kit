@@ -16,14 +16,12 @@ import (
 )
 
 // remoteConfigCacheKey is the Redis key under which the remote configuration is
-// cached. Its value is part of the cache layout shared with earlier releases.
+// cached. Changing it orphans entries written by running instances.
 const remoteConfigCacheKey = "cache:config:app"
 
-// LoadRemote applies the optional remote or file configuration: Consul when
-// CONSUL is set, otherwise the file named by APP_CONFIG (or config/<APP_ENV>.env).
-// Whatever it finds is exported to the process environment unless CONFIG_ID
-// shows the same version was already applied; FromEnv then reads the result.
-// A missing source is logged and ignored. Call it once, before FromEnv.
+// LoadRemote exports Consul (CONSUL) or file (APP_CONFIG) settings to the
+// environment unless CONFIG_ID shows they were already applied. A missing source
+// is logged and ignored. Call once, before FromEnv.
 func LoadRemote() {
 	confID := getAppConf("CONFIG_ID", "", nil)
 	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %v", confID))

@@ -1,25 +1,9 @@
-// Package app owns the service lifecycle. Run loads and validates the
-// configuration, then New opens the connections, Migrate updates the schema
-// when asked, Serve builds the routes and handles requests until the context
-// ends, and Close releases everything. Every failure is returned as an error;
-// only cmd/api decides to exit the process.
+// Package app owns the service lifecycle: New, Migrate, Serve, Close.
+// Failures are returned as errors; only cmd/api exits the process.
 package app
 
-// Where to add things:
-//
-//   - A new config field: add it to the matching struct in internal/config
-//     (config.go), read it in load.go, and check it in validate.go. Nothing
-//     outside internal/config reads the environment.
-//   - A new dependency (a client, a connection, a provider): open it in
-//     newApp below, keep it on App so Close can release it, and pass it to the
-//     routes through router.Deps in internal/router/router.go.
-//   - A new module: write its packages under domain, services, repositories
-//     and handlers/http, a registrar in internal/router (see location.go) and
-//     one entry in apiRegistrars (or rootRegistrars) in router.go; the README
-//     recipe "Adding a module" walks through it.
-//     Also add the new routes to the expected list in
-//     internal/router/routes_test.go (ownRoutesWithoutMedia), or the route
-//     table test fails.
+// To add a config field, a dependency or a module, see the README sections
+// "Runtime Configuration" and "Adding a module".
 
 import (
 	"context"
@@ -80,9 +64,8 @@ type deps struct {
 	migrate     func(ctx context.Context) error
 }
 
-// Run is the whole program: it loads configuration, builds the App, migrates
-// when asked, and serves until ctx is canceled. args are the command-line
-// arguments without the program name.
+// Run loads configuration, builds the App, migrates when asked, and serves until
+// ctx is canceled. args exclude the program name.
 func Run(ctx context.Context, args []string) error {
 	return run(ctx, args, deps{})
 }
@@ -104,9 +87,8 @@ func run(ctx context.Context, args []string, d deps) error {
 	return execute(ctx, cfg, d)
 }
 
-// loadConfig applies the sources in their fixed order: .env (never overriding
-// the environment), Consul or the config file, the environment, command-line
-// flags, then validation.
+// loadConfig applies .env (never overriding the environment), Consul or file,
+// environment, flags, then validation, in that order.
 func loadConfig(args []string) (config.Config, error) {
 	if err := config.LoadDotEnv(".env"); err != nil {
 		return config.Config{}, fmt.Errorf("load environment: %w", err)
@@ -170,10 +152,8 @@ func execute(ctx context.Context, cfg config.Config, d deps) (err error) {
 	return a.Serve(ctx)
 }
 
-// New opens the database, and Redis and the storage provider when configured,
-// and builds authkit. It builds no routes: Serve does that, after the caller
-// has had the chance to call Migrate. If any step fails, everything already
-// opened is closed and the error is returned.
+// New opens the connections and builds authkit, but no routes (Serve does),
+// so callers can Migrate first. On failure everything opened is closed.
 func New(ctx context.Context, cfg config.Config) (*App, error) {
 	return newApp(ctx, cfg, deps{})
 }
@@ -234,10 +214,8 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 	return a, nil
 }
 
-// authConfig completes authkit's configuration with the open connections. A
-// mailer is passed only when Redis is present (OTP and password reset need
-// it) and SMTP is fully configured; if the sender cannot be built the service
-// continues without it.
+// authConfig adds the open connections to authkit's config. The mailer is
+// set only with Redis and full SMTP settings; otherwise the service runs without it.
 func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Config {
 	authCfg := cfg.Auth
 	authCfg.DB = db
@@ -266,9 +244,8 @@ func brevoConfig(s config.SMTP) authkit.BrevoConfig {
 	}
 }
 
-// buildRoutes creates the router and the HTTP server. It does nothing when
-// they exist already. It runs after the migrations, because registering some
-// routes queries the database.
+// buildRoutes creates the router and server once; it runs after the migrations
+// because some routes query the database.
 func (a *App) buildRoutes() error {
 	if a.engine != nil {
 		return nil
@@ -303,16 +280,14 @@ func (a *App) Handler() http.Handler {
 	return a.engine
 }
 
-// Close stops background work and waits for it, at most HTTP_SHUTDOWN_TIMEOUT,
-// then closes Redis and the database. It is safe to call more than once; only
-// the first call does anything and reports errors.
+// Close stops background work (waiting at most HTTP_SHUTDOWN_TIMEOUT), then closes
+// Redis and the database. Only the first call acts.
 func (a *App) Close() error {
 	return a.closeBy(time.Now().Add(a.cfg.HTTP.ShutdownTimeout))
 }
 
-// closeBy is Close with an explicit shutdown deadline, so that Serve can make
-// the HTTP drain, the lifecycle hooks and the jobs' final writes share the one
-// deadline it computed when shutdown started.
+// closeBy is Close with an explicit deadline so Serve's drain, hooks and final
+// writes share one.
 func (a *App) closeBy(deadline time.Time) error {
 	a.closeMu.Lock()
 	defer a.closeMu.Unlock()
@@ -342,9 +317,8 @@ func (a *App) closeBy(deadline time.Time) error {
 	return errors.Join(errs...)
 }
 
-// setServerIPEnv publishes the host's first non-loopback IPv4 address as
-// ServerIP, which the logger adds to every line. It is the only place outside
-// internal/config that writes the environment.
+// setServerIPEnv publishes the first non-loopback IPv4 address as ServerIP for the
+// logger; the only environment write outside internal/config.
 func setServerIPEnv() error {
 	addr := "unknown"
 	addrs, _ := net.InterfaceAddrs()

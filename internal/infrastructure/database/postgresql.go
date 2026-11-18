@@ -19,12 +19,9 @@ import (
 	"starter-kit/internal/config"
 )
 
-// Open connects to PostgreSQL with the given settings and applies the pool
-// limits. The connection string is parsed by pgx itself and the session time
-// zone is set on the parsed configuration, so neither gorm's driver nor a
-// regular expression ever reads the DSN text. The driver's error text can
-// quote the DSN, so it is never returned, logged, or printed by gorm: a
-// failure is reported as a fixed message that names only the kind of problem.
+// Open connects to PostgreSQL and applies the pool limits. pgx parses the DSN,
+// and its errors can quote it, so they are never returned or logged: failures
+// map to a fixed message.
 func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
 	logus.WriteLog(logus.LogLevelDebug, "database.Open; initialize db connection")
 
@@ -63,12 +60,9 @@ func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 	return db, sqlDB, nil
 }
 
-// sessionParams returns the runtime parameters for the connection with the
-// session time zone applied. When the operator wrote a time zone in
-// DATABASE_URL (zoneInURL) it is kept. In every other case, including the
-// DB_* parts and a DATABASE_URL without a zone, the configured zone wins and
-// replaces any zone already present, such as one pgx merged in from the PGTZ
-// environment variable (PostgreSQL parameter names are case-insensitive).
+// sessionParams applies the configured time zone, except when DATABASE_URL
+// itself sets one (zoneInURL). Otherwise it replaces any zone already present,
+// such as one merged from PGTZ (names are case-insensitive).
 func sessionParams(params map[string]string, timezone string, zoneInURL bool) map[string]string {
 	out := make(map[string]string, len(params)+1)
 	for k, v := range params {
@@ -89,9 +83,8 @@ func sessionParams(params map[string]string, timezone string, zoneInURL bool) ma
 	return out
 }
 
-// urlNamesTimeZone reports whether the DATABASE_URL text itself sets a session
-// time zone, as a URL query parameter or, for the key=value form pgx also
-// accepts, as a keyword. Settings pgx adds from the environment do not count.
+// urlNamesTimeZone reports whether the DATABASE_URL text itself sets a time zone
+// (query parameter or keyword); environment-derived settings do not count.
 func urlNamesTimeZone(raw string) bool {
 	if u, err := url.Parse(raw); err == nil && u.Scheme != "" && strings.Contains(raw, "://") {
 		for k := range u.Query() {
@@ -104,15 +97,13 @@ func urlNamesTimeZone(raw string) bool {
 	return strings.Contains(strings.ToLower(raw), "timezone=")
 }
 
-// failed logs msg and returns it as an error.
 func failed(msg, logPrefix string) error {
 	logus.WriteLog(logus.LogLevelError, logPrefix+msg)
 	return errors.New(msg)
 }
 
-// classify names the kind of connection failure without using any of the
-// driver's text, so an operator can tell a configuration problem (the server
-// answered and refused) from a network one (it never answered).
+// classify names the failure kind without any driver text: configuration (server
+// refused) versus network (no answer).
 func classify(err error) string {
 	var parseErr *pgconn.ParseConfigError
 	var pgErr *pgconn.PgError

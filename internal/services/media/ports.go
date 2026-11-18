@@ -7,9 +7,8 @@ import (
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-// Repository is the persistence the media service needs. The adapter in
-// internal/repositories/media satisfies it by method set and returns
-// domainmedia.ErrNotFound for a missing row.
+// Repository is the persistence the service needs; the adapter satisfies it and
+// returns domainmedia.ErrNotFound for a missing row.
 type Repository interface {
 	Store(ctx context.Context, media domainmedia.Media) error
 	GetByID(ctx context.Context, id string) (domainmedia.Media, error)
