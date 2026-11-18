@@ -13,8 +13,10 @@ package app
 //   - A new dependency (a client, a connection, a provider): open it in
 //     newApp below, keep it on App so Close can release it, and pass it to the
 //     routes through router.Deps in internal/router/router.go.
-//   - A new module: write a registrar in internal/router (see location.go)
-//     and add one entry to apiRegistrars (or rootRegistrars) in router.go.
+//   - A new module: write its packages under domain, services, repositories
+//     and handlers/http, a registrar in internal/router (see location.go) and
+//     one entry in apiRegistrars (or rootRegistrars) in router.go; the README
+//     recipe "Adding a module" walks through it.
 //     Also add the new routes to the expected list in
 //     internal/router/routes_test.go (ownRoutesWithoutMedia), or the route
 //     table test fails.

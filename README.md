@@ -84,31 +84,32 @@ Implemented in this project:
 - Locations
 - Media upload and owner-controlled deletion when `MEDIA_ENABLED=true`
 
-Shared plumbing comes from three modules, each imported through one path: [`github.com/zazhedho/gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils), [`github.com/zazhedho/authkit`](https://github.com/zazhedho/authkit) (authentication, RBAC, audit, mailer) and [`github.com/zazhedho/logus`](https://github.com/zazhedho/logus) (logging). They are pinned to tagged versions in `go.mod` (logus v0.1.1, gokit v0.2.0, authkit v0.2.0).
+Shared plumbing comes from three modules, each imported through one path: [`github.com/zazhedho/gokit`](https://github.com/zazhedho/gokit) (responses, messages, filters, generic repository, middlewares, utils), [`github.com/zazhedho/authkit`](https://github.com/zazhedho/authkit) (authentication, RBAC, audit, mailer) and [`github.com/zazhedho/logus`](https://github.com/zazhedho/logus) (logging). They are pinned to tagged versions in `go.mod`; upgrade them deliberately with `go get <module>@<version>`.
 
 ## Project Structure
 
 ```text
 starter-kit/
-├── cmd/api/                 # main(): signal handling, exit code (nothing else)
+├── cmd/api/                       # main(): signal handling, exit code (nothing else)
 ├── internal/
-│   ├── app/                 # lifecycle: Run, New, Migrate, Serve, Close
-│   ├── config/              # the one config package: Config, FromEnv, Validate, LoadDotEnv, LoadRemote (Consul/file)
-│   ├── router/              # gin engine, global middleware, one register<Module> per module
-│   ├── domain/              # entities and domain errors
-│   ├── dto/
-│   ├── interfaces/          # repository and service contracts
-│   ├── repositories/
-│   ├── services/
-│   ├── handlers/http/
-│   ├── infrastructure/
-│   │   ├── cache/location/  # Redis implementation of the location cache port
-│   │   ├── database/        # PostgreSQL pool, Redis client
-│   │   └── storage/         # object storage providers (MinIO, Cloudflare R2) and InitStorage
-│   └── testutil/            # test helpers (log capture)
-├── migrations/              # this project's own migrations (start at 000005)
-├── deploy/entrypoint.sh     # container entrypoint (runs the migration when asked)
-├── docs/                    # smoke-test.md, postman/ (API collection)
+│   ├── app/                       # lifecycle and composition: Run, New, Migrate, Serve, Close
+│   ├── config/                    # the one config package: Config, FromEnv, Validate, LoadDotEnv, LoadRemote (Consul/file)
+│   ├── router/                    # gin engine, global middleware, one register<Module> per module; wires repository -> service -> handler
+│   ├── domain/<module>/           # entities and domain errors; no framework except gorm.DeletedAt
+│   ├── dto/<module>/              # request and response shapes shared by handler and service
+│   ├── services/<module>/         # business rules; declares the ports it needs (Repository, Cache, Storage) in ports.go
+│   ├── repositories/<module>/     # GORM adapters; translate gorm errors into domain errors
+│   ├── handlers/
+│   │   └── http/<module>/         # gin handlers; declare the Service interface they call (ports.go); map errors to HTTP
+│   ├── infrastructure/            # adapters for the outside world
+│   │   ├── cache/<module>/        # Redis implementations of a service's Cache port
+│   │   ├── database/              # PostgreSQL pool, Redis client
+│   │   └── storage/               # object storage providers (MinIO, Cloudflare R2) and InitStorage
+│   ├── architecture/              # guard tests: the dependency rule, import aliases, package names
+│   └── testutil/                  # test helpers (log capture)
+├── migrations/                    # this project's own migrations (start at 000005)
+├── deploy/entrypoint.sh           # container entrypoint (runs the migration when asked)
+├── docs/                          # smoke-test.md, postman/ (API collection)
 ├── Dockerfile
 ├── Makefile
 └── go.mod
@@ -122,11 +123,54 @@ Pattern for each module:
 route -> handler -> service -> repository -> database
 ```
 
+### Transports: `handlers/<transport>/<module>`
+
+Handlers sit one level below their transport. This service has one transport, HTTP, so handlers are in `internal/handlers/http/<module>`. A second transport gets its own sibling folder with the same per-module layout, for example `internal/handlers/grpc/<module>` or `internal/handlers/queue/<module>`, and calls the same service. Do not flatten `http/` away: it is what keeps a gRPC or queue handler from sharing a package with the gin handlers.
+
+### Dependency rule
+
+Dependencies point inward only: everything depends on `domain` (and `dto`), and nothing in the middle layers imports its neighbours. A layer reaches its neighbour through an interface that the consumer declares.
+
+```text
+  handlers/http   --> domain, dto       calls the Service interface it declares
+  services        --> domain, dto       calls the Repository, Cache and Storage interfaces it declares
+  repositories    --> domain, dto       satisfies services' Repository by method set
+  infrastructure  --> domain, dto       satisfies services' Cache and Storage by method set (and reads config)
+
+  router, app     --> everything        the only code that constructs the pieces and joins them:
+                                        handler(service(repository)), so Go checks every fit at compile time
+```
+
+- `domain` imports nothing from the project, and nothing outside the standard library except `gorm.io/gorm`, for `gorm.DeletedAt`. Entities double as persistence models (gorm and json tags); this is the one documented exception.
+- `dto` imports `domain` at most, never gin, gorm or go-redis.
+- `services` import `domain` and `dto`, never gin, gorm, go-redis, a storage SDK, `gokit`, `authkit`, `config`, `router`, `app`, or anything in `repositories`, `handlers` or `infrastructure`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
+- `handlers` never import `services`, `repositories`, gorm or `infrastructure`; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
+- `repositories` and `infrastructure` never import `services` or `handlers`; they satisfy the services' ports by method set, so Go checks the fit when the router wires them together.
+- Constructors return concrete structs (`NewService`, `NewRepository`, `New`); interfaces live with their consumer, never in a shared `interfaces` package.
+
+`internal/architecture` enforces all of this on every `go test ./...` with `go/parser`, with no extra dependency.
+
+### Names and import aliases
+
+A package is named after its directory (`package location` in `domain/location`, `services/location`, ...), and module names are not repeated inside it: `location.Service`, `location.NewService`, `location.NewRepository`, `location.New` for a handler. Because every module package has the same name, importers always use one alias, `<layer><module>`:
+
+| Directory | Alias for module `location` |
+|---|---|
+| `internal/domain/location` | `domainlocation` |
+| `internal/dto/location` | `dtolocation` |
+| `internal/services/location` | `servicelocation` |
+| `internal/repositories/location` | `repositorylocation` |
+| `internal/handlers/http/location` | `httplocation` (transport plus module) |
+| `internal/infrastructure/cache/location` | `cachelocation` |
+
+The same applies to `media` and to every module you add. goimports and gopls suggest the bare name `location`; the alias is a convention that `internal/architecture` checks, so a wrong alias fails `go test`. Import groups are standard library, third party, then `starter-kit/...`; `make fmt` (`golangci-lint fmt`) keeps them that way.
+
 Rules that keep the structure uniform:
 - Only `cmd/api` calls `os.Exit`; everything else returns errors. Nothing outside `internal/config` reads the environment, and nothing outside `internal/app` opens connections: the router and modules receive a `router.Deps` value.
 - Repositories use the generic repository `gokit.Repository` (`gokit.NewRepository`) from `github.com/zazhedho/gokit` for common CRUD and list queries; module repository files hold only custom queries (joins, aggregates, transactions).
 - Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`.
 - For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods.
+- Background work a module starts (the location sync job) stops through `router.Deps.Lifecycle`: register a hook with `d.Lifecycle.OnClose(name, fn)` and `App.Close` runs it before closing Redis and the database.
 
 ## Startup Flow
 
@@ -160,10 +204,11 @@ cmd/api/main.go
     |
     `- 5. serve until SIGINT/SIGTERM, then shut down gracefully
            stop accepting connections, wait up to HTTP_SHUTDOWN_TIMEOUT for running
-           requests, close Redis, close the database
+           requests, stop background work (a running location sync is canceled and
+           waited for, at most HTTP_SHUTDOWN_TIMEOUT), close Redis, close the database
 ```
 
-The routes are built after the migrations because some modules read their tables when they are registered (the location service marks sync jobs that were interrupted by a previous run), so the first start against an empty database is as quiet as every other start.
+The routes are built after the migrations because some modules read their tables when they are registered (`registerLocation` calls `RecoverInterruptedJobs`, which marks sync jobs left over from a previous run as failed), so the first start against an empty database is as quiet as every other start. If that write fails, route registration fails and the service does not start.
 
 ## Environment
 
@@ -288,13 +333,15 @@ Both probes are on the engine root, outside `/api`:
 
 Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the log (`readyz; database ping failed: ...`), never in the response.
 
-On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it closes Redis and the database and logs `Shutdown complete`, exit code `0`. If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
+On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive connections, and waits up to `HTTP_SHUTDOWN_TIMEOUT` for requests that are already running. Then it stops background work, closes Redis and the database, and logs `Shutdown complete`, exit code `0`. A location sync that is still running is canceled and marked failed with the message `Location sync interrupted` (the state a restart would give it); the service waits for that write, at most `HTTP_SHUTDOWN_TIMEOUT` again, before it closes the connections. If requests are still running when the time limit passes, they are cut off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM while the service is still waiting ends the process at once, without waiting for the remaining requests (the first signal restores the default signal handling). Set the orchestrator's termination grace period above `HTTP_SHUTDOWN_TIMEOUT`.
 
 ### Tests
 
 ```bash
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
 ```
+
+`make fmt` formats the code and the import groups (`golangci-lint fmt`). `internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong import alias, or declares a package name that differs from its directory.
 
 The unit tests need no services. `internal/infrastructure/database` also has integration tests that connect to a real PostgreSQL through both the `DATABASE_URL` and the `DB_*` paths, check the session time zone, and check a role whose password contains spaces, quotes, a backslash, `@`, `:` and `/`. They are skipped unless `STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container; the role they create is dropped afterwards. The tests compile and vet on Linux, macOS, and Windows (`GOOS=windows go vet ./...`).
 
@@ -370,12 +417,13 @@ Location architecture:
 - shared Location Service is used only for sync/import to the database
 - location sync runs asynchronously; start the job with `POST /api/location/sync` and poll its status via `GET /api/location/sync/:id`
 - use scoped sync for regular updates; `level=all` is intended for initial bootstrap because it performs a full hierarchical import
+- the sync job belongs to the running process: on shutdown it is canceled and recorded as failed (`Location sync interrupted`), and a job left queued or running by a crashed process is failed the same way when the next one starts
 
 ## Adding a module
 
-Follow these steps in order. The example adds a `projects` module: a user with `projects:list` can list projects, and a user with `projects:create` can create one. Every file below was compiled and exercised against a real PostgreSQL before it was written here; the code is a recipe to copy and adapt, not part of this repository.
+Follow these steps in order. The example adds a `projects` module: a user with `projects:list` can list projects, and a user with `projects:create` can create one. The Go code below was compiled, vetted and tested (including `internal/architecture` and `TestRouteTable`) in a scratch copy of this repository on 2026-11-18; it is a recipe to copy and adapt, not part of this repository.
 
-The module name `projects` is used for the menu name, the permission resource, the table, and the audit resource. Keep them identical, because menus are derived from permissions by that name.
+The module name `projects` is used for the menu name, the permission resource, the table, and the audit resource. Keep them identical, because menus are derived from permissions by that name. Every package of the module is named `projects` and imported under the alias `<layer>projects` (see [Names and import aliases](#names-and-import-aliases)).
 
 ### 1. Migration: table, menu, and permissions
 
@@ -420,7 +468,7 @@ The migration runs on the next start (or with `-migrate-only`).
 `internal/domain/projects/entity.go`:
 
 ```go
-package domainprojects
+package projects
 
 import "time"
 
@@ -434,36 +482,162 @@ type Project struct {
 }
 ```
 
-### 3. Repository
-
-Declare the contracts in `internal/interfaces/projects/projects.go`, so handlers and services depend on interfaces:
+`internal/domain/projects/errors.go` holds the errors callers match with `errors.Is`. A repository that looks a row up returns a domain `ErrNotFound` instead of the ORM's error (see `internal/domain/media`):
 
 ```go
-package interfaceprojects
+package projects
+
+import "errors"
+
+// ErrNameRequired is returned when a project is created without a name.
+var ErrNameRequired = errors.New("project name is required")
+```
+
+### 3. DTO
+
+`internal/dto/projects/projects.go` holds request shapes that the handler and the service share. Add it only when they share something; it must not import gin or gorm:
+
+```go
+// Package projects holds the request shapes the projects handler and service
+// share. It must not import gin or gorm.
+package projects
+
+// ListRequest is a parsed list query: the handler fills it from the URL, the
+// repository applies it.
+type ListRequest struct {
+	Search         string
+	OrderBy        string
+	OrderDirection string
+	Page           int
+	Limit          int
+	Offset         int
+}
+```
+
+### 4. Service
+
+The service declares the ports it needs in `ports.go`, next to the code that uses them, and holds the business rules. It imports only `domain` and `dto` from this project and no framework: the ID generator is injected, and the caller's identity is a plain argument.
+
+`internal/services/projects/ports.go`:
+
+```go
+package projects
 
 import (
 	"context"
 
-	"github.com/zazhedho/gokit"
-
 	domainprojects "starter-kit/internal/domain/projects"
+	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-type RepoProjectsInterface interface {
+// Repository is the persistence the service needs. The GORM adapter in
+// internal/repositories/projects satisfies it by method set.
+type Repository interface {
 	Store(ctx context.Context, p domainprojects.Project) error
-	List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error)
-}
-
-type ServiceProjectsInterface interface {
-	Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error)
-	List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error)
+	List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error)
 }
 ```
 
-`internal/repositories/projects/projects.go` embeds the generic repository for `Store`, `GetByID`, `Update`, and `Delete`, and adds only the list query:
+`internal/services/projects/service.go`:
 
 ```go
-package repositoryprojects
+package projects
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	domainprojects "starter-kit/internal/domain/projects"
+	dtoprojects "starter-kit/internal/dto/projects"
+)
+
+// Service holds the projects business rules. It imports no framework: ids are
+// injected, and the caller's identity arrives as a plain argument.
+type Service struct {
+	repo  Repository
+	newID func() string
+}
+
+// NewService builds the service. newID returns a new row id; the router passes
+// gokit.CreateUUID, which issues UUIDv7.
+func NewService(repo Repository, newID func() string) *Service {
+	return &Service{repo: repo, newID: newID}
+}
+
+func (s *Service) Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return domainprojects.Project{}, domainprojects.ErrNameRequired
+	}
+	p := domainprojects.Project{ID: s.newID(), OwnerUserID: ownerUserID, Name: name, CreatedAt: time.Now()}
+	if err := s.repo.Store(ctx, p); err != nil {
+		return domainprojects.Project{}, err
+	}
+	return p, nil
+}
+
+func (s *Service) List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
+	return s.repo.List(ctx, req)
+}
+```
+
+Unit-test the service with a fake of its port, no database (`internal/services/projects/service_test.go`):
+
+```go
+package projects
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	domainprojects "starter-kit/internal/domain/projects"
+	dtoprojects "starter-kit/internal/dto/projects"
+)
+
+// fakeRepository satisfies Repository; services are tested without a database.
+type fakeRepository struct {
+	stored domainprojects.Project
+	err    error
+}
+
+func (f *fakeRepository) Store(_ context.Context, p domainprojects.Project) error {
+	f.stored = p
+	return f.err
+}
+
+func (f *fakeRepository) List(context.Context, dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
+	return nil, 0, f.err
+}
+
+func TestCreateTrimsTheNameAndUsesTheInjectedID(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := NewService(repo, func() string { return "p-1" })
+
+	p, err := svc.Create(context.Background(), "u-1", "  First  ")
+	if err != nil {
+		t.Fatalf("Create = %v", err)
+	}
+	if p.ID != "p-1" || p.Name != "First" || repo.stored.OwnerUserID != "u-1" {
+		t.Fatalf("unexpected project %+v, stored %+v", p, repo.stored)
+	}
+}
+
+func TestCreateRejectsABlankName(t *testing.T) {
+	svc := NewService(&fakeRepository{}, func() string { return "p-1" })
+	if _, err := svc.Create(context.Background(), "u-1", "   "); !errors.Is(err, domainprojects.ErrNameRequired) {
+		t.Fatalf("Create = %v, want ErrNameRequired", err)
+	}
+}
+```
+
+### 5. Repository
+
+`internal/repositories/projects/repository.go` is the adapter that satisfies the service's `Repository` port by method set. It returns a concrete `*Repository`; nothing declares an interface for it here. It embeds the generic repository for `Store`, `GetByID`, `Update` and `Delete`, and adds only the list query. Test it with sqlmock like `internal/repositories/media/repository_test.go`.
+
+```go
+package projects
 
 import (
 	"context"
@@ -472,83 +646,68 @@ import (
 	"gorm.io/gorm"
 
 	domainprojects "starter-kit/internal/domain/projects"
-	interfaceprojects "starter-kit/internal/interfaces/projects"
+	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-type repo struct {
+// Repository is the GORM adapter for the projects table. It embeds the generic
+// gokit repository for Store, GetByID, Update and Delete, and adds only the
+// list query. Translate gorm.ErrRecordNotFound into a domain ErrNotFound for
+// any lookup the service exposes, as repositories/media does.
+type Repository struct {
 	*gokit.Repository[domainprojects.Project]
 }
 
-func NewProjectsRepo(db *gorm.DB) interfaceprojects.RepoProjectsInterface {
-	return &repo{Repository: gokit.NewRepository[domainprojects.Project](db)}
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{Repository: gokit.NewRepository[domainprojects.Project](db)}
 }
 
-func (r *repo) List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error) {
+func (r *Repository) List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error) {
+	params := gokit.BaseParams{
+		Search:         req.Search,
+		OrderBy:        req.OrderBy,
+		OrderDirection: req.OrderDirection,
+		Page:           req.Page,
+		Limit:          req.Limit,
+		Offset:         req.Offset,
+	}
 	return r.GetAll(ctx, params, gokit.QueryOptions{
 		Search:              gokit.BuildSearchFunc("name"),
 		AllowedOrderColumns: []string{"name", "created_at"},
 		DefaultOrders:       []string{"created_at DESC"},
 	})
 }
-
-var _ interfaceprojects.RepoProjectsInterface = (*repo)(nil)
 ```
 
 Searchable columns, allowed filters, and sortable columns are configured through `gokit.QueryOptions`; add custom repository methods only for business-specific queries.
 
-### 4. Service
+### 6. Handler
 
-`internal/services/projects/service.go` holds the business rules and returns plain errors that the handler maps to status codes:
+The handler declares the `Service` interface it calls, in `ports.go`, so it never imports the service package.
+
+`internal/handlers/http/projects/ports.go`:
 
 ```go
-package serviceprojects
+package projects
 
 import (
 	"context"
-	"errors"
-	"strings"
-	"time"
-
-	"github.com/google/uuid"
-	"github.com/zazhedho/gokit"
 
 	domainprojects "starter-kit/internal/domain/projects"
-	interfaceprojects "starter-kit/internal/interfaces/projects"
+	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-var ErrNameRequired = errors.New("project name is required")
-
-type service struct {
-	repo interfaceprojects.RepoProjectsInterface
-}
-
-func NewProjectsService(repo interfaceprojects.RepoProjectsInterface) interfaceprojects.ServiceProjectsInterface {
-	return &service{repo: repo}
-}
-
-func (s *service) Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return domainprojects.Project{}, ErrNameRequired
-	}
-	p := domainprojects.Project{ID: uuid.NewString(), OwnerUserID: ownerUserID, Name: name, CreatedAt: time.Now()}
-	if err := s.repo.Store(ctx, p); err != nil {
-		return domainprojects.Project{}, err
-	}
-	return p, nil
-}
-
-func (s *service) List(ctx context.Context, params gokit.BaseParams) ([]domainprojects.Project, int64, error) {
-	return s.repo.List(ctx, params)
+// Service is what the handlers call. The concrete service is in
+// internal/services/projects; the router wires it in.
+type Service interface {
+	Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error)
+	List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error)
 }
 ```
 
-### 5. Handler
-
-`internal/handlers/http/projects/projects.go` embeds `authkit.AuditWriter` and writes an audit event for the success and failure of every mutation. The caller comes from `authkit.ScopeFrom`, which `d.Kit.Auth()` fills in:
+`internal/handlers/http/projects/handler.go` embeds `authkit.AuditWriter` and writes an audit event for the success and failure of every mutation. The caller comes from `authkit.ScopeFrom`, which `d.Kit.Auth()` fills in, and is passed to the service as a plain value. Domain errors become status codes here. Test the handler with a fake `Service` and `httptest`, as `internal/handlers/http/media/handler_test.go` does.
 
 ```go
-package handlerprojects
+package projects
 
 import (
 	"errors"
@@ -558,19 +717,20 @@ import (
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 
-	interfaceprojects "starter-kit/internal/interfaces/projects"
-	serviceprojects "starter-kit/internal/services/projects"
+	domainprojects "starter-kit/internal/domain/projects"
+	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-type ProjectsHandler struct {
-	Service  interfaceprojects.ServiceProjectsInterface
+// Handler embeds authkit.AuditWriter to record every mutation.
+type Handler struct {
+	service  Service
 	pageSize int
 	authkit.AuditWriter
 }
 
-func NewProjectsHandler(svc interfaceprojects.ServiceProjectsInterface, audit authkit.AuditService, pageSize int) *ProjectsHandler {
-	return &ProjectsHandler{
-		Service:     svc,
+func New(svc Service, audit authkit.AuditService, pageSize int) *Handler {
+	return &Handler{
+		service:     svc,
 		pageSize:    pageSize,
 		AuditWriter: authkit.NewAuditWriter(audit, "ProjectsHandler"),
 	}
@@ -580,14 +740,21 @@ type createRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
-func (h *ProjectsHandler) List(ctx *gin.Context) {
+func (h *Handler) List(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
 	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", h.pageSize)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 		return
 	}
-	items, total, err := h.Service.List(ctx.Request.Context(), params)
+	items, total, err := h.service.List(ctx.Request.Context(), dtoprojects.ListRequest{
+		Search:         params.Search,
+		OrderBy:        params.OrderBy,
+		OrderDirection: params.OrderDirection,
+		Page:           params.Page,
+		Limit:          params.Limit,
+		Offset:         params.Offset,
+	})
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
 		return
@@ -595,21 +762,23 @@ func (h *ProjectsHandler) List(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, items))
 }
 
-func (h *ProjectsHandler) Create(ctx *gin.Context) {
+func (h *Handler) Create(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
 	var req createRequest
 	if !gokit.BindJSON(ctx, logID, "[ProjectsHandler][Create]", &req) {
 		return
 	}
 
+	// The handler turns the authenticated scope into the plain input the
+	// service needs; services never import authkit.
 	scope := authkit.ScopeFrom(ctx.Request.Context())
-	p, err := h.Service.Create(ctx.Request.Context(), scope.UserID, req.Name)
+	p, err := h.service.Create(ctx.Request.Context(), scope.UserID, req.Name)
 	if err != nil {
 		h.WriteAudit(ctx, authkit.AuditEvent{
 			Action: authkit.ActionCreate, Resource: "projects",
 			Status: authkit.StatusFailed, Message: "Failed to create project", ErrorMessage: err.Error(),
 		})
-		if errors.Is(err, serviceprojects.ErrNameRequired) {
+		if errors.Is(err, domainprojects.ErrNameRequired) {
 			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 			return
 		}
@@ -625,25 +794,26 @@ func (h *ProjectsHandler) Create(ctx *gin.Context) {
 }
 ```
 
-### 6. Route registrar
+### 7. Route registrar
 
-`internal/router/projects.go` is one function with the registrar signature `func(r gin.IRouter, d Deps) error`. It builds its own repository, service, and handler from `Deps` (`Config`, `DB`, `SQLDB`, `Redis` which may be nil, `Kit`, `Storage` which is nil when media is disabled), mounts routes relative to the group it receives, and returns an error instead of panicking or exiting. It opens no connections. Protect routes with `d.Kit.Auth()` first, then `d.Kit.Can(resource, action)`:
+`internal/router/projects.go` is one function with the registrar signature `func(r gin.IRouter, d Deps) error`. It builds its own repository, service, and handler from `Deps` (`Config`, `DB`, `SQLDB`, `Redis` which may be nil, `Kit`, `Storage` which is nil when media is disabled, `Lifecycle`), mounts routes relative to the group it receives, and returns an error instead of panicking or exiting. It opens no connections. The router is the one place that passes `gokit.CreateUUID` as the ID generator. Protect routes with `d.Kit.Auth()` first, then `d.Kit.Can(resource, action)`:
 
 ```go
 package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/zazhedho/gokit"
 
-	handlerprojects "starter-kit/internal/handlers/http/projects"
+	httpprojects "starter-kit/internal/handlers/http/projects"
 	repositoryprojects "starter-kit/internal/repositories/projects"
 	serviceprojects "starter-kit/internal/services/projects"
 )
 
 func registerProjects(r gin.IRouter, d Deps) error {
-	repo := repositoryprojects.NewProjectsRepo(d.DB)
-	svc := serviceprojects.NewProjectsService(repo)
-	h := handlerprojects.NewProjectsHandler(svc, d.Kit.Audit(), d.Config.Projects.PageSize)
+	repo := repositoryprojects.NewRepository(d.DB)
+	svc := serviceprojects.NewService(repo, gokit.CreateUUID)
+	h := httpprojects.New(svc, d.Kit.Audit(), d.Config.Projects.PageSize)
 
 	projects := r.Group("/projects").Use(d.Kit.Auth())
 	{
@@ -654,9 +824,9 @@ func registerProjects(r gin.IRouter, d Deps) error {
 }
 ```
 
-Avoid role-name checks for module access (`d.Kit.Role(...)`) unless the case is explicitly special, like `superadmin`.
+If the module starts background work, register its stop function with `d.Lifecycle.OnClose("projects job", svc.Close)`, and call any startup recovery (like `registerLocation` does with `RecoverInterruptedJobs`) in the registrar, never in the constructor. Avoid role-name checks for module access (`d.Kit.Role(...)`) unless the case is explicitly special, like `superadmin`.
 
-### 7. One line in `router.New`
+### 8. One line in `router.New`
 
 Add the module to the registrar list in `internal/router/router.go`. Modules under `/api` go in `apiRegistrars` (mounted after authkit's own routes); only probes belong in `rootRegistrars`. A registrar error stops startup with `register projects routes: ...`.
 
@@ -668,7 +838,7 @@ var apiRegistrars = []registrar{
 }
 ```
 
-### 8. Optional: configuration
+### 9. Optional: configuration
 
 If the module needs settings, add them to `internal/config`, never read the environment from the module:
 
@@ -702,7 +872,7 @@ If the module needs settings, add them to `internal/config`, never read the envi
 
 4. document the variable, with its default as a comment, in `.env.example`, and use it from the registrar as `d.Config.Projects.PageSize`.
 
-### 9. Add the routes to the route-table test
+### 10. Add the routes to the route-table test
 
 `internal/router/routes_test.go` lists this service's own routes by hand, in the variables `ownRoutesWithoutMedia` (and `mediaRoutes` for the media routes). A new module's routes make `TestRouteTable` fail until they are added there, so add them on purpose:
 
@@ -714,7 +884,7 @@ ownRoutesWithoutMedia = []string{
 }
 ```
 
-### 10. Check it
+### 11. Check it
 
 ```bash
 go build ./... && go vet ./... && go test -race -count=1 ./... && make lint
@@ -722,7 +892,7 @@ go run ./cmd/api -migrate-only   # applies migration 000007
 go run ./cmd/api
 ```
 
-With the seed above, `admin` and `superadmin` hold the `projects` permissions. A new user has the `viewer` role, so `GET /api/projects` answers `401` without a token and `403` with a viewer token until a role is granted `projects:list` (see the role flow below). `POST /api/projects` with `{"name":"First project"}` answers `201`, and `GET /api/projects?search=first` lists it. The audit trail gets a `projects` / `create` entry.
+`go test` runs `internal/architecture`: a wrong import, alias or package name in the new module fails there with the offending file. With the seed above, `admin` and `superadmin` hold the `projects` permissions. A new user has the `viewer` role, so `GET /api/projects` answers `401` without a token and `403` with a viewer token until a role is granted `projects:list` (see the role flow below). `POST /api/projects` with `{"name":"First project"}` answers `201`, and `GET /api/projects?search=first` lists it. The audit trail gets a `projects` / `create` entry.
 
 ## Role Management Flow
 
