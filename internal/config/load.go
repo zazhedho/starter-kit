@@ -10,13 +10,7 @@ import (
 	"github.com/zazhedho/gokit"
 )
 
-const (
-	defaultLocationServiceBaseURL = "https://location-service-y7si.onrender.com"
-	defaultLocationTimeoutSeconds = 20
-	defaultLocationCacheTTL       = 180 * 24 * time.Hour
-	maxSizeMB                     = 1024
-	defaultAllowedContentTypes    = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
-)
+const maxSizeMB = 1024
 
 // FromEnv reads the environment as it is (callers load .env and Consul first).
 // Unparseable values fall back to defaults and are reported by Validate.
@@ -55,33 +49,11 @@ func FromEnv() Config {
 			Run:  gokit.GetEnv("RUN_MIGRATION", true),
 			Path: l.str("PATH_MIGRATE", "file://migrations"),
 		},
-		Location: Location{
-			ServiceBaseURL: strings.TrimRight(l.str("LOCATION_SERVICE_BASE_URL", defaultLocationServiceBaseURL), "/"),
-			SourceYear:     gokit.GetEnv("LOCATION_SOURCE_YEAR", ""),
-			ServiceTimeout: locationTimeout(),
-			CacheTTL:       locationCacheTTL(),
-		},
-		Media: Media{
-			Enabled:             gokit.GetEnv("MEDIA_ENABLED", false),
-			MaxFileSizeBytes:    l.megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
-			AllowedContentTypes: splitList(l.str("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
-			UploadRateLimit:     gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
-			UploadRateWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
-			UploadTimeout:       l.duration("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
-		},
-		Storage: Storage{
-			Provider:    gokit.NormalizeKey(l.str("STORAGE_PROVIDER", "minio")),
-			Endpoint:    gokit.GetEnv("STORAGE_ENDPOINT", ""),
-			AccessKey:   gokit.GetEnv("STORAGE_ACCESS_KEY", ""),
-			SecretKey:   gokit.GetEnv("STORAGE_SECRET_KEY", ""),
-			Bucket:      gokit.GetEnv("STORAGE_BUCKET_NAME", ""),
-			BaseURL:     gokit.GetEnv("STORAGE_BASE_URL", ""),
-			Region:      l.str("STORAGE_REGION", "auto"),
-			R2AccountID: gokit.GetEnv("R2_ACCOUNT_ID", ""),
-			UseSSL:      gokit.GetEnv("STORAGE_USE_SSL", false),
-		},
-		Auth: authkit.ConfigFromEnv(),
+		Location: locationFromEnv(&l),
+		Auth:     authkit.ConfigFromEnv(),
 	}
+
+	cfg.Media, cfg.Storage = mediaFromEnv(&l)
 
 	cfg.Redis = Redis{
 		URL:      gokit.GetEnv("REDIS_URL", ""),
@@ -145,26 +117,6 @@ func (l *loader) integer(key string, def int) int {
 	return n
 }
 
-// locationTimeout reads LOCATION_SERVICE_TIMEOUT_SECONDS as whole seconds; a
-// non-positive value means the default.
-func locationTimeout() time.Duration {
-	sec := gokit.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", defaultLocationTimeoutSeconds)
-	if sec <= 0 {
-		sec = defaultLocationTimeoutSeconds
-	}
-	return time.Duration(sec) * time.Second
-}
-
-// locationCacheTTL accepts a Go duration, plain seconds or "eod"; a
-// non-positive value means the default.
-func locationCacheTTL() time.Duration {
-	ttl := gokit.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
-	if ttl <= 0 {
-		return defaultLocationCacheTTL
-	}
-	return ttl
-}
-
 // smtpFromEnv reads the SMTP settings; unset values stay empty so the mailer
 // applies its defaults. A non-numeric port is reported via portInvalid.
 func smtpFromEnv() (s SMTP, portInvalid bool) {
@@ -199,14 +151,4 @@ func redisDB() (db int, invalid bool) {
 		return 0, true
 	}
 	return n, false
-}
-
-func splitList(v string) []string {
-	var out []string
-	for _, part := range strings.Split(v, ",") {
-		if part = strings.TrimSpace(part); part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
