@@ -12,9 +12,8 @@ CREATE TABLE IF NOT EXISTS media (
         FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
 
-CREATE INDEX IF NOT EXISTS idx_media_owner_user_id ON media(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_media_deleted_at ON media(deleted_at);
-CREATE INDEX IF NOT EXISTS idx_media_owner_created_at ON media(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_media_owner_created_at ON media(owner_user_id, created_at DESC, id DESC);
 
 -- Acting on your own files needs no permission; the _any actions cover everyone's.
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
