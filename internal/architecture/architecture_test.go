@@ -161,6 +161,12 @@ var rules = []rule{
 		tree:           "internal/router",
 		forbidInternal: []string{"internal/app"},
 	},
+	{
+		// The leaf imports no feature module, so a module never reaches another
+		// through it.
+		tree:           routerLeaf,
+		forbidInternal: []string{"internal/domain", "internal/dto", "internal/services", "internal/repositories", "internal/handlers", "internal/infrastructure/cache", "internal/app"},
+	},
 }
 
 func isStdlib(importPath string) bool {
@@ -273,7 +279,7 @@ func TestImportRule(t *testing.T) {
 }
 
 func TestRulesDetectViolations(t *testing.T) {
-	var services, domain, dto rule
+	var services, domain, dto, leaf rule
 	for _, r := range rules {
 		switch r.tree {
 		case "internal/services":
@@ -282,6 +288,8 @@ func TestRulesDetectViolations(t *testing.T) {
 			domain = r
 		case "internal/dto":
 			dto = r
+		case routerLeaf:
+			leaf = r
 		}
 	}
 	cases := []struct {
@@ -311,6 +319,12 @@ func TestRulesDetectViolations(t *testing.T) {
 		{"dto imports config", dto, "starter-kit/internal/config", false, true},
 		{"dto imports uuid", dto, "github.com/google/uuid", false, true},
 		{"dto imports gin", dto, "github.com/gin-gonic/gin", false, true},
+		{"router leaf imports a service", leaf, "starter-kit/internal/services/media", false, true},
+		{"router leaf imports a domain", leaf, "starter-kit/internal/domain/media", false, true},
+		{"router leaf imports a handler", leaf, "starter-kit/internal/handlers/http/media", false, true},
+		{"router leaf imports the storage abstraction", leaf, "starter-kit/internal/infrastructure/storage", false, false},
+		{"router leaf imports config", leaf, "starter-kit/internal/config", false, false},
+		{"router leaf imports app", leaf, "starter-kit/internal/app", false, true},
 	}
 	for _, c := range cases {
 		if got := violates(c.r, c.ip, c.isTest); got != c.want {
@@ -346,15 +360,50 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 	})
 }
 
-// moduleAliasPrefix maps each per-module package tree to the import-alias prefix
-// importers must use (domainlocation, httpmedia). Handlers use "http" to leave room for other transports.
+// moduleAliasPrefix maps each fixed per-module package tree to the import-alias
+// prefix importers must use (domainlocation, routermedia). Handler trees are not
+// listed: internal/handlers/<transport>/<module> derives its prefix from the
+// transport directory, so a new transport (grpc, queue) needs no edit here.
 var moduleAliasPrefix = map[string]string{
 	"internal/domain":               "domain",
 	"internal/dto":                  "dto",
 	"internal/services":             "service",
 	"internal/repositories":         "repository",
-	"internal/handlers/http":        "http",
 	"internal/infrastructure/cache": "cache",
+	"internal/router":               "router",
+}
+
+const (
+	handlersTree = "internal/handlers"
+	// routerLeaf is the package every router/<module> imports for Deps and
+	// Lifecycle. It is shared infrastructure, not a module: it has no alias prefix
+	// and is skipped by the cross-module rule.
+	routerLeaf = "internal/router/module"
+)
+
+// moduleTree splits a module-relative package path under a per-module tree into
+// its alias prefix, business module and the path below the module ("" for the
+// module's own package). ok is false outside the per-module trees and for the
+// router leaf.
+func moduleTree(p string) (prefix, module, rest string, ok bool) {
+	if p == routerLeaf || strings.HasPrefix(p, routerLeaf+"/") {
+		return "", "", "", false
+	}
+	if below, found := strings.CutPrefix(p, handlersTree+"/"); found {
+		transport, inside, found := strings.Cut(below, "/")
+		if !found || inside == "" {
+			return "", "", "", false
+		}
+		module, rest, _ = strings.Cut(inside, "/")
+		return transport, module, rest, true
+	}
+	for tree, prefix := range moduleAliasPrefix {
+		if below, found := strings.CutPrefix(p, tree+"/"); found {
+			module, rest, _ = strings.Cut(below, "/")
+			return prefix, module, rest, true
+		}
+	}
+	return "", "", "", false
 }
 
 // expectedAlias returns the alias the import convention demands for importPath,
@@ -364,9 +413,8 @@ func expectedAlias(importPath string) string {
 	if !ok {
 		return ""
 	}
-	dir, module := path.Split(internal)
-	prefix, ok := moduleAliasPrefix[strings.TrimSuffix(dir, "/")]
-	if !ok || module == "" {
+	prefix, module, rest, ok := moduleTree(internal)
+	if !ok || rest != "" {
 		return ""
 	}
 	return prefix + module
@@ -437,6 +485,13 @@ func TestExpectedAlias(t *testing.T) {
 		"starter-kit/internal/config":                        "",
 		"github.com/gin-gonic/gin":                           "",
 		"starter-kit/internal/handlers/http":                 "",
+		"starter-kit/internal/router/location":               "routerlocation",
+		"starter-kit/internal/router/media":                  "routermedia",
+		"starter-kit/internal/router/module":                 "", // reserved leaf, imported as module
+		"starter-kit/internal/router":                        "",
+		"starter-kit/internal/handlers/grpc/location":        "grpclocation",
+		"starter-kit/internal/handlers/queue/media":          "queuemedia",
+		"starter-kit/internal/handlers/grpc":                 "",
 	}
 	for ip, want := range cases {
 		if got := expectedAlias(ip); got != want {
@@ -461,15 +516,10 @@ func TestPackageNameMatchesDirectory(t *testing.T) {
 }
 
 // moduleOf returns the business module a module-relative path belongs to, or ""
-// outside the per-module trees (see moduleAliasPrefix).
+// outside the per-module trees (see moduleTree).
 func moduleOf(p string) string {
-	for tree := range moduleAliasPrefix {
-		if rest, ok := strings.CutPrefix(p, tree+"/"); ok {
-			module, _, _ := strings.Cut(rest, "/")
-			return module
-		}
-	}
-	return ""
+	_, module, _, _ := moduleTree(p)
+	return module
 }
 
 // crossesModules reports whether a file in directory dir (module-relative)
@@ -513,6 +563,16 @@ func TestCrossModuleRuleDetectsViolations(t *testing.T) {
 		{"nested package imports its own module", "internal/services/media/upload", "starter-kit/internal/domain/media", false},
 		{"media service imports infrastructure", "internal/services/media", "starter-kit/internal/infrastructure/storage", false},
 		{"router imports both modules", "internal/router", "starter-kit/internal/services/location", false},
+		{"router/location imports router/module", "internal/router/location", "starter-kit/internal/router/module", false},
+		{"router/location imports its own service", "internal/router/location", "starter-kit/internal/services/location", false},
+		{"router/location imports router/media", "internal/router/location", "starter-kit/internal/router/media", true},
+		{"router/media imports location domain", "internal/router/media", "starter-kit/internal/domain/location", true},
+		{"location service imports router/media", "internal/services/location", "starter-kit/internal/router/media", true},
+		{"router/module imports a module", "internal/router/module", "starter-kit/internal/services/media", false},
+		{"grpc handler imports another module's domain", "internal/handlers/grpc/media", "starter-kit/internal/domain/location", true},
+		{"grpc handler imports http handler of the same module", "internal/handlers/grpc/media", "starter-kit/internal/handlers/http/media", false},
+		{"grpc handler imports http handler of another module", "internal/handlers/grpc/media", "starter-kit/internal/handlers/http/location", true},
+		{"transport root package", "internal/handlers/grpc", "starter-kit/internal/domain/location", false},
 		{"media service imports a third party", "internal/services/media", "github.com/google/uuid", false},
 	}
 	for _, c := range cases {
