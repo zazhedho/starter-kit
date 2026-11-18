@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -45,9 +46,9 @@ func (l *Lifecycle) Close(ctx context.Context) error {
 	l.mu.Unlock()
 
 	var errs []error
-	for i := len(hooks) - 1; i >= 0; i-- {
-		if err := hooks[i].fn(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("close %s: %w", hooks[i].name, err))
+	for _, hook := range slices.Backward(hooks) {
+		if err := hook.fn(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("close %s: %w", hook.name, err))
 		}
 	}
 	return errors.Join(errs...)
