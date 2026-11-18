@@ -3,3 +3,6 @@ set -e
 
 echo "pre-push: running lint..."
 make lint
+
+echo "pre-push: running tests..."
+make test

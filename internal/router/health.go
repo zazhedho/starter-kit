@@ -9,11 +9,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/zazhedho/logus"
+
+	"starter-kit/internal/router/module"
 )
 
 const readyTimeout = 2 * time.Second
 
-func registerHealth(r gin.IRouter, d Deps) error {
+func registerHealth(r gin.IRouter, d module.Deps) error {
 	r.GET("/healthcheck", func(ctx *gin.Context) {
 		logus.WriteLogWithContext(ctx, logus.LogLevelDebug, "ClientIP: "+ctx.ClientIP())
 		ctx.JSON(http.StatusOK, gin.H{
@@ -35,7 +37,7 @@ func registerHealth(r gin.IRouter, d Deps) error {
 	return nil
 }
 
-func ping(ctx context.Context, d Deps) error {
+func ping(ctx context.Context, d module.Deps) error {
 	if d.SQLDB == nil {
 		return errors.New("database is not configured")
 	}

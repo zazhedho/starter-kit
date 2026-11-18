@@ -175,20 +175,6 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	}
 }
 
-func TestFromEnvKeepsLegacySecondsForms(t *testing.T) {
-	clearEnv(t)
-	setRequiredEnv(t)
-	t.Setenv("LOCATION_SERVICE_TIMEOUT_SECONDS", "0")
-	t.Setenv("LOCATION_CACHE_TTL", "3600")
-	cfg := FromEnv()
-	if cfg.Location.ServiceTimeout != 20*time.Second {
-		t.Fatalf("non-positive timeout must fall back to 20s, got %v", cfg.Location.ServiceTimeout)
-	}
-	if cfg.Location.CacheTTL != time.Hour {
-		t.Fatalf("plain seconds LOCATION_CACHE_TTL must be accepted, got %v", cfg.Location.CacheTTL)
-	}
-}
-
 func TestFromEnvReadsSMTP(t *testing.T) {
 	clearEnv(t)
 	setRequiredEnv(t)
@@ -394,31 +380,6 @@ func TestValidate(t *testing.T) {
 		)
 	})
 
-	t.Run("requires storage when media enabled", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("MEDIA_ENABLED", "true")
-		t.Setenv("MEDIA_MAX_FILE_SIZE_MB", "0")
-		t.Setenv("STORAGE_PROVIDER", "r2")
-		wantInError(t, validateFromEnv(t),
-			"STORAGE_ENDPOINT is required when storage is configured",
-			"STORAGE_ACCESS_KEY is required when storage is configured",
-			"STORAGE_BASE_URL is required when media is enabled",
-			"MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024",
-		)
-	})
-
-	t.Run("rejects invalid storage base url", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("STORAGE_ENDPOINT", "localhost:9000")
-		t.Setenv("STORAGE_ACCESS_KEY", "k")
-		t.Setenv("STORAGE_SECRET_KEY", "s")
-		t.Setenv("STORAGE_BUCKET_NAME", "b")
-		t.Setenv("STORAGE_BASE_URL", "not a url")
-		wantInError(t, validateFromEnv(t), "STORAGE_BASE_URL must be a valid URL")
-	})
-
 	t.Run("http timeouts must be positive", func(t *testing.T) {
 		clearEnv(t)
 		setRequiredEnv(t)
@@ -458,40 +419,6 @@ func TestValidate(t *testing.T) {
 		wantInError(t, validateFromEnv(t), "DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_IDLE_TIME")
 	})
 
-	t.Run("max body must exceed media max file size", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("MEDIA_ENABLED", "true")
-		t.Setenv("STORAGE_ENDPOINT", "localhost:9000")
-		t.Setenv("STORAGE_ACCESS_KEY", "k")
-		t.Setenv("STORAGE_SECRET_KEY", "s")
-		t.Setenv("STORAGE_BUCKET_NAME", "b")
-		t.Setenv("STORAGE_BASE_URL", "http://localhost:9000")
-		t.Setenv("MEDIA_MAX_FILE_SIZE_MB", "10")
-		t.Setenv("HTTP_MAX_BODY_MB", "10")
-		wantInError(t, validateFromEnv(t), "HTTP_MAX_BODY_MB", "MEDIA_MAX_FILE_SIZE_MB")
-
-		t.Setenv("HTTP_MAX_BODY_MB", "11")
-		if err := validateFromEnv(t); err != nil {
-			t.Fatalf("body larger than max file size must pass, got %v", err)
-		}
-	})
-
-	t.Run("unknown timezone", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("APP_TIMEZONE", "Mars/Olympus")
-		wantInError(t, validateFromEnv(t), "APP_TIMEZONE")
-	})
-
-	t.Run("collects several problems in one error", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("PORT", "0")
-		t.Setenv("APP_TIMEZONE", "Mars/Olympus")
-		err := validateFromEnv(t)
-		wantInError(t, err, "PORT must be a number between 1 and 65535", "APP_TIMEZONE", "; ")
-	})
 }
 
 func TestValidateErrorsNeverContainSecrets(t *testing.T) {

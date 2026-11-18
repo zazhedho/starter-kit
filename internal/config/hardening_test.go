@@ -61,43 +61,6 @@ func TestRedactionHoldsForGoSyntaxPrinting(t *testing.T) {
 	}
 }
 
-func TestMediaUploadRateIsValidatedWhenMediaEnabled(t *testing.T) {
-	for _, bad := range []string{"-5", "0"} {
-		t.Run("limit="+bad, func(t *testing.T) {
-			clearEnv(t)
-			setRequiredEnv(t)
-			enableMediaEnv(t)
-			t.Setenv("MEDIA_UPLOAD_RATE_LIMIT", bad)
-			wantInError(t, validateFromEnv(t), "MEDIA_UPLOAD_RATE_LIMIT")
-		})
-		t.Run("window="+bad, func(t *testing.T) {
-			clearEnv(t)
-			setRequiredEnv(t)
-			enableMediaEnv(t)
-			t.Setenv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", bad)
-			wantInError(t, validateFromEnv(t), "MEDIA_UPLOAD_RATE_WINDOW_SECONDS")
-		})
-	}
-	t.Run("ignored when media disabled", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("MEDIA_UPLOAD_RATE_LIMIT", "0")
-		if err := validateFromEnv(t); err != nil {
-			t.Fatalf("expected success with media disabled, got %v", err)
-		}
-	})
-}
-
-func enableMediaEnv(t *testing.T) {
-	t.Helper()
-	t.Setenv("MEDIA_ENABLED", "true")
-	t.Setenv("STORAGE_ENDPOINT", "files.example.com")
-	t.Setenv("STORAGE_ACCESS_KEY", "access")
-	t.Setenv("STORAGE_SECRET_KEY", "secret")
-	t.Setenv("STORAGE_BUCKET_NAME", "bucket")
-	t.Setenv("STORAGE_BASE_URL", "https://files.example.com")
-}
-
 func TestHostAndPortValuesAreTrimmed(t *testing.T) {
 	clearEnv(t)
 	setRequiredEnv(t)

@@ -4,7 +4,6 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -116,31 +115,6 @@ type Migrate struct {
 	Path      string
 }
 
-type Location struct {
-	ServiceBaseURL, SourceYear string
-	ServiceTimeout, CacheTTL   time.Duration
-}
-
-type Media struct {
-	Enabled             bool
-	MaxFileSizeBytes    int64
-	AllowedContentTypes []string
-	UploadRateLimit     int
-	UploadRateWindow    time.Duration
-	UploadTimeout       time.Duration
-}
-
-type Storage struct {
-	Provider, Endpoint, AccessKey, SecretKey, Bucket, BaseURL, Region, R2AccountID string
-	UseSSL                                                                         bool
-}
-
-// String redacts both keys.
-func (s Storage) String() string {
-	return fmt.Sprintf("Storage{Provider:%q Endpoint:%q AccessKey:%s SecretKey:%s Bucket:%q BaseURL:%q Region:%q R2AccountID:%q UseSSL:%t}",
-		s.Provider, s.Endpoint, redact(s.AccessKey), redact(s.SecretKey), s.Bucket, withoutUserinfo(s.BaseURL), s.Region, s.R2AccountID, s.UseSSL)
-}
-
 // String is safe to log: secrets are reported only as set or unset, and Auth
 // goes through its own redacting String.
 func (c Config) String() string {
@@ -152,18 +126,7 @@ func (c Config) String() string {
 func (c Config) GoString() string   { return c.String() }
 func (d Database) GoString() string { return d.String() }
 func (r Redis) GoString() string    { return r.String() }
-func (s Storage) GoString() string  { return s.String() }
 func (s SMTP) GoString() string     { return s.String() }
-
-// withoutUserinfo drops any user:password part of a URL so it can be printed.
-func withoutUserinfo(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "invalid"
-	}
-	u.User = nil
-	return u.String()
-}
 
 func redact(v string) string {
 	if strings.TrimSpace(v) == "" {

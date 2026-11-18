@@ -9,8 +9,6 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-
-	domainmedia "starter-kit/internal/domain/media"
 )
 
 // MinIOAdapter is the MinIO implementation of Provider.
@@ -66,7 +64,7 @@ func NewMinIOAdapter(config Config) (*MinIOAdapter, error) {
 	}, nil
 }
 
-func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
+func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (StoredFile, error) {
 	objectName := buildObjectName(fileHeader.Filename, folder)
 
 	fileSize := fileHeader.Size
@@ -80,13 +78,13 @@ func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, file
 		ContentType: contentType,
 	})
 	if err != nil {
-		return domainmedia.StoredFile{}, fmt.Errorf("failed to upload file: %w", err)
+		return StoredFile{}, fmt.Errorf("failed to upload file: %w", err)
 	}
 
-	return domainmedia.StoredFile{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
+	return StoredFile{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
 }
 
-func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (domainmedia.StoredFile, error) {
+func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, filename string, folder string, contentType string) (StoredFile, error) {
 	objectName := buildObjectName(filename, folder)
 
 	if contentType == "" {
@@ -98,10 +96,10 @@ func (m *MinIOAdapter) UploadFileFromBytes(ctx context.Context, data []byte, fil
 		ContentType: contentType,
 	})
 	if err != nil {
-		return domainmedia.StoredFile{}, fmt.Errorf("failed to upload file: %w", err)
+		return StoredFile{}, fmt.Errorf("failed to upload file: %w", err)
 	}
 
-	return domainmedia.StoredFile{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
+	return StoredFile{ObjectName: objectName, URL: m.GetFileURL(objectName)}, nil
 }
 
 func (m *MinIOAdapter) DeleteFile(ctx context.Context, fileURL string) error {

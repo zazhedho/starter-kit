@@ -1,16 +1,16 @@
-package router
+package location
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/zazhedho/gokit"
 
 	httplocation "starter-kit/internal/handlers/http/location"
 	cachelocation "starter-kit/internal/infrastructure/cache/location"
 	repositorylocation "starter-kit/internal/repositories/location"
+	"starter-kit/internal/router/module"
 	servicelocation "starter-kit/internal/services/location"
 )
 
@@ -18,7 +18,14 @@ import (
 // variable so tests can shorten it.
 var recoveryTimeout = 10 * time.Second
 
-func registerLocation(r gin.IRouter, d Deps) error {
+// wired is what the location routes need once the module is built.
+type wired struct {
+	handler *httplocation.Handler
+}
+
+// wire builds repository, cache, service and handler, fails sync jobs a previous
+// process left behind, and registers the service's shutdown hook.
+func wire(d module.Deps) (*wired, error) {
 	loc := d.Config.Location
 	repo := repositorylocation.NewRepository(d.DB)
 	svc := servicelocation.NewService(repo, servicelocation.Options{
@@ -35,23 +42,8 @@ func registerLocation(r gin.IRouter, d Deps) error {
 	recoverCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
 	defer cancel()
 	if err := svc.RecoverInterruptedJobs(recoverCtx); err != nil {
-		return fmt.Errorf("recover location sync jobs: %w", err)
+		return nil, fmt.Errorf("recover location sync jobs: %w", err)
 	}
 	d.Lifecycle.OnClose("location sync", svc.Close)
-	h := httplocation.New(svc)
-
-	location := r.Group("/location")
-	{
-		location.GET("/province", h.GetProvince)
-		location.GET("/city", h.GetCity)
-		location.GET("/district", h.GetDistrict)
-		location.GET("/village", h.GetVillage)
-	}
-
-	locationPriv := r.Group("/location").Use(d.Kit.Auth())
-	{
-		locationPriv.POST("/sync", d.Kit.Can("locations", "sync"), h.Sync)
-		locationPriv.GET("/sync/:id", d.Kit.Can("locations", "sync"), h.GetSyncJob)
-	}
-	return nil
+	return &wired{handler: httplocation.New(svc)}, nil
 }

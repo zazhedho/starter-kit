@@ -872,3 +872,32 @@ func TestShutdownSharesOneDeadline(t *testing.T) {
 		t.Fatalf("shutdown took %s, want about one timeout (%s)", elapsed, cfg.HTTP.ShutdownTimeout)
 	}
 }
+
+// ModuleDeps is what the routes (and a later worker or second transport) are
+// wired from: the App's own connections, config and shutdown hooks.
+func TestModuleDepsExposesTheAppsDependencies(t *testing.T) {
+	cfg := testConfig()
+	cfg.Media.Enabled = true
+	cfg.Media.MaxFileSizeBytes = 1 << 20
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), cfg, deps{
+		openDB:      open,
+		initStorage: func(config.Storage) (storage.Provider, error) { return nopStorage{}, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close() }()
+
+	d := a.ModuleDeps()
+	if d.DB != a.db || d.SQLDB != a.sqlDB || d.Redis != a.redis || d.Kit != a.kit {
+		t.Fatal("ModuleDeps does not carry the App's connections and kit")
+	}
+	if d.Storage == nil || d.Config.Media.Enabled != cfg.Media.Enabled {
+		t.Fatalf("ModuleDeps lost the storage or the config: %+v", d)
+	}
+	if d.Lifecycle != a.lifecycle {
+		t.Fatal("ModuleDeps must share the App's Lifecycle so hooks run at Close")
+	}
+}

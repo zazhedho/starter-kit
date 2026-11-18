@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8a22c5f4-87f9-4c31-a3b5-8f7c6d1cf7f1",
     "name": "Starter Kit API",
-    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables. Auth responses use access_token; there is no legacy data.token field.",
+    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables. Auth responses return access_token and refresh_token.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -2118,7 +2118,7 @@
           "response": []
         }
       ],
-      "description": "Runtime reads use Redis then PostgreSQL. External API is used only by the sync endpoint to refresh database data."
+      "description": "Runtime reads use Redis then PostgreSQL. The external Location Service is used by the sync endpoint and, when a read finds no rows, as a fallback fetch that fills the database."
     }
   ]
 }

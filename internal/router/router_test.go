@@ -1,76 +1,23 @@
 package router
 
 import (
-	"bytes"
-	"context"
-	"database/sql"
 	"errors"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"net/textproto"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"github.com/zazhedho/authkit"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 
 	"starter-kit/internal/config"
-	domainmedia "starter-kit/internal/domain/media"
+	"starter-kit/internal/router/module"
+	"starter-kit/internal/testutil/routertest"
 )
 
-func newDryRunDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{
-		DryRun:                 true,
-		DisableAutomaticPing:   true,
-		SkipDefaultTransaction: true,
-	})
-	if err != nil {
-		t.Fatalf("open gorm: %v", err)
-	}
-	return db, sqlDB, mock
-}
-
-func newTestDepsWithMock(t *testing.T, mutate func(*config.Config)) (Deps, sqlmock.Sqlmock) {
-	t.Helper()
-	db, sqlDB, mock := newDryRunDB(t)
-	cfg := config.FromEnv()
-	cfg.Media.Enabled = false
-	if mutate != nil {
-		mutate(&cfg)
-	}
-	kit, err := authkit.New(authkit.Config{
-		DB:      db,
-		AppName: "starter-kit-test",
-		JWTKey:  "test-jwt-key-that-is-at-least-32-characters-long",
-	})
-	if err != nil {
-		t.Fatalf("authkit.New: %v", err)
-	}
-	return Deps{Config: cfg, DB: db, SQLDB: sqlDB, Kit: kit, Lifecycle: &Lifecycle{}}, mock
-}
-
-func newTestDeps(t *testing.T, mutate func(*config.Config)) Deps {
-	t.Helper()
-	d, _ := newTestDepsWithMock(t, mutate)
-	return d
-}
-
-func newEngine(t *testing.T, d Deps) *gin.Engine {
+func newEngine(t *testing.T, d module.Deps) *gin.Engine {
 	t.Helper()
 	engine, err := New(d)
 	if err != nil {
@@ -79,14 +26,8 @@ func newEngine(t *testing.T, d Deps) *gin.Engine {
 	return engine
 }
 
-func serve(engine http.Handler, method, path string) int {
-	rec := httptest.NewRecorder()
-	engine.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
-	return rec.Code
-}
-
 func TestNewRegistersHealthcheck(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
+	engine := newEngine(t, routertest.NewDeps(t, nil))
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthcheck", nil))
 	if rec.Code != http.StatusOK {
@@ -107,7 +48,7 @@ func accessLogLines(output string) []string {
 // TestMiddlewareOrderAndSingleAccessLog checks that the request id precedes the
 // logger, CORS precedes the body limit, and each request is logged once.
 func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
+	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
 
 	mark := logs.Mark()
@@ -143,7 +84,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 
 func TestGlobalBodyLimitCutsOffUndeclaredLengthBody(t *testing.T) {
 	const limit = 1024
-	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = limit }))
+	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = limit }))
 
 	var read int64
 	var readErr error
@@ -176,19 +117,15 @@ func TestGlobalBodyLimitCutsOffUndeclaredLengthBody(t *testing.T) {
 }
 
 func TestNewRejectsIncompleteDeps(t *testing.T) {
-	cases := map[string]func(*Deps){
-		"nil DB":        func(d *Deps) { d.DB = nil },
-		"nil SQLDB":     func(d *Deps) { d.SQLDB = nil },
-		"nil Kit":       func(d *Deps) { d.Kit = nil },
-		"nil Lifecycle": func(d *Deps) { d.Lifecycle = nil },
-		"media enabled without storage": func(d *Deps) {
-			d.Config.Media.Enabled = true
-			d.Storage = nil
-		},
+	cases := map[string]func(*module.Deps){
+		"nil DB":        func(d *module.Deps) { d.DB = nil },
+		"nil SQLDB":     func(d *module.Deps) { d.SQLDB = nil },
+		"nil Kit":       func(d *module.Deps) { d.Kit = nil },
+		"nil Lifecycle": func(d *module.Deps) { d.Lifecycle = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			d := newTestDeps(t, nil)
+			d := routertest.NewDeps(t, nil)
 			mutate(&d)
 			engine, err := New(d)
 			if err == nil || engine != nil {
@@ -199,7 +136,7 @@ func TestNewRejectsIncompleteDeps(t *testing.T) {
 }
 
 func TestGlobalBodyLimitReturns413(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
+	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	body := `{"email":"` + strings.Repeat("a", 4096) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -219,7 +156,7 @@ func TestReadyz(t *testing.T) {
 	compact := func(rec *httptest.ResponseRecorder) string { return strings.TrimSpace(rec.Body.String()) }
 
 	t.Run("database ok, redis absent", func(t *testing.T) {
-		d, mock := newTestDepsWithMock(t, nil)
+		d, mock := routertest.NewDepsWithMock(t, nil)
 		mock.ExpectPing()
 		rec := get(newEngine(t, d))
 		if rec.Code != http.StatusOK || compact(rec) != `{"status":"ok"}` {
@@ -228,7 +165,7 @@ func TestReadyz(t *testing.T) {
 	})
 
 	t.Run("database ping fails", func(t *testing.T) {
-		d, mock := newTestDepsWithMock(t, nil)
+		d, mock := routertest.NewDepsWithMock(t, nil)
 		mock.ExpectPing().WillReturnError(errors.New("boom-secret-detail"))
 		rec := get(newEngine(t, d))
 		if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
@@ -243,7 +180,7 @@ func TestReadyz(t *testing.T) {
 		mr := miniredis.RunT(t)
 		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 		t.Cleanup(func() { _ = client.Close() })
-		d, mock := newTestDepsWithMock(t, nil)
+		d, mock := routertest.NewDepsWithMock(t, nil)
 		d.Redis = client
 		engine := newEngine(t, d)
 
@@ -261,17 +198,17 @@ func TestReadyz(t *testing.T) {
 }
 
 func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
-	if got := serve(engine, http.MethodGet, "/api/users"); got != http.StatusUnauthorized {
+	engine := newEngine(t, routertest.NewDeps(t, nil))
+	if got := routertest.Serve(engine, http.MethodGet, "/api/users"); got != http.StatusUnauthorized {
 		t.Fatalf("GET /api/users without token: expected 401, got %d", got)
 	}
-	if got := serve(engine, http.MethodGet, "/api/user/register/status"); got == http.StatusNotFound {
+	if got := routertest.Serve(engine, http.MethodGet, "/api/user/register/status"); got == http.StatusNotFound {
 		t.Fatalf("GET /api/user/register/status: route not registered")
 	}
 }
 
 func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
+	engine := newEngine(t, routertest.NewDeps(t, nil))
 
 	// GET /api/user/sessions itself answers 401 without Redis because the
 	// authenticated GET /api/user/:id route matches "sessions", so assert on the
@@ -294,132 +231,14 @@ func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
 	}
 }
 
-func TestLocationRoutesProtection(t *testing.T) {
-	engine := newEngine(t, newTestDeps(t, nil))
+func TestNewNamesTheModuleThatFailsToRegister(t *testing.T) {
+	saved := modules
+	t.Cleanup(func() { modules = saved })
+	boom := errors.New("boom")
+	modules = []module.Entry{{Name: "broken", Register: func(gin.IRouter, module.Deps) error { return boom }}}
 
-	switch got := serve(engine, http.MethodGet, "/api/location/province"); got {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-		t.Fatalf("GET /api/location/province must be public, got %d", got)
-	}
-	for _, c := range []struct{ method, path string }{
-		{http.MethodPost, "/api/location/sync"},
-		{http.MethodGet, "/api/location/sync/abc"},
-	} {
-		if got := serve(engine, c.method, c.path); got != http.StatusUnauthorized {
-			t.Fatalf("%s %s without token: expected 401, got %d", c.method, c.path, got)
-		}
-	}
-}
-
-// fakeStorage is a storage provider that keeps nothing.
-type fakeStorage struct{}
-
-func (fakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (domainmedia.StoredFile, error) {
-	return domainmedia.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
-}
-
-func (fakeStorage) DeleteFile(context.Context, string) error { return nil }
-
-func TestMediaRoutesProtection(t *testing.T) {
-	t.Run("disabled", func(t *testing.T) {
-		engine := newEngine(t, newTestDeps(t, func(c *config.Config) { c.Media.Enabled = false }))
-		if got := serve(engine, http.MethodPost, "/api/media"); got != http.StatusNotFound {
-			t.Fatalf("expected 404 when media disabled, got %d", got)
-		}
-	})
-
-	t.Run("disabled registers nothing even when a provider is passed", func(t *testing.T) {
-		d := newTestDeps(t, func(c *config.Config) { c.Media.Enabled = false })
-		d.Storage = fakeStorage{}
-		for _, route := range newEngine(t, d).Routes() {
-			if strings.HasPrefix(route.Path, "/api/media") {
-				t.Fatalf("media route %s registered while media is disabled", route.Path)
-			}
-		}
-	})
-
-	t.Run("enabled", func(t *testing.T) {
-		d := newTestDeps(t, func(c *config.Config) { c.Media.Enabled = true })
-		d.Storage = fakeStorage{}
-		engine := newEngine(t, d)
-		if got := serve(engine, http.MethodPost, "/api/media"); got != http.StatusUnauthorized {
-			t.Fatalf("POST /api/media without token: expected 401, got %d", got)
-		}
-		if got := serve(engine, http.MethodDelete, "/api/media/abc"); got != http.StatusUnauthorized {
-			t.Fatalf("DELETE /api/media/abc without token: expected 401, got %d", got)
-		}
-	})
-}
-
-func mediaDeps(t *testing.T) Deps {
-	t.Helper()
-	d := newTestDeps(t, func(c *config.Config) {
-		c.Media.Enabled = true
-		c.Media.MaxFileSizeBytes = 64 << 10
-		c.HTTP.MaxBodyBytes = 1 << 20
-	})
-	d.Storage = fakeStorage{}
-	return d
-}
-
-func uploadRequest(t *testing.T, d Deps, fileSize int) *http.Request {
-	t.Helper()
-	token, err := d.Kit.IssueAccessToken("11111111-1111-1111-1111-111111111111", "", "viewer")
-	if err != nil {
-		t.Fatalf("token: %v", err)
-	}
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	hdr := textproto.MIMEHeader{}
-	hdr.Set("Content-Disposition", `form-data; name="file"; filename="a.png"`)
-	hdr.Set("Content-Type", "image/png")
-	part, err := mw.CreatePart(hdr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, fileSize)
-	copy(data, []byte("\x89PNG\r\n\x1a\n"))
-	_, _ = part.Write(data)
-	_ = mw.Close()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/media", &buf)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
-	return req
-}
-
-func TestMediaUploadAtMaxSizeIsAccepted(t *testing.T) {
-	d := mediaDeps(t)
-	engine := newEngine(t, d)
-	rec := httptest.NewRecorder()
-	engine.ServeHTTP(rec, uploadRequest(t, d, 64<<10))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload at max size: expected 201, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-type deadlineRecorder struct {
-	*httptest.ResponseRecorder
-	deadline time.Time
-	calls    int
-}
-
-func (r *deadlineRecorder) SetReadDeadline(t time.Time) error {
-	r.deadline = t
-	r.calls++
-	return nil
-}
-
-func TestMediaUploadExtendsReadDeadline(t *testing.T) {
-	d := mediaDeps(t)
-	d.Config.Media.UploadTimeout = 90 * time.Second
-	engine := newEngine(t, d)
-	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	engine.ServeHTTP(rec, uploadRequest(t, d, 1024))
-	if rec.calls == 0 {
-		t.Fatal("upload handler did not extend the read deadline")
-	}
-	if diff := time.Until(rec.deadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
-		t.Fatalf("deadline is %s away from now+UploadTimeout", diff)
+	engine, err := New(routertest.NewDeps(t, nil))
+	if engine != nil || !errors.Is(err, boom) || !strings.Contains(err.Error(), "register broken routes") {
+		t.Fatalf("New = %v, %v; want no engine and an error naming the module", engine, err)
 	}
 }

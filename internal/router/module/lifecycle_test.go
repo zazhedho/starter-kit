@@ -1,12 +1,10 @@
-package router
+package module
 
 import (
 	"context"
 	"errors"
 	"reflect"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 )
 
 func TestLifecycleClosesInReverseOrderAndJoinsErrors(t *testing.T) {
@@ -47,15 +45,18 @@ func TestLifecycleCloseHandsTheContextToHooks(t *testing.T) {
 	}
 }
 
-func TestRegisterLocationRegistersAShutdownHook(t *testing.T) {
-	d := newTestDeps(t, nil)
-	if err := registerLocation(gin.New(), d); err != nil {
-		t.Fatalf("registerLocation: %v", err)
+func TestLifecycleLenCountsHooks(t *testing.T) {
+	var l Lifecycle
+	if l.Len() != 0 {
+		t.Fatalf("Len = %d on a new Lifecycle", l.Len())
 	}
-	if len(d.Lifecycle.hooks) != 1 {
-		t.Fatalf("registerLocation registered %d shutdown hooks, want 1", len(d.Lifecycle.hooks))
+	l.OnClose("a", func(context.Context) error { return nil })
+	l.OnClose("b", func(context.Context) error { return nil })
+	if l.Len() != 2 {
+		t.Fatalf("Len = %d, want 2", l.Len())
 	}
-	if err := d.Lifecycle.Close(context.Background()); err != nil {
-		t.Fatalf("Lifecycle.Close = %v", err)
+	_ = l.Close(context.Background())
+	if l.Len() != 0 {
+		t.Fatalf("Len = %d after Close, want 0", l.Len())
 	}
 }

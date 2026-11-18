@@ -1,4 +1,7 @@
-package router
+// Package module holds what every router/<module> package shares: the Deps a
+// module is wired from, the Lifecycle it registers shutdown hooks with, and the
+// Entry that mounts it. It imports no feature module.
+package module
 
 import (
 	"context"
@@ -25,6 +28,13 @@ func (l *Lifecycle) OnClose(name string, fn func(context.Context) error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.hooks = append(l.hooks, hook{name: name, fn: fn})
+}
+
+// Len reports how many hooks are registered; modules use it in tests.
+func (l *Lifecycle) Len() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.hooks)
 }
 
 // Close runs the hooks in reverse order of registration with ctx, and returns

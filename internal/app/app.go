@@ -27,6 +27,7 @@ import (
 	"starter-kit/internal/infrastructure/database"
 	"starter-kit/internal/infrastructure/storage"
 	"starter-kit/internal/router"
+	"starter-kit/internal/router/module"
 )
 
 // App holds the open connections and the HTTP server of one running service.
@@ -44,7 +45,7 @@ type App struct {
 	// lifecycle holds the shutdown hooks of background work the modules start
 	// (the location sync job). Close runs it before releasing Redis and the
 	// database, so that work can still use them while it finishes.
-	lifecycle *router.Lifecycle
+	lifecycle *module.Lifecycle
 	routes    func(*gin.Engine) // extra routes added by tests
 
 	listener net.Listener                    // nil: Serve listens on server.Addr
@@ -174,7 +175,7 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		openDB = database.Open
 	}
 
-	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate, routes: d.routes, lifecycle: &router.Lifecycle{}}
+	a := &App{cfg: cfg, listener: d.listener, migrate: d.migrate, routes: d.routes, lifecycle: &module.Lifecycle{}}
 	if a.db, a.sqlDB, err = openDB(cfg.Database, cfg.App.Timezone); err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -244,13 +245,20 @@ func brevoConfig(s config.SMTP) authkit.BrevoConfig {
 	}
 }
 
+// ModuleDeps returns what the modules are wired from: the open connections, the
+// config and the shutdown Lifecycle. The routes use it, and so can a second
+// binary or transport that builds the App with New.
+func (a *App) ModuleDeps() module.Deps {
+	return module.Deps{Config: a.cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: a.storage, Lifecycle: a.lifecycle}
+}
+
 // buildRoutes creates the router and server once; it runs after the migrations
 // because some routes query the database.
 func (a *App) buildRoutes() error {
 	if a.engine != nil {
 		return nil
 	}
-	engine, err := router.New(router.Deps{Config: a.cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: a.storage, Lifecycle: a.lifecycle})
+	engine, err := router.New(a.ModuleDeps())
 	if err != nil {
 		return fmt.Errorf("initialize routes: %w", err)
 	}
