@@ -104,6 +104,8 @@ type rule struct {
 	// prefixes of the module's own packages may be imported.
 	internalAllowed []string
 	externalAllowed []string // when non-nil, only stdlib plus these exact paths may be imported
+	// exceptTrees are subtrees of tree the rule does not apply to.
+	exceptTrees []string
 	// testsToo applies the external bans to _test.go files as well.
 	testsToo bool
 }
@@ -154,6 +156,13 @@ var rules = []rule{
 		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/router", "internal/app"},
 	},
 	{
+		// Infrastructure owns its own types. The one exception is
+		// infrastructure/cache/<module>, which implements that module's port.
+		tree:           "internal/infrastructure",
+		forbidInternal: []string{"internal/domain"},
+		exceptTrees:    []string{"internal/infrastructure/cache"},
+	},
+	{
 		tree:           "internal/config",
 		forbidInternal: []string{"internal/"},
 	},
@@ -172,6 +181,19 @@ var rules = []rule{
 func isStdlib(importPath string) bool {
 	first, _, _ := strings.Cut(importPath, "/")
 	return !strings.Contains(first, ".")
+}
+
+// applies reports whether r governs the package in dir.
+func applies(r rule, dir string) bool {
+	if !underTree(dir, r.tree) {
+		return false
+	}
+	for _, e := range r.exceptTrees {
+		if underTree(dir, e) {
+			return false
+		}
+	}
+	return true
 }
 
 func underTree(dir, tree string) bool {
@@ -205,7 +227,7 @@ func collectViolations(t *testing.T) map[string]bool {
 				return err
 			}
 			for _, r := range rules {
-				if !underTree(dir, r.tree) {
+				if !applies(r, dir) {
 					continue
 				}
 				if bad := violates(r, ip, isTest); bad {
@@ -275,6 +297,35 @@ func TestImportRule(t *testing.T) {
 	sort.Strings(found)
 	for _, v := range found {
 		t.Errorf("import-rule violation: %s", v)
+	}
+}
+
+// TestInfrastructureDoesNotImportDomain: infrastructure owns its own types; only
+// infrastructure/cache/<module>, which implements a module's port, may name a
+// domain type.
+func TestInfrastructureDoesNotImportDomain(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  string
+		ip   string
+		want bool
+	}{
+		{"storage imports a domain", "internal/infrastructure/storage", "starter-kit/internal/domain/media", true},
+		{"database imports a domain", "internal/infrastructure/database", "starter-kit/internal/domain/location", true},
+		{"cache of a module imports its domain", "internal/infrastructure/cache/location", "starter-kit/internal/domain/location", false},
+		{"storage imports config", "internal/infrastructure/storage", "starter-kit/internal/config", false},
+		{"storage imports stdlib", "internal/infrastructure/storage", "context", false},
+	}
+	for _, c := range cases {
+		got := false
+		for _, r := range rules {
+			if applies(r, c.dir) && violates(r, c.ip, false) {
+				got = true
+			}
+		}
+		if got != c.want {
+			t.Errorf("%s: violated=%v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
