@@ -1,7 +1,11 @@
 package router
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/gin-gonic/gin"
+	"github.com/zazhedho/gokit"
 
 	httplocation "starter-kit/internal/handlers/http/location"
 	cachelocation "starter-kit/internal/infrastructure/cache/location"
@@ -14,11 +18,17 @@ func registerLocation(r gin.IRouter, d Deps) error {
 	repo := repositorylocation.NewRepository(d.DB)
 	svc := servicelocation.NewService(repo, servicelocation.Options{
 		Cache:      cachelocation.New(d.Redis),
+		NewID:      gokit.CreateUUID,
 		BaseURL:    loc.ServiceBaseURL,
 		SourceYear: loc.SourceYear,
 		Timeout:    loc.ServiceTimeout,
 		CacheTTL:   loc.CacheTTL,
 	})
+	// A sync job left queued or running by a previous process will never
+	// finish: fail it now.
+	if err := svc.RecoverInterruptedJobs(context.Background()); err != nil {
+		return fmt.Errorf("recover location sync jobs: %w", err)
+	}
 	h := httplocation.New(svc)
 
 	location := r.Group("/location")

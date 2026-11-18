@@ -112,44 +112,43 @@ var (
 	redisPkg = "github.com/redis/go-redis"
 	minioPkg = "github.com/minio/minio-go"
 	gokitPkg = "github.com/zazhedho/gokit"
+	// authkit is the project's auth framework: handlers translate its scope into
+	// plain inputs (an Actor, a user id) so services never import it.
+	authkitPkg = "github.com/zazhedho/authkit"
 )
 
 var rules = []rule{
 	{
 		tree:            "internal/domain",
-		forbidInternal:  []string{"internal/dto", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
+		forbidInternal:  []string{"internal/dto", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/router", "internal/app", "internal/config"},
 		externalAllowed: []string{gormPkg}, // gorm.DeletedAt is the single documented exception
 		testsToo:        true,
 	},
 	{
 		tree:           "internal/dto",
-		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
+		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/router", "internal/app", "internal/config"},
 		forbidExternal: []string{ginPkg, gormPkg, redisPkg},
 		testsToo:       true,
 	},
 	{
 		tree:           "internal/services",
-		forbidInternal: []string{"internal/infrastructure", "internal/repositories", "internal/handlers", "internal/cache", "internal/router", "internal/app", "internal/config"},
-		forbidExternal: []string{ginPkg, gormPkg, redisPkg, minioPkg, gokitPkg},
+		forbidInternal: []string{"internal/infrastructure", "internal/repositories", "internal/handlers", "internal/router", "internal/app", "internal/config"},
+		forbidExternal: []string{ginPkg, gormPkg, redisPkg, minioPkg, gokitPkg, authkitPkg},
 		testsToo:       true,
 	},
 	{
 		tree:           "internal/handlers",
-		forbidInternal: []string{"internal/services", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
+		forbidInternal: []string{"internal/services", "internal/repositories", "internal/infrastructure", "internal/router", "internal/app", "internal/config"},
 		forbidExternal: []string{gormPkg, redisPkg, minioPkg},
 		testsToo:       true,
 	},
 	{
 		tree:           "internal/repositories",
-		forbidInternal: []string{"internal/services", "internal/handlers", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
+		forbidInternal: []string{"internal/services", "internal/handlers", "internal/infrastructure", "internal/router", "internal/app", "internal/config"},
 		forbidExternal: []string{ginPkg},
 	},
 	{
 		tree:           "internal/infrastructure",
-		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/router", "internal/app"},
-	},
-	{
-		tree:           "internal/cache", // moves under infrastructure in a later step
 		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/router", "internal/app"},
 	},
 	{
@@ -160,15 +159,6 @@ var rules = []rule{
 		tree:           "internal/router",
 		forbidInternal: []string{"internal/app"},
 	},
-}
-
-// knownViolations is the ratchet: edges that exist today and are scheduled for
-// removal, keyed "<package dir> -> <import path>". The test fails on any edge
-// that is not listed and on any listed edge that no longer exists, so the map
-// can only shrink. Each refactoring step deletes its entries.
-var knownViolations = map[string]string{
-	"internal/services/location -> github.com/zazhedho/gokit": "step 9: services stop importing gokit",
-	"internal/services/media -> github.com/zazhedho/gokit":    "step 9: services stop importing gokit",
 }
 
 func isStdlib(importPath string) bool {
@@ -260,26 +250,16 @@ func violates(r rule, ip string, isTest bool) bool {
 	return false
 }
 
+// TestImportRule asserts the dependency rule has zero violations.
 func TestImportRule(t *testing.T) {
-	found := collectViolations(t)
-	var fresh, stale []string
-	for v := range found {
-		if _, ok := knownViolations[v]; !ok {
-			fresh = append(fresh, v)
-		}
+	violations := collectViolations(t)
+	found := make([]string, 0, len(violations))
+	for v := range violations {
+		found = append(found, v)
 	}
-	for v := range knownViolations {
-		if !found[v] {
-			stale = append(stale, v)
-		}
-	}
-	sort.Strings(fresh)
-	sort.Strings(stale)
-	for _, v := range fresh {
-		t.Errorf("new import-rule violation: %s", v)
-	}
-	for _, v := range stale {
-		t.Errorf("knownViolations lists an edge that no longer exists, remove it: %s", v)
+	sort.Strings(found)
+	for _, v := range found {
+		t.Errorf("import-rule violation: %s", v)
 	}
 }
 
@@ -304,6 +284,10 @@ func TestRulesDetectViolations(t *testing.T) {
 		{"service imports redis", services, "github.com/redis/go-redis/v9", false, true},
 		{"service imports infrastructure", services, "starter-kit/internal/infrastructure/storage", false, true},
 		{"service imports domain", services, "starter-kit/internal/domain/media", false, false},
+		{"service imports gokit", services, "github.com/zazhedho/gokit", false, true},
+		{"service imports authkit", services, "github.com/zazhedho/authkit", false, true},
+		{"service test imports authkit", services, "github.com/zazhedho/authkit", true, true},
+		{"service imports uuid", services, "github.com/google/uuid", false, false},
 		{"service imports stdlib", services, "context", false, false},
 		{"service test imports gorm", services, "gorm.io/gorm", true, true},
 		{"domain imports gorm", domain, "gorm.io/gorm", false, false},

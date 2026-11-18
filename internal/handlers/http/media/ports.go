@@ -4,8 +4,6 @@ import (
 	"context"
 	"mime/multipart"
 
-	"github.com/zazhedho/authkit"
-
 	domainmedia "starter-kit/internal/domain/media"
 )
 
@@ -14,5 +12,5 @@ import (
 type Service interface {
 	MaxFileSize() int64
 	Upload(ctx context.Context, ownerUserID string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error)
-	Delete(ctx context.Context, scope authkit.Scope, id string) (domainmedia.Media, error)
+	Delete(ctx context.Context, actor domainmedia.Actor, id string) (domainmedia.Media, error)
 }

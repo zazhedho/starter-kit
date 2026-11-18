@@ -3,8 +3,6 @@ package media
 import (
 	"context"
 	"errors"
-	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/gokit"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -31,19 +29,37 @@ var defaultContentTypes = []string{
 	"image/webp",
 }
 
+// Options tunes the service. The zero value is valid: a 10 MiB limit, the
+// default content types and UUIDv7 identifiers.
+type Options struct {
+	// MaxFileSize is the largest accepted upload in bytes; zero or less means 10 MiB.
+	MaxFileSize int64
+	// AllowedContentTypes lists accepted media types; empty means the defaults.
+	AllowedContentTypes []string
+	// NewID returns a new identifier for a stored media row; nil means UUIDv7.
+	NewID func() string
+}
+
 type Service struct {
 	repo                Repository
 	storage             Storage
+	newID               func() string
 	maxFileSize         int64
 	allowedContentTypes map[string]struct{}
 }
 
-func NewService(repo Repository, storageProvider Storage, maxFileSize int64, allowedContentTypes []string) *Service {
+func NewService(repo Repository, storage Storage, opts Options) *Service {
+	maxFileSize := opts.MaxFileSize
 	if maxFileSize <= 0 {
 		maxFileSize = defaultMaxFileSize
 	}
+	allowedContentTypes := opts.AllowedContentTypes
 	if len(allowedContentTypes) == 0 {
 		allowedContentTypes = defaultContentTypes
+	}
+	newID := opts.NewID
+	if newID == nil {
+		newID = newUUIDv7
 	}
 
 	allowed := make(map[string]struct{}, len(allowedContentTypes))
@@ -55,7 +71,8 @@ func NewService(repo Repository, storageProvider Storage, maxFileSize int64, all
 
 	return &Service{
 		repo:                repo,
-		storage:             storageProvider,
+		storage:             storage,
+		newID:               newID,
 		maxFileSize:         maxFileSize,
 		allowedContentTypes: allowed,
 	}
@@ -96,7 +113,7 @@ func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart
 	}
 
 	media := domainmedia.Media{
-		ID:           gokit.CreateUUID(),
+		ID:           s.newID(),
 		OwnerUserID:  ownerUserID,
 		ObjectKey:    uploaded.ObjectName,
 		URL:          uploaded.URL,
@@ -113,12 +130,12 @@ func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart
 	return media, nil
 }
 
-func (s *Service) Delete(ctx context.Context, scope authkit.Scope, id string) (domainmedia.Media, error) {
+func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string) (domainmedia.Media, error) {
 	media, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return domainmedia.Media{}, err
 	}
-	if media.OwnerUserID != strings.TrimSpace(scope.UserID) && strings.TrimSpace(scope.Role) != authkit.RoleSuperAdmin {
+	if media.OwnerUserID != strings.TrimSpace(actor.UserID) && !actor.IsSuperAdmin {
 		return domainmedia.Media{}, domainmedia.ErrMediaForbidden
 	}
 
@@ -130,6 +147,15 @@ func (s *Service) Delete(ctx context.Context, scope authkit.Scope, id string) (d
 	}
 
 	return media, nil
+}
+
+// newUUIDv7 returns a time-ordered UUID, falling back to a random one if the
+// clock source fails. The router normally injects the same behavior.
+func newUUIDv7() string {
+	if id, err := uuid.NewV7(); err == nil {
+		return id.String()
+	}
+	return uuid.NewString()
 }
 
 func detectContentType(file multipart.File) (string, error) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/zazhedho/authkit"
 	"mime/multipart"
 	"net/textproto"
 	"testing"
@@ -69,7 +68,7 @@ func TestUploadDetectsContentAndStoresMetadata(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repo := &mediaRepoMock{}
 	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
-	service := NewService(repo, storageMock, 1024, nil)
+	service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 	ownerID := uuid.NewString()
 
 	media, err := service.Upload(context.Background(), ownerID, mediaTestFile{bytes.NewReader(png)}, newMediaHeader("../avatar.exe", int64(len(png))))
@@ -104,7 +103,7 @@ func TestUploadRejectsInvalidFilesBeforeStorage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			storageMock := &mediaStorageMock{}
-			service := NewService(&mediaRepoMock{}, storageMock, tt.maxSize, nil)
+			service := NewService(&mediaRepoMock{}, storageMock, Options{MaxFileSize: tt.maxSize})
 			_, err := service.Upload(context.Background(), ownerID, mediaTestFile{bytes.NewReader(tt.data)}, tt.header)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("expected %v, got %v", tt.wantErr, err)
@@ -121,7 +120,7 @@ func TestUploadDeletesObjectWhenMetadataStoreFails(t *testing.T) {
 	repoErr := errors.New("database unavailable")
 	repo := &mediaRepoMock{storeErr: repoErr}
 	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
-	service := NewService(repo, storageMock, 1024, nil)
+	service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 
 	_, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("avatar.png", int64(len(png))))
 	if !errors.Is(err, repoErr) {
@@ -139,9 +138,9 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 	t.Run("owner", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
-		service := NewService(repo, storageMock, 1024, nil)
+		service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 
-		if _, err := service.Delete(context.Background(), authkit.NewScope(ownerID, "owner", "viewer", nil), media.ID); err != nil {
+		if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: ownerID}, media.ID); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		if storageMock.deletedURL != media.URL || repo.deletedID != media.ID {
@@ -152,9 +151,9 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 	t.Run("other user", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
-		service := NewService(repo, storageMock, 1024, nil)
+		service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 
-		_, err := service.Delete(context.Background(), authkit.NewScope(uuid.NewString(), "other", "viewer", nil), media.ID)
+		_, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString()}, media.ID)
 		if !errors.Is(err, domainmedia.ErrMediaForbidden) {
 			t.Fatalf("expected forbidden, got %v", err)
 		}
@@ -166,10 +165,51 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 	t.Run("superadmin", func(t *testing.T) {
 		repo := &mediaRepoMock{media: media}
 		storageMock := &mediaStorageMock{}
-		service := NewService(repo, storageMock, 1024, nil)
+		service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 
-		if _, err := service.Delete(context.Background(), authkit.NewScope(uuid.NewString(), "root", authkit.RoleSuperAdmin, nil), media.ID); err != nil {
+		if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString(), IsSuperAdmin: true}, media.ID); err != nil {
 			t.Fatalf("delete as superadmin: %v", err)
 		}
 	})
+}
+
+func TestUploadUsesTheInjectedIDGenerator(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	repo := &mediaRepoMock{}
+	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/x.png", URL: "https://cdn/media/x.png"}}
+	service := NewService(repo, storageMock, Options{NewID: func() string { return "fixed-id" }})
+
+	media, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("a.png", int64(len(png))))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if media.ID != "fixed-id" || repo.stored.ID != "fixed-id" {
+		t.Fatalf("injected id not used: returned %q, stored %q", media.ID, repo.stored.ID)
+	}
+}
+
+// Without an injected generator the service issues UUIDv7 ids, the same
+// version gokit.CreateUUID produces, so ids stay time-ordered.
+func TestUploadDefaultIDIsUUIDv7(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/x.png", URL: "https://cdn/media/x.png"}}
+	service := NewService(&mediaRepoMock{}, storageMock, Options{})
+
+	media, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("a.png", int64(len(png))))
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	id, err := uuid.Parse(media.ID)
+	if err != nil || id.Version() != 7 {
+		t.Fatalf("id %q is not a UUIDv7 (err=%v)", media.ID, err)
+	}
+}
+
+func TestDeleteTrimsTheActorUserID(t *testing.T) {
+	ownerID := uuid.NewString()
+	media := domainmedia.Media{ID: uuid.NewString(), OwnerUserID: ownerID, URL: "https://cdn/media/file.png"}
+	service := NewService(&mediaRepoMock{media: media}, &mediaStorageMock{}, Options{})
+	if _, err := service.Delete(context.Background(), domainmedia.Actor{UserID: "  " + ownerID + " "}, media.ID); err != nil {
+		t.Fatalf("delete with padded actor id: %v", err)
+	}
 }

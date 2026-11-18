@@ -57,8 +57,11 @@ func TestLocationCacheIsSkippedWithoutPositiveTTL(t *testing.T) {
 
 func TestNewLocationServiceWithoutCacheAlwaysMisses(t *testing.T) {
 	svc := NewService(&locationRepoTestDouble{}, Options{CacheTTL: time.Minute})
+	if svc.cache == nil {
+		t.Fatal("the constructor must install a cache when none is given")
+	}
 	svc.setLocationCache(context.Background(), "location:province", []dtolocation.Location{{Code: "11", Name: "Aceh"}})
-	if _, ok := svc.cacheOrNoop().Get(context.Background(), "location:province"); ok {
+	if _, ok := svc.cache.Get(context.Background(), "location:province"); ok {
 		t.Fatal("a service without a cache must always miss")
 	}
 }

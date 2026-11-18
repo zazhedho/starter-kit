@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/zazhedho/gokit"
 	"io"
 	"net/http"
 	"net/url"
@@ -52,12 +51,7 @@ func (s *Service) fetchLocationMap(ctx context.Context, url, entity string) (map
 		return nil, fmt.Errorf("failed to prepare %s request: %w", entity, err)
 	}
 
-	client := s.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
-	}
-
-	resp, err := client.Do(request)
+	resp, err := s.httpClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch %s: %w", entity, err)
 	}
@@ -85,7 +79,7 @@ func (s *Service) setLocationCache(ctx context.Context, cacheKey string, locatio
 	if len(locations) == 0 || s.cacheTTL <= 0 {
 		return
 	}
-	s.cacheOrNoop().Set(ctx, cacheKey, locations, s.cacheTTL)
+	s.cache.Set(ctx, cacheKey, locations, s.cacheTTL)
 }
 
 func decodeLocationMap(body []byte) (map[string]string, error) {
@@ -115,6 +109,9 @@ func decodeLocationMap(body []byte) (map[string]string, error) {
 	}
 	return dataMap, nil
 }
+
+// normalizeKey is the comparison form of a name: trimmed and lower-cased.
+func normalizeKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
 
 func mapProvinces(rows []domainlocation.Province) []dtolocation.Location {
 	locations := make([]dtolocation.Location, 0, len(rows))
@@ -149,22 +146,22 @@ func mapVillages(rows []domainlocation.Village) []dtolocation.Location {
 }
 
 func sortProvinces(items []domainlocation.Province) []domainlocation.Province {
-	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
 	return items
 }
 
 func sortCities(items []domainlocation.City) []domainlocation.City {
-	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
 	return items
 }
 
 func sortDistricts(items []domainlocation.District) []domainlocation.District {
-	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
 	return items
 }
 
 func sortVillages(items []domainlocation.Village) []domainlocation.Village {
-	sort.Slice(items, func(i, j int) bool { return gokit.NormalizeKey(items[i].Name) < gokit.NormalizeKey(items[j].Name) })
+	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
 	return items
 }
 

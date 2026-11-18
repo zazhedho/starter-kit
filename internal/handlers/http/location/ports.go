@@ -13,6 +13,6 @@ type Service interface {
 	GetCity(ctx context.Context, provinceCode string) ([]dtolocation.Location, error)
 	GetDistrict(ctx context.Context, cityCode string) ([]dtolocation.Location, error)
 	GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error)
-	StartSync(ctx context.Context, req dtolocation.SyncRequest) (dtolocation.SyncJob, error)
+	StartSync(ctx context.Context, req dtolocation.SyncRequest, requestedBy string) (dtolocation.SyncJob, error)
 	GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error)
 }

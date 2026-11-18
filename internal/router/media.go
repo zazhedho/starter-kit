@@ -20,7 +20,11 @@ func registerMedia(r gin.IRouter, d Deps) error {
 	}
 
 	repo := repositorymedia.NewRepository(d.DB)
-	svc := servicemedia.NewService(repo, d.Storage, m.MaxFileSizeBytes, m.AllowedContentTypes)
+	svc := servicemedia.NewService(repo, d.Storage, servicemedia.Options{
+		MaxFileSize:         m.MaxFileSizeBytes,
+		AllowedContentTypes: m.AllowedContentTypes,
+		NewID:               gokit.CreateUUID,
+	})
 	h := httpmedia.New(svc, d.Kit.Audit(), m.UploadTimeout)
 
 	media := r.Group("/media").Use(d.Kit.Auth())

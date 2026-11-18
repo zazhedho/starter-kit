@@ -1,9 +1,11 @@
 package media
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -100,7 +102,7 @@ func (h *Handler) Delete(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.service.Delete(ctx.Request.Context(), authkit.ScopeFrom(ctx.Request.Context()), id)
+	data, err := h.service.Delete(ctx.Request.Context(), actorFrom(ctx.Request.Context()), id)
 	if err != nil {
 		h.WriteAudit(ctx, authkit.AuditEvent{
 			Action:       authkit.ActionDelete,
@@ -126,6 +128,15 @@ func (h *Handler) Delete(ctx *gin.Context) {
 		BeforeData: data,
 	})
 	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, "Media deleted successfully", logID, nil))
+}
+
+// actorFrom reduces the authenticated scope to what the media rules need.
+func actorFrom(ctx context.Context) domainmedia.Actor {
+	scope := authkit.ScopeFrom(ctx)
+	return domainmedia.Actor{
+		UserID:       scope.UserID,
+		IsSuperAdmin: strings.TrimSpace(scope.Role) == authkit.RoleSuperAdmin,
+	}
 }
 
 func mediaErrorResponse(err error) (int, string) {

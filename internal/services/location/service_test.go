@@ -3,7 +3,6 @@ package location
 import (
 	"context"
 	"errors"
-	"github.com/zazhedho/authkit"
 	"io"
 	"net/http"
 	"reflect"
@@ -229,38 +228,46 @@ func TestLocationServiceReadMethodsReturnRepositoryErrors(t *testing.T) {
 	}
 }
 
+// newTestService builds a Service through the constructor and, when rt is not
+// nil, swaps the HTTP transport so no network is used.
+func newTestService(t *testing.T, repo Repository, rt http.RoundTripper) *Service {
+	t.Helper()
+	svc := NewService(repo, Options{})
+	if rt != nil {
+		svc.httpClient = &http.Client{Transport: rt}
+	}
+	return svc
+}
+
 func newLocationFallbackService(t *testing.T) *Service {
 	t.Helper()
 	repo := &locationRepoTestDouble{
 		city:     domainlocation.City{Code: "1671", ProvinceCode: "16", Name: "Palembang"},
 		district: domainlocation.District{Code: "167101", CityCode: "1671", Name: "Ilir Timur I"},
 	}
-	svc := &Service{
-		repo: repo,
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			body := `{}`
-			switch {
-			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"16","name":"Sumatera Selatan"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/regencies"):
-				if got := req.URL.Query().Get("province_code"); got != "16" {
-					t.Fatalf("expected province_code 16, got %q", got)
-				}
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Kota Palembang"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/districts"):
-				if got := req.URL.Query().Get("regency_code"); got != "71" {
-					t.Fatalf("expected regency_code 71, got %q", got)
-				}
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Ilir Timur I"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/villages"):
-				if got := req.URL.Query().Get("district_code"); got != "01" {
-					t.Fatalf("expected district_code 01, got %q", got)
-				}
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"1001","name":"Sungai Pangeran"}]}`
+	svc := newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{}`
+		switch {
+		case strings.Contains(req.URL.Path, "/api/locations/provinces"):
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"16","name":"Sumatera Selatan"}]}`
+		case strings.Contains(req.URL.Path, "/api/locations/regencies"):
+			if got := req.URL.Query().Get("province_code"); got != "16" {
+				t.Fatalf("expected province_code 16, got %q", got)
 			}
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-		})},
-	}
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Kota Palembang"}]}`
+		case strings.Contains(req.URL.Path, "/api/locations/districts"):
+			if got := req.URL.Query().Get("regency_code"); got != "71" {
+				t.Fatalf("expected regency_code 71, got %q", got)
+			}
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Ilir Timur I"}]}`
+		case strings.Contains(req.URL.Path, "/api/locations/villages"):
+			if got := req.URL.Query().Get("district_code"); got != "01" {
+				t.Fatalf("expected district_code 01, got %q", got)
+			}
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"1001","name":"Sungai Pangeran"}]}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	}))
 	return svc
 }
 
@@ -295,29 +302,29 @@ func TestLocationServiceGetVillageFallsBackToLocationService(t *testing.T) {
 func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 	svc := NewService(&locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}, Options{})
 
-	_, err := svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "city"})
+	_, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "city"}, "user-1")
 	if err == nil || err.Error() != "province_code is required for city sync" {
 		t.Fatalf("expected city sync validation error, got %v", err)
 	}
 
-	_, err = svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "district", ProvinceCode: "31"})
+	_, err = svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "district", ProvinceCode: "31"}, "user-1")
 	if err == nil || err.Error() != "province_code and city_code are required for district sync" {
 		t.Fatalf("expected district sync validation error, got %v", err)
 	}
 
-	_, err = svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "village", ProvinceCode: "31", CityCode: "3171"})
+	_, err = svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "village", ProvinceCode: "31", CityCode: "3171"}, "user-1")
 	if err == nil || err.Error() != "province_code, city_code, and district_code are required for village sync" {
 		t.Fatalf("expected village sync validation error, got %v", err)
 	}
 
-	_, err = svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "unknown"})
+	_, err = svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "unknown"}, "user-1")
 	if err == nil || err.Error() != "invalid sync level" {
 		t.Fatalf("expected invalid level error, got %v", err)
 	}
 	if !errors.Is(err, domainlocation.ErrInvalidSync) {
 		t.Fatalf("expected validation errors to match domainlocation.ErrInvalidSync, got %v", err)
 	}
-	_, err = svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "city"})
+	_, err = svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "city"}, "user-1")
 	if !errors.Is(err, domainlocation.ErrInvalidSync) {
 		t.Fatalf("expected scoped-code error to match domainlocation.ErrInvalidSync, got %v", err)
 	}
@@ -337,7 +344,7 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 		},
 	}, Options{})
 
-	got, err := svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "all", Year: "2025"})
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2025"}, "user-1")
 	if !errors.Is(err, domainlocation.ErrSyncRunning) {
 		t.Fatalf("expected domainlocation.ErrSyncRunning, got %v", err)
 	}
@@ -350,7 +357,7 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 	repo := &locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}
 	svc := NewService(repo, Options{SourceYear: "2026"})
 
-	got, err := svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "province"})
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "user-1")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -368,12 +375,12 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 
 func TestStartSyncRepositoryErrors(t *testing.T) {
 	svc := NewService(&locationRepoTestDouble{activeJobErr: errors.New("database down")}, Options{})
-	if _, err := svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "all", Year: "2026"}); err == nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
 		t.Fatal("expected active job lookup error")
 	}
 
 	svc = NewService(&locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound, createSyncJobErr: errors.New("database down")}, Options{})
-	if _, err := svc.StartSync(locationTestActorContext("user-1"), dtolocation.SyncRequest{Level: "all", Year: "2026"}); err == nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
 		t.Fatal("expected create sync job error")
 	}
 }
@@ -389,10 +396,6 @@ func TestLocationHelperCacheKeysAndCodeNormalization(t *testing.T) {
 	if got := childCodeCandidates("11", "1101"); !reflect.DeepEqual(got, wantCandidates) {
 		t.Fatalf("expected %v, got %v", wantCandidates, got)
 	}
-}
-
-func locationTestActorContext(userID string) context.Context {
-	return authkit.WithScope(context.Background(), authkit.NewScope(userID, "admin", "admin", nil))
 }
 
 func TestLocationMapAndSortHelpers(t *testing.T) {
@@ -424,13 +427,13 @@ func TestLocationMapAndSortHelpers(t *testing.T) {
 }
 
 func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
-	svc := &Service{httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	svc := newTestService(t, &locationRepoTestDouble{}, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"11","full_code":"11","name":"Aceh","level":"province"}]}`)),
 			Header:     make(http.Header),
 		}, nil
-	})}}
+	}))
 	got, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
@@ -471,39 +474,36 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 
 func newScopedLocationSyncService(t *testing.T, repo *locationRepoTestDouble) *Service {
 	t.Helper()
-	return &Service{
-		repo: repo,
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			body := `{}`
-			switch {
-			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","full_code":"31","name":"DKI Jakarta","level":"province"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/regencies"):
-				if got := req.URL.Query().Get("province_code"); got != "31" {
-					t.Fatalf("expected province_code 31, got %q", got)
-				}
-				if got := req.URL.Query().Get("code_format"); got != "short" {
-					t.Fatalf("expected short code format, got %q", got)
-				}
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","full_code":"31.71","name":"Jakarta Selatan","level":"regency","parent_code":"31"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/districts"):
-				if got := req.URL.Query().Get("regency_code"); got != "71" {
-					t.Fatalf("expected regency_code 71, got %q", got)
-				}
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01","name":"Tebet","level":"district","parent_code":"31.71"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/villages"):
-				if got := req.URL.Query().Get("district_code"); got != "01" {
-					t.Fatalf("expected district_code 01, got %q", got)
-				}
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01.0001","name":"Tebet Barat","level":"village","parent_code":"31.71.01"}]}`
+	return newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{}`
+		switch {
+		case strings.Contains(req.URL.Path, "/api/locations/provinces"):
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","full_code":"31","name":"DKI Jakarta","level":"province"}]}`
+		case strings.Contains(req.URL.Path, "/api/locations/regencies"):
+			if got := req.URL.Query().Get("province_code"); got != "31" {
+				t.Fatalf("expected province_code 31, got %q", got)
 			}
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(body)),
-				Header:     make(http.Header),
-			}, nil
-		})},
-	}
+			if got := req.URL.Query().Get("code_format"); got != "short" {
+				t.Fatalf("expected short code format, got %q", got)
+			}
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","full_code":"31.71","name":"Jakarta Selatan","level":"regency","parent_code":"31"}]}`
+		case strings.Contains(req.URL.Path, "/api/locations/districts"):
+			if got := req.URL.Query().Get("regency_code"); got != "71" {
+				t.Fatalf("expected regency_code 71, got %q", got)
+			}
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01","name":"Tebet","level":"district","parent_code":"31.71"}]}`
+		case strings.Contains(req.URL.Path, "/api/locations/villages"):
+			if got := req.URL.Query().Get("district_code"); got != "01" {
+				t.Fatalf("expected district_code 01, got %q", got)
+			}
+			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01.0001","name":"Tebet Barat","level":"village","parent_code":"31.71.01"}]}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	}))
 }
 
 func TestLocationFetchScopedLevelsNormalizeCodes(t *testing.T) {
@@ -546,27 +546,24 @@ func TestLocationSyncAll(t *testing.T) {
 
 func TestLocationSyncIndividualLevels(t *testing.T) {
 	makeService := func(repo *locationRepoTestDouble) *Service {
-		return &Service{
-			repo: repo,
-			httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				body := `{}`
-				switch {
-				case strings.Contains(req.URL.Path, "/api/locations/provinces"):
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
-				case strings.Contains(req.URL.Path, "/api/locations/regencies"):
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
-				case strings.Contains(req.URL.Path, "/api/locations/districts"):
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
-				case strings.Contains(req.URL.Path, "/api/locations/villages"):
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
-				}
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(strings.NewReader(body)),
-					Header:     make(http.Header),
-				}, nil
-			})},
-		}
+		return newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body := `{}`
+			switch {
+			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/regencies"):
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/districts"):
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
+			case strings.Contains(req.URL.Path, "/api/locations/villages"):
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+			}, nil
+		}))
 	}
 
 	tests := []dtolocation.SyncRequest{
@@ -598,22 +595,19 @@ func TestLocationSyncIndividualLevels(t *testing.T) {
 
 func TestLocationSyncUpsertErrors(t *testing.T) {
 	makeService := func(repo *locationRepoTestDouble) *Service {
-		return &Service{
-			repo: repo,
-			httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				body := `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
-				if strings.Contains(req.URL.Path, "/api/locations/regencies") {
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
-				}
-				if strings.Contains(req.URL.Path, "/api/locations/districts") {
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
-				}
-				if strings.Contains(req.URL.Path, "/api/locations/villages") {
-					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
-				}
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-			})},
-		}
+		return newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body := `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
+			if strings.Contains(req.URL.Path, "/api/locations/regencies") {
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
+			}
+			if strings.Contains(req.URL.Path, "/api/locations/districts") {
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
+			}
+			if strings.Contains(req.URL.Path, "/api/locations/villages") {
+				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		}))
 	}
 
 	tests := []struct {
@@ -640,12 +634,9 @@ func TestLocationSyncUpsertErrors(t *testing.T) {
 func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	now := time.Now()
 	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: now}}
-	svc := &Service{
-		repo: repo,
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`)), Header: make(http.Header)}, nil
-		})},
-	}
+	svc := newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`)), Header: make(http.Header)}, nil
+	}))
 
 	svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province", Year: "2026"})
 	if len(repo.updatedJobs) < 2 {
@@ -656,7 +647,7 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	}
 
 	repo = &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-2", Status: "queued", CreatedAt: now}}
-	svc = &Service{repo: repo}
+	svc = newTestService(t, repo, nil)
 	svc.syncing.Store(true)
 	svc.runSyncJob("job-2", dtolocation.SyncRequest{Level: "province", Year: "2026"})
 	if len(repo.updatedJobs) != 1 || repo.updatedJobs[0].Status != "failed" {
@@ -667,7 +658,7 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 func TestLocationSyncProgressAndFailureHelpers(t *testing.T) {
 	now := time.Now()
 	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "running", CreatedAt: now}}
-	svc := &Service{repo: repo}
+	svc := newTestService(t, repo, nil)
 
 	job := domainlocation.SyncJob{ID: "job-1"}
 	svc.applySyncProgress(&job, syncProgress{Message: "halfway", ProvinceCount: 1})

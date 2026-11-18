@@ -41,9 +41,9 @@ func (m *locationServiceTestDouble) GetDistrict(ctx context.Context, cityCode st
 func (m *locationServiceTestDouble) GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error) {
 	return m.locations, m.err
 }
-func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dtolocation.SyncRequest) (dtolocation.SyncJob, error) {
+func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dtolocation.SyncRequest, requestedBy string) (dtolocation.SyncJob, error) {
 	m.startReq = req
-	m.requested = authkit.ScopeFrom(ctx).ActorUserID()
+	m.requested = requestedBy
 	return m.job, m.err
 }
 func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error) {

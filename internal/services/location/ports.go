@@ -41,16 +41,10 @@ type Cache interface {
 	DeleteKeys(ctx context.Context, prefix string)
 }
 
-// noopCache stands in when no Cache is configured: every lookup misses.
+// noopCache is the cache NewService installs when Options.Cache is nil: every
+// lookup misses.
 type noopCache struct{}
 
 func (noopCache) Get(context.Context, string) ([]dtolocation.Location, bool)         { return nil, false }
 func (noopCache) Set(context.Context, string, []dtolocation.Location, time.Duration) {}
 func (noopCache) DeleteKeys(context.Context, string)                                 {}
-
-func (s *Service) cacheOrNoop() Cache {
-	if s.cache == nil {
-		return noopCache{}
-	}
-	return s.cache
-}

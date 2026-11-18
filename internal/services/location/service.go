@@ -5,20 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/zazhedho/authkit"
-	"github.com/zazhedho/gokit"
-	"github.com/zazhedho/logus"
-	domainlocation "starter-kit/internal/domain/location"
-	dtolocation "starter-kit/internal/dto/location"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/zazhedho/logus"
+
+	domainlocation "starter-kit/internal/domain/location"
+	dtolocation "starter-kit/internal/dto/location"
 )
 
+// restartedMessage is recorded on a job a previous process left unfinished.
+const restartedMessage = "Service restarted before the previous location sync completed."
+
+// Service holds the location use cases. Build it with NewService.
 type Service struct {
 	repo       Repository
 	cache      Cache
 	httpClient *http.Client
+	newID      func() string
 	syncing    atomic.Bool
 
 	baseURL    string
@@ -26,10 +31,13 @@ type Service struct {
 	cacheTTL   time.Duration
 }
 
-// Options is what the service needs besides its repository. Cache may be nil,
-// which disables caching.
+// Options is what the service needs besides its repository. The zero value is
+// valid; the constructor fills in defaults.
 type Options struct {
-	Cache             Cache
+	// Cache is the read-through cache; nil installs a cache that always misses.
+	Cache Cache
+	// NewID returns the identifier of a new sync job; nil means UUIDv7.
+	NewID             func() string
 	BaseURL           string
 	SourceYear        string
 	Timeout, CacheTTL time.Duration
@@ -46,6 +54,8 @@ type syncProgress struct {
 // defaultHTTPTimeout bounds outbound calls when Options.Timeout is not positive.
 const defaultHTTPTimeout = 20 * time.Second
 
+// NewService builds the service. It performs no I/O: call RecoverInterruptedJobs
+// once at startup.
 func NewService(repo Repository, opts Options) *Service {
 	// Zero would mean "no timeout" to http.Client; never allow that, so a
 	// project that builds Options by hand stays safe.
@@ -53,25 +63,47 @@ func NewService(repo Repository, opts Options) *Service {
 	if timeout <= 0 {
 		timeout = defaultHTTPTimeout
 	}
-	service := &Service{
+	cache := opts.Cache
+	if cache == nil {
+		cache = noopCache{}
+	}
+	newID := opts.NewID
+	if newID == nil {
+		newID = newUUIDv7
+	}
+	return &Service{
 		repo:       repo,
-		cache:      opts.Cache,
+		cache:      cache,
 		httpClient: &http.Client{Timeout: timeout},
+		newID:      newID,
 		baseURL:    opts.BaseURL,
 		sourceYear: opts.SourceYear,
 		cacheTTL:   opts.CacheTTL,
 	}
+}
 
-	if err := service.repo.FailActiveSyncJobs(context.Background(), "Service restarted before the previous location sync completed."); err != nil {
-		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("failed to mark interrupted location sync jobs: %v", err))
+// newUUIDv7 returns a time-ordered UUID, falling back to a random one if the
+// clock source fails. The router normally injects the same behavior.
+func newUUIDv7() string {
+	if id, err := uuid.NewV7(); err == nil {
+		return id.String()
 	}
+	return uuid.NewString()
+}
 
-	return service
+// RecoverInterruptedJobs marks every queued or running sync job as failed. Call
+// it once when the process starts: such a job belongs to a process that no
+// longer exists.
+func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
+	if err := s.repo.FailActiveSyncJobs(ctx, restartedMessage); err != nil {
+		return fmt.Errorf("mark interrupted location sync jobs: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
 	cacheKey := provinceKey()
-	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -99,7 +131,7 @@ func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, erro
 
 func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocation.Location, error) {
 	cacheKey := cityKey(provinceCode)
-	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -127,7 +159,7 @@ func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocati
 
 func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocation.Location, error) {
 	cacheKey := districtKey(cityCode)
-	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -159,7 +191,7 @@ func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocati
 
 func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error) {
 	cacheKey := villageKey(districtCode)
-	if data, ok := s.cacheOrNoop().Get(ctx, cacheKey); ok {
+	if data, ok := s.cache.Get(ctx, cacheKey); ok {
 		if len(data) > 0 {
 			return data, nil
 		}
@@ -193,12 +225,13 @@ func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtoloc
 	return locations, nil
 }
 
-func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest) (dtolocation.SyncJob, error) {
+// StartSync queues a sync job and runs it in the background. requestedBy is the
+// id of the user who asked for it.
+func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, requestedBy string) (dtolocation.SyncJob, error) {
 	normalizedReq, err := s.normalizeAndValidateRequest(req)
 	if err != nil {
 		return dtolocation.SyncJob{}, err
 	}
-	requestedByUserID := authkit.ScopeFrom(ctx).ActorUserID()
 
 	activeJob, err := s.repo.GetActiveSyncJob(ctx)
 	switch {
@@ -210,14 +243,14 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest) (d
 
 	now := time.Now()
 	job := domainlocation.SyncJob{
-		ID:           gokit.CreateUUID(),
+		ID:           s.newID(),
 		Status:       "queued",
 		Level:        normalizedReq.Level,
 		Year:         normalizedReq.Year,
 		ProvinceCode: normalizedReq.ProvinceCode,
 		CityCode:     normalizedReq.CityCode,
 		DistrictCode: normalizedReq.DistrictCode,
-		RequestedBy:  requestedByUserID,
+		RequestedBy:  requestedBy,
 		Message:      "Location sync queued",
 		CreatedAt:    now,
 		UpdatedAt:    &now,
@@ -355,7 +388,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		if err := s.repo.UpsertProvinces(ctx, provinces); err != nil {
 			return syncProgress{}, err
 		}
-		s.cacheOrNoop().DeleteKeys(context.Background(), provinceKey())
+		s.cache.DeleteKeys(context.Background(), provinceKey())
 		return syncProgress{
 			Message:       "Province sync completed",
 			ProvinceCount: len(provinces),
@@ -369,7 +402,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		if err := s.repo.UpsertCities(ctx, cities); err != nil {
 			return syncProgress{}, err
 		}
-		s.cacheOrNoop().DeleteKeys(context.Background(), cityKey(req.ProvinceCode))
+		s.cache.DeleteKeys(context.Background(), cityKey(req.ProvinceCode))
 		return syncProgress{
 			Message:   "City sync completed",
 			CityCount: len(cities),
@@ -383,7 +416,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		if err := s.repo.UpsertDistricts(ctx, districts); err != nil {
 			return syncProgress{}, err
 		}
-		s.cacheOrNoop().DeleteKeys(context.Background(), districtKey(req.CityCode))
+		s.cache.DeleteKeys(context.Background(), districtKey(req.CityCode))
 		return syncProgress{
 			Message:       "District sync completed",
 			DistrictCount: len(districts),
@@ -397,7 +430,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		if err := s.repo.UpsertVillages(ctx, villages); err != nil {
 			return syncProgress{}, err
 		}
-		s.cacheOrNoop().DeleteKeys(context.Background(), villageKey(req.DistrictCode))
+		s.cache.DeleteKeys(context.Background(), villageKey(req.DistrictCode))
 		return syncProgress{
 			Message:      "Village sync completed",
 			VillageCount: len(villages),
@@ -418,7 +451,7 @@ func (s *Service) syncAll(ctx context.Context, year string, progress func(syncPr
 	if err := s.repo.UpsertProvinces(ctx, provinces); err != nil {
 		return syncProgress{}, err
 	}
-	s.cacheOrNoop().DeleteKeys(context.Background(), provinceKey())
+	s.cache.DeleteKeys(context.Background(), provinceKey())
 
 	totals := syncProgress{ProvinceCount: len(provinces)}
 	progress(syncProgress{
@@ -432,7 +465,7 @@ func (s *Service) syncAll(ctx context.Context, year string, progress func(syncPr
 		}
 	}
 
-	s.cacheOrNoop().DeleteKeys(context.Background(), cachePrefix)
+	s.cache.DeleteKeys(context.Background(), cachePrefix)
 	return syncProgress{
 		Message:       "Full location sync completed",
 		ProvinceCount: len(provinces),
@@ -452,7 +485,7 @@ func (s *Service) syncProvince(ctx context.Context, year string, provinces []dom
 			return err
 		}
 		totals.CityCount += len(cities)
-		s.cacheOrNoop().DeleteKeys(context.Background(), cityKey(province.Code))
+		s.cache.DeleteKeys(context.Background(), cityKey(province.Code))
 	}
 	progress(syncProgress{
 		Message:       fmt.Sprintf("Processed province %d/%d: %s", index+1, len(provinces), province.Name),
@@ -487,7 +520,7 @@ func (s *Service) syncCity(ctx context.Context, year string, province domainloca
 			return err
 		}
 		totals.DistrictCount += len(districts)
-		s.cacheOrNoop().DeleteKeys(context.Background(), districtKey(city.Code))
+		s.cache.DeleteKeys(context.Background(), districtKey(city.Code))
 	}
 	for _, district := range districts {
 		villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
@@ -501,7 +534,7 @@ func (s *Service) syncCity(ctx context.Context, year string, province domainloca
 			return err
 		}
 		totals.VillageCount += len(villages)
-		s.cacheOrNoop().DeleteKeys(context.Background(), villageKey(district.Code))
+		s.cache.DeleteKeys(context.Background(), villageKey(district.Code))
 	}
 	return nil
 }

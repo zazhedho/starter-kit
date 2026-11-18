@@ -3,6 +3,7 @@ package location
 import (
 	"errors"
 	"fmt"
+	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	"net/http"
@@ -122,7 +123,7 @@ func (h *Handler) Sync(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.service.StartSync(reqCtx, req)
+	data, err := h.service.StartSync(reqCtx, req, authkit.ScopeFrom(reqCtx).ActorUserID())
 	if err != nil {
 		if errors.Is(err, domainlocation.ErrSyncRunning) {
 			res := gokit.Response(http.StatusConflict, gokit.MsgSomethingWrong, logId, data)
