@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"starter-kit/internal/config"
+	"starter-kit/internal/router/module"
 	"starter-kit/internal/testutil/routertest"
 )
 
@@ -227,5 +228,17 @@ func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
 	}
 	if !registered["GET /api/user/:id"] {
 		t.Fatal("expected the rest of the user routes to be registered")
+	}
+}
+
+func TestNewNamesTheModuleThatFailsToRegister(t *testing.T) {
+	saved := modules
+	t.Cleanup(func() { modules = saved })
+	boom := errors.New("boom")
+	modules = []module.Entry{{Name: "broken", Register: func(gin.IRouter, module.Deps) error { return boom }}}
+
+	engine, err := New(routertest.NewDeps(t, nil))
+	if engine != nil || !errors.Is(err, boom) || !strings.Contains(err.Error(), "register broken routes") {
+		t.Fatalf("New = %v, %v; want no engine and an error naming the module", engine, err)
 	}
 }

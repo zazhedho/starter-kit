@@ -9,8 +9,6 @@ import (
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
 
-	routerlocation "starter-kit/internal/router/location"
-	routermedia "starter-kit/internal/router/media"
 	"starter-kit/internal/router/module"
 )
 
@@ -19,25 +17,6 @@ type (
 	Deps      = module.Deps
 	Lifecycle = module.Lifecycle
 )
-
-// registrar mounts one module's routes. Module registrars take the /api group
-// and use paths relative to it.
-type registrar struct {
-	name     string
-	register func(r gin.IRouter, d Deps) error
-}
-
-// rootRegistrars are mounted on the engine itself (probes live outside /api).
-var rootRegistrars = []registrar{
-	{"health", registerHealth},
-}
-
-// apiRegistrars mount under /api after authkit's routes; a new module must also be
-// added to the router tests' expected route list.
-var apiRegistrars = []registrar{
-	{"location", routerlocation.Register},
-	{"media", routermedia.Register},
-}
 
 func validate(d Deps) error {
 	var missing []string
@@ -59,8 +38,8 @@ func validate(d Deps) error {
 	return nil
 }
 
-// New returns the engine, or an error when Deps is incomplete or a registrar
-// fails.
+// New returns the engine, or an error when Deps is incomplete or a module
+// fails to register. Probes live on the engine; modules (modules.go) mount under /api.
 func New(d Deps) (*gin.Engine, error) {
 	if err := validate(d); err != nil {
 		return nil, err
@@ -74,25 +53,17 @@ func New(d Deps) (*gin.Engine, error) {
 	engine.Use(authkit.RequestLogger())
 	engine.Use(bodyLimit(d.Config.HTTP.MaxBodyBytes))
 
-	if err := mount(engine, rootRegistrars, d); err != nil {
-		return nil, err
+	if err := registerHealth(engine, d); err != nil {
+		return nil, fmt.Errorf("register health routes: %w", err)
 	}
 
 	api := engine.Group("/api")
 	d.Kit.Mount(api)
-	if err := mount(api, apiRegistrars, d); err != nil {
-		return nil, err
+	for _, m := range modules {
+		if err := m.Register(api, d); err != nil {
+			return nil, fmt.Errorf("register %s routes: %w", m.Name, err)
+		}
 	}
 
 	return engine, nil
-}
-
-// mount runs the registrars in order and stops at the first error.
-func mount(r gin.IRouter, registrars []registrar, d Deps) error {
-	for _, reg := range registrars {
-		if err := reg.register(r, d); err != nil {
-			return fmt.Errorf("register %s routes: %w", reg.name, err)
-		}
-	}
-	return nil
 }

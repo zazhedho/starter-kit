@@ -4,58 +4,51 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
 	"starter-kit/internal/config"
+	"starter-kit/internal/router/module"
 	"starter-kit/internal/testutil/routertest"
 )
 
-// ownRoutesWithMedia and ownRoutesWithoutMedia are written by hand from the
-// registrars. A new route must be added here on purpose; an accidental one fails the test.
-var (
-	ownRoutesWithoutMedia = []string{
-		"GET /healthcheck",
-		"GET /readyz",
-		"GET /api/location/province",
-		"GET /api/location/city",
-		"GET /api/location/district",
-		"GET /api/location/village",
-		"POST /api/location/sync",
-		"GET /api/location/sync/:id",
-	}
-	mediaRoutes = []string{
-		"POST /api/media",
-		"DELETE /api/media/:id",
-	}
-)
-
-func sorted(lists ...[]string) []string {
-	var all []string
-	for _, l := range lists {
-		all = append(all, l...)
-	}
-	sort.Strings(all)
-	return all
-}
-
-func equalLists(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+// routeOwners returns every route the full engine is expected to have, mapped to
+// who mounts it: authkit, the probes, or the module registered alone. Nothing is
+// listed by hand; each module's own routes_test.go pins its exact routes.
+func routeOwners(t *testing.T, d module.Deps) (owners map[string]string, duplicates []string) {
+	t.Helper()
+	owners = map[string]string{}
+	add := func(owner string, routes map[string]bool) {
+		for route := range routes {
+			if prev, taken := owners[route]; taken {
+				duplicates = append(duplicates, route+" ("+prev+" and "+owner+")")
+				continue
+			}
+			owners[route] = owner
 		}
 	}
-	return true
+
+	add("authkit", routertest.AuthkitRoutes(t, d))
+	probes := gin.New()
+	if err := registerHealth(probes, d); err != nil {
+		t.Fatalf("registerHealth: %v", err)
+	}
+	add("health", routertest.RouteSet(probes))
+	for _, m := range modules {
+		add(m.Name, routertest.RouteSet(routertest.Mount(t, m.Register, d)))
+	}
+	sort.Strings(duplicates)
+	return owners, duplicates
 }
 
+// TestRouteTable derives the expected routes from authkit, the probes and each
+// mounted module registered alone, so adding a module to modules.go needs no edit here.
 func TestRouteTable(t *testing.T) {
 	cases := []struct {
 		name  string
 		media bool
-		want  []string
 	}{
-		{"media enabled, redis absent", true, sorted(ownRoutesWithoutMedia, mediaRoutes)},
-		{"media disabled, redis absent", false, sorted(ownRoutesWithoutMedia)},
+		{"media enabled, redis absent", true},
+		{"media disabled, redis absent", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,25 +57,50 @@ func TestRouteTable(t *testing.T) {
 				d.Storage = routertest.FakeStorage{}
 			}
 			all := routertest.RouteSet(newEngine(t, d))
-			kit := routertest.AuthkitRoutes(t, d)
+			want, duplicates := routeOwners(t, d)
 
-			own := map[string]bool{}
-			for route := range all {
-				if !kit[route] {
-					own[route] = true
-				}
+			for _, dup := range duplicates {
+				t.Errorf("route mounted twice: %s", dup)
 			}
-			if got := routertest.SortedKeys(own); !equalLists(got, c.want) {
-				t.Errorf("this service's routes are\n  %v\nwant\n  %v", got, c.want)
-			}
-			for route := range kit {
+			for route, owner := range want {
 				if !all[route] {
-					t.Errorf("authkit route %s is missing from the engine", route)
+					t.Errorf("%s route %s is missing from the engine", owner, route)
 				}
 			}
-			if len(all) != len(kit)+len(c.want) {
-				t.Errorf("engine has %d routes, want authkit's %d plus %d of our own", len(all), len(kit), len(c.want))
+			for route := range all {
+				if _, ok := want[route]; !ok {
+					t.Errorf("engine route %s is not mounted by authkit, the probes or any module in modules.go", route)
+				}
 			}
 		})
+	}
+}
+
+func TestModulesAreAlphabeticalAndUnique(t *testing.T) {
+	if len(modules) == 0 {
+		t.Fatal("modules is empty")
+	}
+	for i, m := range modules {
+		if m.Name == "" || m.Register == nil {
+			t.Errorf("modules[%d] needs a Name and a Register", i)
+		}
+		if i > 0 && modules[i-1].Name >= m.Name {
+			t.Errorf("modules must be alphabetical and unique: %q follows %q", m.Name, modules[i-1].Name)
+		}
+	}
+}
+
+func TestRouteOwnersDetectsADuplicateRoute(t *testing.T) {
+	d := routertest.NewDeps(t, nil)
+	saved := modules
+	t.Cleanup(func() { modules = saved })
+	dup := module.Entry{Name: "zzz-dup", Register: func(r gin.IRouter, _ module.Deps) error {
+		r.GET("/location/province", func(*gin.Context) {})
+		return nil
+	}}
+	modules = append(append([]module.Entry{}, saved...), dup)
+
+	if _, duplicates := routeOwners(t, d); len(duplicates) != 1 {
+		t.Fatalf("duplicates = %v, want exactly the one route mounted twice", duplicates)
 	}
 }
