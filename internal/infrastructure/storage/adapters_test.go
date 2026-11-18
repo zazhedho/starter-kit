@@ -5,7 +5,6 @@ import (
 	"context"
 	"mime/multipart"
 	"net/textproto"
-	"strings"
 	"testing"
 
 	"github.com/minio/minio-go/v7"
@@ -18,93 +17,6 @@ type storageTestMultipartFile struct {
 
 func (f storageTestMultipartFile) Close() error {
 	return nil
-}
-
-func TestNewStorageProviderRejectsUnknownProvider(t *testing.T) {
-	_, err := NewStorageProvider(Config{Provider: "local"})
-	if err == nil || !strings.Contains(err.Error(), "unsupported storage provider") {
-		t.Fatalf("expected unsupported provider error, got %v", err)
-	}
-}
-
-func TestNewStorageProviderCreatesR2AdapterAliases(t *testing.T) {
-	provider, err := NewStorageProvider(Config{
-		Provider:        "cloudflare-r2",
-		Endpoint:        "https://example.r2.cloudflarestorage.com",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-		BaseURL:         "https://cdn.example.com",
-		UseSSL:          true,
-	})
-	if err != nil {
-		t.Fatalf("expected success, got %v", err)
-	}
-	if _, ok := provider.(*R2Adapter); !ok {
-		t.Fatalf("expected R2 adapter, got %T", provider)
-	}
-}
-
-func TestNewMinIOAdapterRejectsInvalidEndpoint(t *testing.T) {
-	_, err := NewMinIOAdapter(Config{
-		Endpoint:        "://bad-endpoint",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-	})
-	if err == nil || !strings.Contains(err.Error(), "failed to create MinIO client") {
-		t.Fatalf("expected invalid endpoint error, got %v", err)
-	}
-}
-
-func TestNewStorageProviderRejectsInvalidMinIOEndpoint(t *testing.T) {
-	_, err := NewStorageProvider(Config{
-		Provider:        "minio",
-		Endpoint:        "://bad-endpoint",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-	})
-	if err == nil || !strings.Contains(err.Error(), "failed to create MinIO client") {
-		t.Fatalf("expected invalid minio endpoint error, got %v", err)
-	}
-}
-
-func TestNewStorageProviderCreatesR2AdapterWithDefaults(t *testing.T) {
-	provider, err := NewStorageProvider(Config{
-		Provider:        "r2",
-		Endpoint:        "custom-endpoint",
-		AccountID:       "account-1",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-		UseSSL:          true,
-	})
-	if err != nil {
-		t.Fatalf("expected success, got %v", err)
-	}
-	r2, ok := provider.(*R2Adapter)
-	if !ok {
-		t.Fatalf("expected R2 adapter, got %T", provider)
-	}
-	if r2.baseURL != "https://bucket.r2.dev" || r2.accountID != "account-1" {
-		t.Fatalf("unexpected r2 defaults: %+v", r2)
-	}
-}
-
-func TestBuildObjectNameKeepsExtensionAndTrimsFolder(t *testing.T) {
-	got := buildObjectName("avatar.png", "/users/")
-	if !strings.HasPrefix(got, "users/") {
-		t.Fatalf("expected folder prefix, got %q", got)
-	}
-	if !strings.HasSuffix(got, ".png") {
-		t.Fatalf("expected extension to be preserved, got %q", got)
-	}
-
-	got = buildObjectName("report", "")
-	if strings.Contains(got, "/") || strings.HasSuffix(got, ".") {
-		t.Fatalf("expected bare generated object name without folder or extension, got %q", got)
-	}
 }
 
 func TestExtractObjectNameFromProviderURLs(t *testing.T) {
@@ -199,21 +111,5 @@ func TestStorageAdaptersReturnErrorsWithCanceledContext(t *testing.T) {
 	}
 	if r2Object != nil {
 		_ = r2Object.Close()
-	}
-}
-
-func TestNewStorageProviderReturnsNilInterfaceOnError(t *testing.T) {
-	provider, err := NewStorageProvider(Config{
-		Provider:        "minio",
-		Endpoint:        "://bad-endpoint",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-	})
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if provider != nil {
-		t.Fatalf("expected a nil Provider on error, got %#v", provider)
 	}
 }

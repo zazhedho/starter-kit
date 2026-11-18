@@ -150,3 +150,28 @@ func TestACompletedSyncIsNotMarkedInterrupted(t *testing.T) {
 		t.Fatalf("got %+v, want completed", got)
 	}
 }
+
+func TestNewServiceDoesNotTouchTheRepository(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	_ = NewService(repo, Options{})
+	if repo.failMessage != "" {
+		t.Fatalf("the constructor wrote to the repository: %q", repo.failMessage)
+	}
+}
+
+func TestRecoverInterruptedJobsFailsActiveJobs(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	svc := NewService(repo, Options{})
+	if err := svc.RecoverInterruptedJobs(context.Background()); err != nil {
+		t.Fatalf("RecoverInterruptedJobs = %v", err)
+	}
+	if repo.failMessage != "Service restarted before the previous location sync completed." {
+		t.Fatalf("unexpected recovery message %q", repo.failMessage)
+	}
+
+	boom := errors.New("database down")
+	svc = NewService(&locationRepoTestDouble{failActiveErr: boom}, Options{})
+	if err := svc.RecoverInterruptedJobs(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("RecoverInterruptedJobs = %v, want it to wrap the repository error", err)
+	}
+}
