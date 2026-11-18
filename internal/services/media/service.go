@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 
 	domainmedia "starter-kit/internal/domain/media"
-	interfacemedia "starter-kit/internal/interfaces/media"
 )
 
 const (
@@ -33,13 +32,13 @@ var defaultContentTypes = []string{
 }
 
 type MediaService struct {
-	repo                interfacemedia.RepoMediaInterface
+	repo                Repository
 	storage             Storage
 	maxFileSize         int64
 	allowedContentTypes map[string]struct{}
 }
 
-func NewMediaService(repo interfacemedia.RepoMediaInterface, storageProvider Storage, maxFileSize int64, allowedContentTypes []string) *MediaService {
+func NewMediaService(repo Repository, storageProvider Storage, maxFileSize int64, allowedContentTypes []string) *MediaService {
 	if maxFileSize <= 0 {
 		maxFileSize = defaultMaxFileSize
 	}
@@ -174,5 +173,3 @@ func extensionForContentType(contentType string) string {
 func safeFilename(filename string) string {
 	return path.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
 }
-
-var _ interfacemedia.ServiceMediaInterface = (*MediaService)(nil)

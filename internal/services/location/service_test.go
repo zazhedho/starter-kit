@@ -236,8 +236,8 @@ func newLocationFallbackService(t *testing.T) *LocationService {
 		district: domainlocation.District{Code: "167101", CityCode: "1671", Name: "Ilir Timur I"},
 	}
 	svc := &LocationService{
-		Repo: repo,
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		repo: repo,
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			body := `{}`
 			switch {
 			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
@@ -424,7 +424,7 @@ func TestLocationMapAndSortHelpers(t *testing.T) {
 }
 
 func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
-	svc := &LocationService{HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	svc := &LocationService{httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"11","full_code":"11","name":"Aceh","level":"province"}]}`)),
@@ -439,7 +439,7 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 		t.Fatalf("unexpected location map: %+v", got)
 	}
 
-	svc.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusInternalServerError,
 			Body:       io.NopCloser(strings.NewReader("")),
@@ -450,14 +450,14 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 		t.Fatal("expected status error")
 	}
 
-	svc.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return nil, errors.New("network down")
 	})}
 	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
 		t.Fatal("expected transport error")
 	}
 
-	svc.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{`)),
@@ -472,8 +472,8 @@ func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
 func newScopedLocationSyncService(t *testing.T, repo *locationRepoTestDouble) *LocationService {
 	t.Helper()
 	return &LocationService{
-		Repo: repo,
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		repo: repo,
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			body := `{}`
 			switch {
 			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
@@ -547,8 +547,8 @@ func TestLocationSyncAll(t *testing.T) {
 func TestLocationSyncIndividualLevels(t *testing.T) {
 	makeService := func(repo *locationRepoTestDouble) *LocationService {
 		return &LocationService{
-			Repo: repo,
-			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			repo: repo,
+			httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				body := `{}`
 				switch {
 				case strings.Contains(req.URL.Path, "/api/locations/provinces"):
@@ -599,8 +599,8 @@ func TestLocationSyncIndividualLevels(t *testing.T) {
 func TestLocationSyncUpsertErrors(t *testing.T) {
 	makeService := func(repo *locationRepoTestDouble) *LocationService {
 		return &LocationService{
-			Repo: repo,
-			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			repo: repo,
+			httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				body := `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
 				if strings.Contains(req.URL.Path, "/api/locations/regencies") {
 					body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
@@ -641,8 +641,8 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	now := time.Now()
 	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: now}}
 	svc := &LocationService{
-		Repo: repo,
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		repo: repo,
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`)), Header: make(http.Header)}, nil
 		})},
 	}
@@ -656,7 +656,7 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	}
 
 	repo = &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-2", Status: "queued", CreatedAt: now}}
-	svc = &LocationService{Repo: repo}
+	svc = &LocationService{repo: repo}
 	svc.syncing.Store(true)
 	svc.runSyncJob("job-2", dto.SyncLocationRequest{Level: "province", Year: "2026"})
 	if len(repo.updatedJobs) != 1 || repo.updatedJobs[0].Status != "failed" {
@@ -667,7 +667,7 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 func TestLocationSyncProgressAndFailureHelpers(t *testing.T) {
 	now := time.Now()
 	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "running", CreatedAt: now}}
-	svc := &LocationService{Repo: repo}
+	svc := &LocationService{repo: repo}
 
 	job := domainlocation.SyncJob{ID: "job-1"}
 	svc.applySyncProgress(&job, syncProgress{Message: "halfway", ProvinceCount: 1})

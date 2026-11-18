@@ -11,13 +11,13 @@ import (
 func TestNewLocationServiceNeverDisablesTheHTTPTimeout(t *testing.T) {
 	for _, timeout := range []time.Duration{0, -time.Second} {
 		svc := NewLocationService(&locationRepoTestDouble{}, Options{Timeout: timeout})
-		if svc.HTTPClient.Timeout != defaultHTTPTimeout {
-			t.Errorf("Timeout %v: client timeout = %v, want %v", timeout, svc.HTTPClient.Timeout, defaultHTTPTimeout)
+		if svc.httpClient.Timeout != defaultHTTPTimeout {
+			t.Errorf("Timeout %v: client timeout = %v, want %v", timeout, svc.httpClient.Timeout, defaultHTTPTimeout)
 		}
 	}
 	svc := NewLocationService(&locationRepoTestDouble{}, Options{Timeout: 3 * time.Second})
-	if svc.HTTPClient.Timeout != 3*time.Second {
-		t.Errorf("explicit timeout not kept: %v", svc.HTTPClient.Timeout)
+	if svc.httpClient.Timeout != 3*time.Second {
+		t.Errorf("explicit timeout not kept: %v", svc.httpClient.Timeout)
 	}
 }
 

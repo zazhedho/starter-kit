@@ -1,14 +1,17 @@
-package interfacemedia
+package handlermedia
 
 import (
 	"context"
-	"github.com/zazhedho/authkit"
 	"mime/multipart"
+
+	"github.com/zazhedho/authkit"
 
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-type ServiceMediaInterface interface {
+// Service is what the media handlers call. The concrete service lives in
+// internal/services/media; the router wires it in.
+type Service interface {
 	MaxFileSize() int64
 	Upload(ctx context.Context, ownerUserID string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error)
 	Delete(ctx context.Context, scope authkit.Scope, id string) (domainmedia.Media, error)

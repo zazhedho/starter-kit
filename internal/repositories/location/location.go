@@ -5,15 +5,15 @@ import (
 	"errors"
 	"github.com/zazhedho/gokit"
 	domainlocation "starter-kit/internal/domain/location"
-	interfacelocation "starter-kit/internal/interfaces/location"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-type repo struct {
-	DB *gorm.DB
+// Repository is the GORM adapter for the location tables.
+type Repository struct {
+	db *gorm.DB
 }
 
 const (
@@ -21,40 +21,41 @@ const (
 	locationCodeFilter = "code = ? AND deleted_at IS NULL"
 )
 
-func NewLocationRepo(db *gorm.DB) interfacelocation.RepoLocationInterface {
-	return &repo{DB: db}
+// NewRepository returns a Repository over db.
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{db: db}
 }
 
-func (r *repo) ListProvinces(ctx context.Context) (ret []domainlocation.Province, err error) {
-	err = r.DB.WithContext(ctx).Where("deleted_at IS NULL").Order(locationNameOrder).Find(&ret).Error
+func (r *Repository) ListProvinces(ctx context.Context) (ret []domainlocation.Province, err error) {
+	err = r.db.WithContext(ctx).Where("deleted_at IS NULL").Order(locationNameOrder).Find(&ret).Error
 	return
 }
 
-func (r *repo) ListCitiesByProvince(ctx context.Context, provinceCode string) (ret []domainlocation.City, err error) {
-	err = r.DB.WithContext(ctx).Where("province_code = ? AND deleted_at IS NULL", provinceCode).Order(locationNameOrder).Find(&ret).Error
+func (r *Repository) ListCitiesByProvince(ctx context.Context, provinceCode string) (ret []domainlocation.City, err error) {
+	err = r.db.WithContext(ctx).Where("province_code = ? AND deleted_at IS NULL", provinceCode).Order(locationNameOrder).Find(&ret).Error
 	return
 }
 
-func (r *repo) ListDistrictsByCity(ctx context.Context, cityCode string) (ret []domainlocation.District, err error) {
-	err = r.DB.WithContext(ctx).Where("city_code = ? AND deleted_at IS NULL", cityCode).Order(locationNameOrder).Find(&ret).Error
+func (r *Repository) ListDistrictsByCity(ctx context.Context, cityCode string) (ret []domainlocation.District, err error) {
+	err = r.db.WithContext(ctx).Where("city_code = ? AND deleted_at IS NULL", cityCode).Order(locationNameOrder).Find(&ret).Error
 	return
 }
 
-func (r *repo) ListVillagesByDistrict(ctx context.Context, districtCode string) (ret []domainlocation.Village, err error) {
-	err = r.DB.WithContext(ctx).Where("district_code = ? AND deleted_at IS NULL", districtCode).Order(locationNameOrder).Find(&ret).Error
+func (r *Repository) ListVillagesByDistrict(ctx context.Context, districtCode string) (ret []domainlocation.Village, err error) {
+	err = r.db.WithContext(ctx).Where("district_code = ? AND deleted_at IS NULL", districtCode).Order(locationNameOrder).Find(&ret).Error
 	return
 }
 
-func (r *repo) GetProvinceByCode(ctx context.Context, code string) (ret domainlocation.Province, err error) {
-	return getByCode[domainlocation.Province](ctx, r.DB, code)
+func (r *Repository) GetProvinceByCode(ctx context.Context, code string) (ret domainlocation.Province, err error) {
+	return getByCode[domainlocation.Province](ctx, r.db, code)
 }
 
-func (r *repo) GetCityByCode(ctx context.Context, code string) (ret domainlocation.City, err error) {
-	return getByCode[domainlocation.City](ctx, r.DB, code)
+func (r *Repository) GetCityByCode(ctx context.Context, code string) (ret domainlocation.City, err error) {
+	return getByCode[domainlocation.City](ctx, r.db, code)
 }
 
-func (r *repo) GetDistrictByCode(ctx context.Context, code string) (ret domainlocation.District, err error) {
-	return getByCode[domainlocation.District](ctx, r.DB, code)
+func (r *Repository) GetDistrictByCode(ctx context.Context, code string) (ret domainlocation.District, err error) {
+	return getByCode[domainlocation.District](ctx, r.db, code)
 }
 
 func getByCode[T any](ctx context.Context, db *gorm.DB, code string) (T, error) {
@@ -72,46 +73,46 @@ func translateNotFound(err error) error {
 	return err
 }
 
-func (r *repo) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
+func (r *Repository) UpsertProvinces(ctx context.Context, items []domainlocation.Province) error {
 	return r.upsert(ctx, "code", items)
 }
 
-func (r *repo) UpsertCities(ctx context.Context, items []domainlocation.City) error {
+func (r *Repository) UpsertCities(ctx context.Context, items []domainlocation.City) error {
 	return r.upsert(ctx, "code", items)
 }
 
-func (r *repo) UpsertDistricts(ctx context.Context, items []domainlocation.District) error {
+func (r *Repository) UpsertDistricts(ctx context.Context, items []domainlocation.District) error {
 	return r.upsert(ctx, "code", items)
 }
 
-func (r *repo) UpsertVillages(ctx context.Context, items []domainlocation.Village) error {
+func (r *Repository) UpsertVillages(ctx context.Context, items []domainlocation.Village) error {
 	return r.upsert(ctx, "code", items)
 }
 
-func (r *repo) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
-	return r.DB.WithContext(ctx).Create(job).Error
+func (r *Repository) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
+	return r.db.WithContext(ctx).Create(job).Error
 }
 
-func (r *repo) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
-	return r.DB.WithContext(ctx).Save(job).Error
+func (r *Repository) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
+	return r.db.WithContext(ctx).Save(job).Error
 }
 
-func (r *repo) GetSyncJobByID(ctx context.Context, id string) (ret domainlocation.SyncJob, err error) {
-	err = r.DB.WithContext(ctx).Where("id = ?", id).First(&ret).Error
+func (r *Repository) GetSyncJobByID(ctx context.Context, id string) (ret domainlocation.SyncJob, err error) {
+	err = r.db.WithContext(ctx).Where("id = ?", id).First(&ret).Error
 	return ret, translateNotFound(err)
 }
 
-func (r *repo) GetActiveSyncJob(ctx context.Context) (ret domainlocation.SyncJob, err error) {
-	err = r.DB.WithContext(ctx).
+func (r *Repository) GetActiveSyncJob(ctx context.Context) (ret domainlocation.SyncJob, err error) {
+	err = r.db.WithContext(ctx).
 		Where("status IN ?", []string{"queued", "running"}).
 		Order("created_at ASC").
 		First(&ret).Error
 	return ret, translateNotFound(err)
 }
 
-func (r *repo) FailActiveSyncJobs(ctx context.Context, message string) error {
+func (r *Repository) FailActiveSyncJobs(ctx context.Context, message string) error {
 	now := time.Now()
-	return r.DB.WithContext(ctx).Model(&domainlocation.SyncJob{}).
+	return r.db.WithContext(ctx).Model(&domainlocation.SyncJob{}).
 		Where("status IN ?", []string{"queued", "running"}).
 		Updates(map[string]any{
 			"status":        "failed",
@@ -122,7 +123,7 @@ func (r *repo) FailActiveSyncJobs(ctx context.Context, message string) error {
 		}).Error
 }
 
-func (r *repo) upsert(ctx context.Context, conflictColumn string, values any) error {
+func (r *Repository) upsert(ctx context.Context, conflictColumn string, values any) error {
 	switch items := values.(type) {
 	case []domainlocation.Province:
 		prepareUpsertRows(items, func(item *domainlocation.Province) (*string, *time.Time, **time.Time) {
@@ -149,8 +150,8 @@ func (r *repo) upsert(ctx context.Context, conflictColumn string, values any) er
 	}
 }
 
-func (r *repo) saveUpsert(ctx context.Context, conflictColumn string, values any, updateColumns []string) error {
-	return r.DB.WithContext(ctx).Clauses(clause.OnConflict{
+func (r *Repository) saveUpsert(ctx context.Context, conflictColumn string, values any, updateColumns []string) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: conflictColumn}},
 		DoUpdates: clause.AssignmentColumns(updateColumns),
 	}).Create(values).Error

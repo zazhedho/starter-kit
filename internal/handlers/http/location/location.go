@@ -8,17 +8,16 @@ import (
 	"net/http"
 	domainlocation "starter-kit/internal/domain/location"
 	"starter-kit/internal/dto"
-	interfacelocation "starter-kit/internal/interfaces/location"
 
 	"github.com/gin-gonic/gin"
 )
 
 type LocationHandler struct {
-	Service interfacelocation.ServiceLocationInterface
+	service Service
 }
 
-func NewLocationHandler(s interfacelocation.ServiceLocationInterface) *LocationHandler {
-	return &LocationHandler{Service: s}
+func NewLocationHandler(s Service) *LocationHandler {
+	return &LocationHandler{service: s}
 }
 
 func (h *LocationHandler) GetProvince(ctx *gin.Context) {
@@ -26,7 +25,7 @@ func (h *LocationHandler) GetProvince(ctx *gin.Context) {
 	logPrefix := "[LocationHandler][GetProvince]"
 	reqCtx := ctx.Request.Context()
 
-	data, err := h.Service.GetProvince(reqCtx)
+	data, err := h.service.GetProvince(reqCtx)
 	if err != nil {
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetProvince; Error: %+v", logPrefix, err))
 		res := gokit.InternalServerError(logId)
@@ -51,7 +50,7 @@ func (h *LocationHandler) GetCity(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetCity(reqCtx, provinceCode)
+	data, err := h.service.GetCity(reqCtx, provinceCode)
 	if err != nil {
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetCity; Error: %+v", logPrefix, err))
 		res := gokit.InternalServerError(logId)
@@ -76,7 +75,7 @@ func (h *LocationHandler) GetDistrict(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetDistrict(reqCtx, cityCode)
+	data, err := h.service.GetDistrict(reqCtx, cityCode)
 	if err != nil {
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetDistrict; Error: %+v", logPrefix, err))
 		res := gokit.InternalServerError(logId)
@@ -101,7 +100,7 @@ func (h *LocationHandler) GetVillage(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetVillage(reqCtx, districtCode)
+	data, err := h.service.GetVillage(reqCtx, districtCode)
 	if err != nil {
 		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetVillage; Error: %+v", logPrefix, err))
 		res := gokit.InternalServerError(logId)
@@ -123,7 +122,7 @@ func (h *LocationHandler) Sync(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.StartSync(reqCtx, req)
+	data, err := h.service.StartSync(reqCtx, req)
 	if err != nil {
 		if errors.Is(err, domainlocation.ErrSyncRunning) {
 			res := gokit.Response(http.StatusConflict, gokit.MsgSomethingWrong, logId, data)
@@ -162,7 +161,7 @@ func (h *LocationHandler) GetSyncJob(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.GetSyncJob(reqCtx, jobID)
+	data, err := h.service.GetSyncJob(reqCtx, jobID)
 	if err != nil {
 		if errors.Is(err, domainlocation.ErrNotFound) {
 			res := gokit.Response(http.StatusNotFound, gokit.MsgNotFound, logId, nil)

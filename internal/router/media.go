@@ -19,7 +19,7 @@ func registerMedia(r gin.IRouter, d Deps) error {
 		return nil
 	}
 
-	repo := mediaRepo.NewMediaRepo(d.DB)
+	repo := mediaRepo.NewRepository(d.DB)
 	svc := mediaSvc.NewMediaService(repo, d.Storage, m.MaxFileSizeBytes, m.AllowedContentTypes)
 	h := mediaHandler.NewMediaHandler(svc, d.Kit.Audit(), m.UploadTimeout)
 

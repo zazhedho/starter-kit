@@ -11,7 +11,7 @@ import (
 
 func registerLocation(r gin.IRouter, d Deps) error {
 	loc := d.Config.Location
-	repo := locationRepo.NewLocationRepo(d.DB)
+	repo := locationRepo.NewRepository(d.DB)
 	svc := locationSvc.NewLocationService(repo, locationSvc.Options{
 		Cache:      cachelocation.New(d.Redis),
 		BaseURL:    loc.ServiceBaseURL,

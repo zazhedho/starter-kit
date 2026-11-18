@@ -1,11 +1,14 @@
-package interfacelocation
+package handlerlocation
 
 import (
 	"context"
+
 	"starter-kit/internal/dto"
 )
 
-type ServiceLocationInterface interface {
+// Service is what the location handlers call. The concrete service lives in
+// internal/services/location; the router wires it in.
+type Service interface {
 	GetProvince(ctx context.Context) ([]dto.Location, error)
 	GetCity(ctx context.Context, provinceCode string) ([]dto.Location, error)
 	GetDistrict(ctx context.Context, cityCode string) ([]dto.Location, error)

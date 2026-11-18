@@ -52,7 +52,7 @@ func (s *LocationService) fetchLocationMap(ctx context.Context, url, entity stri
 		return nil, fmt.Errorf("failed to prepare %s request: %w", entity, err)
 	}
 
-	client := s.HTTPClient
+	client := s.httpClient
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
 	}

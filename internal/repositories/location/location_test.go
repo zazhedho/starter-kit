@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	domainlocation "starter-kit/internal/domain/location"
-	interfacelocation "starter-kit/internal/interfaces/location"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -31,7 +30,7 @@ func newDryRunDB(t *testing.T) *gorm.DB {
 }
 
 func TestLocationRepositoryDryRunReads(t *testing.T) {
-	repo := NewLocationRepo(newDryRunDB(t))
+	repo := NewRepository(newDryRunDB(t))
 	ctx := context.Background()
 
 	if _, err := repo.ListProvinces(ctx); err != nil {
@@ -58,7 +57,7 @@ func TestLocationRepositoryDryRunReads(t *testing.T) {
 }
 
 func TestLocationRepositoryDryRunUpserts(t *testing.T) {
-	repo := NewLocationRepo(newDryRunDB(t))
+	repo := NewRepository(newDryRunDB(t))
 	ctx := context.Background()
 	if err := repo.UpsertProvinces(ctx, []domainlocation.Province{{Code: "31", Name: "DKI Jakarta"}}); err != nil {
 		t.Fatalf("upsert provinces: %v", err)
@@ -75,7 +74,7 @@ func TestLocationRepositoryDryRunUpserts(t *testing.T) {
 }
 
 func TestLocationRepositoryDryRunSyncJobs(t *testing.T) {
-	repo := NewLocationRepo(newDryRunDB(t))
+	repo := NewRepository(newDryRunDB(t))
 	ctx := context.Background()
 	job := &domainlocation.SyncJob{ID: "job-1", Status: "queued"}
 	if err := repo.CreateSyncJob(ctx, job); err != nil {
@@ -96,7 +95,7 @@ func TestLocationRepositoryDryRunSyncJobs(t *testing.T) {
 }
 
 func TestLocationRepositoryUpsertIgnoresUnknownType(t *testing.T) {
-	repo := NewLocationRepo(newDryRunDB(t)).(*repo)
+	repo := NewRepository(newDryRunDB(t))
 	if err := repo.upsert(context.Background(), "code", []string{"unsupported"}); err != nil {
 		t.Fatalf("unsupported upsert should be ignored: %v", err)
 	}
@@ -118,30 +117,30 @@ func newNoRowsRepo(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 
 func TestLocationRepositoryTranslatesNotFound(t *testing.T) {
 	ctx := context.Background()
-	lookups := map[string]func(r interfacelocation.RepoLocationInterface) error{
-		"province": func(r interfacelocation.RepoLocationInterface) error {
+	lookups := map[string]func(r *Repository) error{
+		"province": func(r *Repository) error {
 			_, err := r.GetProvinceByCode(ctx, "99")
 			return err
 		},
-		"city": func(r interfacelocation.RepoLocationInterface) error {
+		"city": func(r *Repository) error {
 			_, err := r.GetCityByCode(ctx, "9999")
 			return err
 		},
-		"district": func(r interfacelocation.RepoLocationInterface) error {
+		"district": func(r *Repository) error {
 			_, err := r.GetDistrictByCode(ctx, "999999")
 			return err
 		},
-		"job": func(r interfacelocation.RepoLocationInterface) error {
+		"job": func(r *Repository) error {
 			_, err := r.GetSyncJobByID(ctx, "missing")
 			return err
 		},
-		"active": func(r interfacelocation.RepoLocationInterface) error { _, err := r.GetActiveSyncJob(ctx); return err },
+		"active": func(r *Repository) error { _, err := r.GetActiveSyncJob(ctx); return err },
 	}
 	for name, lookup := range lookups {
 		t.Run(name, func(t *testing.T) {
 			db, mock := newNoRowsRepo(t)
 			mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"id"}))
-			err := lookup(NewLocationRepo(db))
+			err := lookup(NewRepository(db))
 			if !errors.Is(err, domainlocation.ErrNotFound) {
 				t.Fatalf("expected domainlocation.ErrNotFound, got %v", err)
 			}
@@ -156,7 +155,7 @@ func TestLocationRepositoryKeepsOtherErrors(t *testing.T) {
 	db, mock := newNoRowsRepo(t)
 	boom := errors.New("connection reset")
 	mock.ExpectQuery("SELECT").WillReturnError(boom)
-	_, err := NewLocationRepo(db).GetProvinceByCode(context.Background(), "31")
+	_, err := NewRepository(db).GetProvinceByCode(context.Background(), "31")
 	if !errors.Is(err, boom) || errors.Is(err, domainlocation.ErrNotFound) {
 		t.Fatalf("expected the original error, got %v", err)
 	}

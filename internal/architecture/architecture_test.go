@@ -117,13 +117,13 @@ var (
 var rules = []rule{
 	{
 		tree:            "internal/domain",
-		forbidInternal:  []string{"internal/dto", "internal/interfaces", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
+		forbidInternal:  []string{"internal/dto", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
 		externalAllowed: []string{gormPkg}, // gorm.DeletedAt is the single documented exception
 		testsToo:        true,
 	},
 	{
 		tree:           "internal/dto",
-		forbidInternal: []string{"internal/interfaces", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
+		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/cache", "internal/router", "internal/app", "internal/config"},
 		forbidExternal: []string{ginPkg, gormPkg, redisPkg},
 		testsToo:       true,
 	},
@@ -315,4 +315,32 @@ func TestRulesDetectViolations(t *testing.T) {
 			t.Errorf("%s: violates=%v, want %v", c.name, got, c.want)
 		}
 	}
+}
+
+// TestInterfacesLiveWithTheirConsumer keeps the Go convention: an interface is
+// declared by the package that uses it (ports.go), never in a producer-side
+// internal/interfaces package, and carries no "Interface" suffix.
+func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("..", "..", "internal", "interfaces")); err == nil {
+		t.Error("internal/interfaces must not exist: declare interfaces in the consuming package (ports.go)")
+	}
+	repoFiles(t, func(p string, data []byte) {
+		file, err := parser.ParseFile(token.NewFileSet(), p, data, 0)
+		if err != nil {
+			t.Errorf("parse %s: %v", p, err)
+			return
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts := spec.(*ast.TypeSpec)
+				if _, isIface := ts.Type.(*ast.InterfaceType); isIface && strings.HasSuffix(ts.Name.Name, "Interface") {
+					t.Errorf("%s: interface %s has an Interface suffix; name it for the role (Service, Repository, ...)", p, ts.Name.Name)
+				}
+			}
+		}
+	})
 }

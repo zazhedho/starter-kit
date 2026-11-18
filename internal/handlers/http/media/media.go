@@ -12,20 +12,19 @@ import (
 	"github.com/zazhedho/gokit"
 	"github.com/zazhedho/logus"
 	domainmedia "starter-kit/internal/domain/media"
-	interfacemedia "starter-kit/internal/interfaces/media"
 )
 
 const multipartOverhead = int64(1 << 20)
 
 type MediaHandler struct {
-	Service       interfacemedia.ServiceMediaInterface
+	service       Service
 	uploadTimeout time.Duration
 	authkit.AuditWriter
 }
 
-func NewMediaHandler(service interfacemedia.ServiceMediaInterface, auditService authkit.AuditService, uploadTimeout time.Duration) *MediaHandler {
+func NewMediaHandler(service Service, auditService authkit.AuditService, uploadTimeout time.Duration) *MediaHandler {
 	return &MediaHandler{
-		Service:       service,
+		service:       service,
 		uploadTimeout: uploadTimeout,
 		AuditWriter:   authkit.NewAuditWriter(auditService, "MediaHandler"),
 	}
@@ -41,7 +40,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; SetReadDeadline; Error: %v", logPrefix, err))
 		}
 	}
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, h.Service.MaxFileSize()+multipartOverhead)
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, h.service.MaxFileSize()+multipartOverhead)
 
 	file, header, err := ctx.Request.FormFile("file")
 	if err != nil {
@@ -62,7 +61,7 @@ func (h *MediaHandler) Upload(ctx *gin.Context) {
 	}()
 
 	scope := authkit.ScopeFrom(ctx.Request.Context())
-	data, err := h.Service.Upload(ctx.Request.Context(), scope.UserID, file, header)
+	data, err := h.service.Upload(ctx.Request.Context(), scope.UserID, file, header)
 	if err != nil {
 		h.WriteAudit(ctx, authkit.AuditEvent{
 			Action:       authkit.ActionCreate,
@@ -101,7 +100,7 @@ func (h *MediaHandler) Delete(ctx *gin.Context) {
 		return
 	}
 
-	data, err := h.Service.Delete(ctx.Request.Context(), authkit.ScopeFrom(ctx.Request.Context()), id)
+	data, err := h.service.Delete(ctx.Request.Context(), authkit.ScopeFrom(ctx.Request.Context()), id)
 	if err != nil {
 		h.WriteAudit(ctx, authkit.AuditEvent{
 			Action:       authkit.ActionDelete,
