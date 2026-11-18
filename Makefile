@@ -1,7 +1,7 @@
 GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
 GOLANGCI_LINT_VERSION := v2.14.0
 
-.PHONY: lint fmt lint-install run debug hook-install
+.PHONY: lint fmt test lint-install run debug hook-install
 
 lint:
 	@echo "Running golangci-lint..."
@@ -11,6 +11,9 @@ lint:
 	fi
 	@$(GOLANGCI_LINT) run --config .golangci.yml --timeout=5m ./...
 	@echo "golangci-lint passed."
+
+test:
+	@go build ./... && go vet ./... && go test -race -count=1 ./...
 
 fmt:
 	@if [ ! -x "$(GOLANGCI_LINT)" ]; then \
@@ -31,4 +34,4 @@ debug: lint
 hook-install:
 	@git config core.hooksPath .githooks
 	@chmod +x .githooks/pre-commit .githooks/pre-push
-	@echo "Git hooks installed. Lint will run on commit and push."
+	@echo "Git hooks installed. Lint runs on commit; lint and tests run on push."
