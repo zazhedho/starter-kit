@@ -425,13 +425,28 @@ type createRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
+// maxListLimit caps the page size a caller can ask for.
+const maxListLimit = 100
+
+// clampLimit turns anything below 1 (including -1) into def and caps the rest.
+func clampLimit(limit, def int) int {
+	if limit < 1 {
+		return def
+	}
+	return min(limit, maxListLimit)
+}
+
 func (h *Handler) List(ctx *gin.Context) {
 	logID := gokit.GenerateLogId(ctx)
-	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "created_at", "desc", h.pageSize)
+	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "", "", h.pageSize)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 		return
 	}
+	// A user-facing list must be bounded: gokit keeps limit=-1 (no limit) and
+	// accepts up to 10000, so clamp it and recompute the offset.
+	params.Limit = clampLimit(params.Limit, h.pageSize)
+	params.Offset = (params.Page - 1) * params.Limit
 	items, total, err := h.service.List(ctx.Request.Context(), dtoprojects.ListRequest{
 		Search:         params.Search,
 		OrderBy:        params.OrderBy,

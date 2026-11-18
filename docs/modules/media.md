@@ -38,7 +38,7 @@ service a `domainmedia.Actor`; the service never imports authkit. The migration 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `page` | `1` | page number; a value below 1 becomes 1; a non-number answers `400` |
-| `limit` | `20` | page size; below 1 or above 10000 falls back to 20; `-1` (gokit's "no limit") returns every row on one page; a non-number answers `400` |
+| `limit` | `20` | page size, at most `100`; below 1 (including `-1`) falls back to 20, above 100 becomes 100; a non-number answers `400` |
 | `search` | empty | file name contains the text, case-insensitive |
 | `order_by` | `created_at` | `created_at`, `size` or `original_name`; any other column falls back to `created_at` |
 | `order_direction` | `desc` | `asc` or `desc`; anything else falls back to `desc` |

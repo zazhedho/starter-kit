@@ -20,6 +20,7 @@ import (
 const (
 	multipartOverhead = int64(1 << 20)
 	defaultListLimit  = 20
+	maxListLimit      = 100
 )
 
 // listFilters are the filters[...] keys the list endpoint reads.
@@ -112,6 +113,9 @@ func (h *Handler) List(ctx *gin.Context) {
 		return
 	}
 
+	params.Limit = clampLimit(params.Limit)
+	params.Offset = (params.Page - 1) * params.Limit
+
 	filters := gokit.WhitelistStringFilter(params.Filters, listFilters)
 	ownerID, _ := filters["owner_user_id"].(string)
 	contentType, _ := filters["content_type"].(string)
@@ -139,6 +143,16 @@ func (h *Handler) List(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, data))
+}
+
+// clampLimit bounds a user-facing list: gokit passes -1 (no limit) through
+// and accepts up to 10000, so anything below 1 becomes the default and
+// anything above maxListLimit becomes the maximum.
+func clampLimit(limit int) int {
+	if limit < 1 {
+		return defaultListLimit
+	}
+	return min(limit, maxListLimit)
 }
 
 func (h *Handler) Delete(ctx *gin.Context) {

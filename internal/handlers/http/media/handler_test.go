@@ -387,3 +387,40 @@ func TestListHandlerMapsServiceErrors(t *testing.T) {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
 }
+
+// A user-facing list is bounded: gokit keeps limit=-1 (no limit) and accepts
+// up to 10000, so the handler clamps before the service sees the value.
+func TestListHandlerClampsTheLimit(t *testing.T) {
+	cases := []struct {
+		name       string
+		query      string
+		wantLimit  int
+		wantOffset int
+	}{
+		// gokit resets the page to 1 for -1, so the offset is 0.
+		{"minus one is not unbounded", "limit=-1&page=3", defaultListLimit, 0},
+		{"zero falls back", "limit=0", defaultListLimit, 0},
+		{"above the maximum", "limit=101&page=2", maxListLimit, maxListLimit},
+		{"huge value", "limit=10000", maxListLimit, 0},
+		{"normal value", "limit=5&page=3", 5, 10},
+		{"the maximum itself", "limit=100", maxListLimit, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := &serviceDouble{}
+			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?"+c.query, nil, "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+			}
+			if svc.listReq.Limit != c.wantLimit || svc.listReq.Offset != c.wantOffset {
+				t.Fatalf("limit/offset = %d/%d, want %d/%d", svc.listReq.Limit, svc.listReq.Offset, c.wantLimit, c.wantOffset)
+			}
+			var res struct {
+				Limit int `json:"limit"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || res.Limit != c.wantLimit {
+				t.Fatalf("response limit = %d (%v), want %d", res.Limit, err, c.wantLimit)
+			}
+		})
+	}
+}
