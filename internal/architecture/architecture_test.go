@@ -329,6 +329,37 @@ func TestInfrastructureDoesNotImportDomain(t *testing.T) {
 	}
 }
 
+// TestSharedRespectsLayerRules: a shared package belongs to its tree, so the
+// layer rules still apply to it and to importers of it.
+func TestSharedRespectsLayerRules(t *testing.T) {
+	cases := []struct {
+		name, dir, ip string
+		want          bool
+	}{
+		{"dto shared imports domain", "internal/dto/shared", "starter-kit/internal/domain/shared", false},
+		{"dto shared imports gin", "internal/dto/shared", "github.com/gin-gonic/gin", true},
+		{"dto shared imports a service", "internal/dto/shared", "starter-kit/internal/services/shared", true},
+		{"dto module imports services shared", "internal/dto/location", "starter-kit/internal/services/shared", true},
+		{"domain module imports dto shared", "internal/domain/location", "starter-kit/internal/dto/shared", true},
+		{"service module imports repositories shared", "internal/services/location", "starter-kit/internal/repositories/shared", true},
+		{"service module imports dto shared", "internal/services/location", "starter-kit/internal/dto/shared", false},
+		{"http handler imports services shared", "internal/handlers/http/location", "starter-kit/internal/services/shared", true},
+		{"http handler imports dto shared", "internal/handlers/http/location", "starter-kit/internal/dto/shared", false},
+		{"repository imports handlers shared", "internal/repositories/location", "starter-kit/internal/handlers/http/shared", true},
+	}
+	for _, c := range cases {
+		got := false
+		for _, r := range rules {
+			if applies(r, c.dir) && violates(r, c.ip, false) {
+				got = true
+			}
+		}
+		if got != c.want {
+			t.Errorf("%s: violated=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestRulesDetectViolations(t *testing.T) {
 	var services, domain, dto, leaf rule
 	for _, r := range rules {
@@ -411,10 +442,9 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 	})
 }
 
-// moduleAliasPrefix maps each fixed per-module package tree to the import-alias
-// prefix importers must use (domainlocation, routermedia). Handler trees are not
-// listed: internal/handlers/<transport>/<module> derives its prefix from the
-// transport directory, so a new transport (grpc, queue) needs no edit here.
+// moduleAliasPrefix maps each per-module tree to its import-alias prefix
+// (domainlocation, routermedia). Handler trees derive theirs from the transport
+// directory (internal/handlers/<transport>/<module>), so a new transport needs no edit.
 var moduleAliasPrefix = map[string]string{
 	"internal/domain":               "domain",
 	"internal/dto":                  "dto",
@@ -430,12 +460,15 @@ const (
 	// Lifecycle. It is shared infrastructure, not a module: it has no alias prefix
 	// and is skipped by the cross-module rule.
 	routerLeaf = "internal/router/module"
+	// sharedName is the one reserved directory name in a per-module tree
+	// (<tree>/shared). It holds helpers every module of the tree may import, is
+	// not a business module, and must not import one. Alias: prefix + "shared".
+	sharedName = "shared"
 )
 
-// moduleTree splits a module-relative package path under a per-module tree into
-// its alias prefix, business module and the path below the module ("" for the
-// module's own package). ok is false outside the per-module trees and for the
-// router leaf.
+// moduleTree splits a module-relative path under a per-module tree into alias
+// prefix, module and the path below it ("" for the module's own package). ok is
+// false outside those trees and for the router leaf; shared comes back as a module.
 func moduleTree(p string) (prefix, module, rest string, ok bool) {
 	if p == routerLeaf || strings.HasPrefix(p, routerLeaf+"/") {
 		return "", "", "", false
@@ -543,6 +576,10 @@ func TestExpectedAlias(t *testing.T) {
 		"starter-kit/internal/handlers/grpc/location":        "grpclocation",
 		"starter-kit/internal/handlers/queue/media":          "queuemedia",
 		"starter-kit/internal/handlers/grpc":                 "",
+		"starter-kit/internal/dto/shared":                    "dtoshared",
+		"starter-kit/internal/handlers/http/shared":          "httpshared",
+		"starter-kit/internal/services/shared":               "serviceshared",
+		"starter-kit/internal/dto/shared/page":               "",
 	}
 	for ip, want := range cases {
 		if got := expectedAlias(ip); got != want {
@@ -567,21 +604,35 @@ func TestPackageNameMatchesDirectory(t *testing.T) {
 }
 
 // moduleOf returns the business module a module-relative path belongs to, or ""
-// outside the per-module trees (see moduleTree).
+// outside the per-module trees and for a reserved shared package (see moduleTree).
 func moduleOf(p string) string {
 	_, module, _, _ := moduleTree(p)
+	if module == sharedName {
+		return ""
+	}
 	return module
 }
 
+// isShared reports whether the module-relative path is a reserved shared package
+// (or below one) of a per-module tree.
+func isShared(p string) bool {
+	_, module, _, ok := moduleTree(p)
+	return ok && module == sharedName
+}
+
 // crossesModules reports whether a file in directory dir (module-relative)
-// imports a package of a different business module.
+// imports a package of a different business module. A shared package may be
+// imported by any module but may import no business module at all.
 func crossesModules(dir, importPath string) bool {
 	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
 	if !ok {
 		return false
 	}
 	from, to := moduleOf(dir), moduleOf(internal)
-	return from != "" && to != "" && from != to
+	if to == "" {
+		return false
+	}
+	return from != to && (from != "" || isShared(dir))
 }
 
 // Modules must not import each other in any layer, tests included; they meet only
@@ -625,6 +676,17 @@ func TestCrossModuleRuleDetectsViolations(t *testing.T) {
 		{"grpc handler imports http handler of another module", "internal/handlers/grpc/media", "starter-kit/internal/handlers/http/location", true},
 		{"transport root package", "internal/handlers/grpc", "starter-kit/internal/domain/location", false},
 		{"media service imports a third party", "internal/services/media", "github.com/google/uuid", false},
+		{"http handler imports its tree's shared", "internal/handlers/http/location", "starter-kit/internal/handlers/http/shared", false},
+		{"dto imports dto shared", "internal/dto/media", "starter-kit/internal/dto/shared", false},
+		{"nested module package imports shared", "internal/services/media/upload", "starter-kit/internal/services/shared", false},
+		{"service imports another tree's shared", "internal/services/media", "starter-kit/internal/domain/shared", false},
+		{"shared imports a module of its tree", "internal/handlers/http/shared", "starter-kit/internal/handlers/http/location", true},
+		{"shared imports a module of another tree", "internal/dto/shared", "starter-kit/internal/domain/location", true},
+		{"shared imports a module's own subpackage", "internal/services/shared", "starter-kit/internal/services/media/upload", true},
+		{"shared imports another shared", "internal/handlers/http/shared", "starter-kit/internal/dto/shared", false},
+		{"shared imports the router leaf", "internal/services/shared", "starter-kit/internal/router/module", false},
+		{"shared imports a third party", "internal/handlers/http/shared", "github.com/gin-gonic/gin", false},
+		{"nested package under shared imports a module", "internal/dto/shared/page", "starter-kit/internal/domain/media", true},
 	}
 	for _, c := range cases {
 		if got := crossesModules(c.dir, c.ip); got != c.want {
