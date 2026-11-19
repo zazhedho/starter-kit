@@ -1,9 +1,8 @@
 # Smoke test
 
 The procedure to check a fresh checkout of this project against a real, throwaway PostgreSQL: empty database,
-migrations, boot, endpoints, readiness, signals, the Redis failure mode and the Docker image. It was run on
-2026-11-18 at commit `32adb44`: **15 checks, 15 PASS, 0 FAIL** (results below). Later commits on the branch changed only `_test.go` files, no runtime code
-(`git diff --stat 32adb44 HEAD -- '*.go'`), so the run still stands.
+migrations, boot, endpoints, readiness, signals, the Redis failure mode and the Docker image. Run it after
+changing startup, configuration, migrations or the Dockerfile; every check must match the expected result below.
 
 Everything is fake and disposable. No `.env` file is used: the service accepts a missing `.env` when `APP_ENV`
 is set, so all configuration is exported in the shell. Scratch files (binary, logs) live outside the repository.
@@ -80,27 +79,25 @@ docker rm -f starter-kit-smoke-app starter-kit-smoke; docker rmi starter-kit-smo
 rm -rf "$SCRATCH"
 ```
 
-## Results
+## Expected results
 
-| # | Check | Expected | Result |
-|---|---|---|---|
-| 1 | `-migrate-only` on an empty database | exit 0, both version tables, no port opened | PASS: exit 0; `schema_migrations` (project version `20260101000100`, not dirty) and `authkit_schema_migrations` exist; port 18080 closed |
-| 2 | boot with `-migrate`, `GET /healthcheck` | 200 | PASS: 200 |
-| 3 | `GET /readyz` | 200 | PASS: 200 `{"status":"ok"}` |
-| 4 | `GET /readyz` while the database container is paused | 503 | PASS: 503 `{"status":"unavailable"}` |
-| 5 | `GET /readyz` after unpause | 200 | PASS: 200 within 1 s |
-| 6 | register a fake user | 201 | PASS: 201 |
-| 7 | log in | 200 with a token | PASS: 200, access token received |
-| 8 | `GET /api/user` as viewer | 200 | PASS: 200 (the new user has the `viewer` role) |
-| 9 | `GET /api/users` without a token | 401 | PASS: 401 |
-| 10 | `GET /api/users` as viewer | 403 | PASS: 403 |
-| 11 | `GET /api/location/province` | reported | PASS: 200 with the province list (see note) |
-| 12 | SIGTERM | exit 0, `Shutdown started` and `Shutdown complete` logged | PASS: exit 0, both lines logged |
-| 13 | second SIGTERM during a held shutdown | process ends at once | PASS: still shutting down 3 s after the first signal (held by an open request), gone within 0.1 s of the second, exit 143 (killed by the signal) |
-| 14 | Redis configured but unreachable | exit 1, no credentials in the log | PASS: exit 1, `service exited with error: open redis: ping redis: connection refused`, the password is not in the log |
-| 15 | `docker build .` and run the image | build succeeds, the binary starts | PASS: build ok, `/healthcheck` 200 and `/readyz` 200 from the container, `docker stop` clean |
-
-Summary: 15 PASS, 0 FAIL.
+| # | Check | Expected |
+|---|---|---|
+| 1 | `-migrate-only` on an empty database | exit 0, both version tables, no port opened |
+| 2 | boot with `-migrate`, `GET /healthcheck` | 200 |
+| 3 | `GET /readyz` | 200 |
+| 4 | `GET /readyz` while the database container is paused | 503 |
+| 5 | `GET /readyz` after unpause | 200 |
+| 6 | register a fake user | 201 |
+| 7 | log in | 200 with a token |
+| 8 | `GET /api/user` as viewer | 200 |
+| 9 | `GET /api/users` without a token | 401 |
+| 10 | `GET /api/users` as viewer | 403 |
+| 11 | `GET /api/location/province` | reported |
+| 12 | SIGTERM | exit 0, `Shutdown started` and `Shutdown complete` logged |
+| 13 | second SIGTERM during a held shutdown | process ends at once |
+| 14 | Redis configured but unreachable | exit 1, no credentials in the log |
+| 15 | `docker build .` and run the image | build succeeds, the binary starts |
 
 Notes:
 - Check 11 depends on an external service. With empty location tables the first `GET /api/location/province`

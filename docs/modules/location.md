@@ -55,6 +55,15 @@ bootstrap.
 | `LOCATION_SOURCE_YEAR` | empty | default sync year; empty means the current year |
 | `LOCATION_CACHE_TTL` | `4320h` (180 days) | cache lifetime; a Go duration, plain seconds or `eod`; zero or less means the default |
 
+### Location Service contract
+
+The module is a client of an HTTP service you point it at with `LOCATION_SERVICE_BASE_URL`. It sends `GET`
+requests (no authentication) to `/api/locations/provinces`, `/api/locations/regencies`,
+`/api/locations/districts` and `/api/locations/villages`, passing `province_code`, `regency_code` or
+`district_code` plus `code_format=short` as the level needs, and expects status `200` with either a JSON object
+`{"<code>": "<name>"}` or an array of `{"code", "name"}`, optionally wrapped in `{"data": ...}`. Any other status
+fails the job or read. Swap the client in `internal/services/location/remote.go` if your source differs.
+
 The `.env.example` values are examples, not defaults; the table lists what the code uses when a variable is
 unset.
 
