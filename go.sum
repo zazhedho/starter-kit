@@ -200,10 +200,10 @@ github.com/ugorji/go/codec v1.3.2 h1:zkEASHHyEClGeURfgNT9PJZVfAbs9oEX9QXggwWNJbc
 github.com/ugorji/go/codec v1.3.2/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2Wjqmfxj4=
 github.com/yuin/gopher-lua v1.1.2 h1:yF/FjE3hD65tBbt0VXLE13HWS9h34fdzJmrWRXwobGA=
 github.com/yuin/gopher-lua v1.1.2/go.mod h1:7aRmXIWl37SqRf0koeyylBEzJ+aPt8A+mmkQ4f1ntR8=
-github.com/zazhedho/authkit v0.3.1 h1:YaTxvLAzVXKpPB1j3cL5L+MEC6GAHvmcUBT2SknIkW0=
-github.com/zazhedho/authkit v0.3.1/go.mod h1:r3pGmMt3ErJrmqFSVuAXT3tgM5k6T1aEu2G2kd7mp6M=
-github.com/zazhedho/gokit v0.3.0 h1:6AFqgiE2yoBvkky9NGYKrMsEamPtb/GXPLnxIjQ5gY0=
-github.com/zazhedho/gokit v0.3.0/go.mod h1:8OZ3E631D7FyrN9DUmJNzkDKpJrbUgBHrZgYWr/OowU=
+github.com/zazhedho/authkit v0.3.2 h1:fwb2M0pTRwdqedCnHK1a2p/P4E2pajJW12gBDSmD4q0=
+github.com/zazhedho/authkit v0.3.2/go.mod h1:wpZrFWNffpnIwU5opAYAjy2ifNq9bNewovxvLwE/lUQ=
+github.com/zazhedho/gokit v0.4.0 h1:sYGNgIrG8RQxSXfnwttZ4nZ0HJNAmO/MawBp4Pj6vgY=
+github.com/zazhedho/gokit v0.4.0/go.mod h1:8OZ3E631D7FyrN9DUmJNzkDKpJrbUgBHrZgYWr/OowU=
 github.com/zazhedho/logus v0.2.0 h1:xi1U2kruhN3a9upL/3sVXFGmZzkn6NiglgZWoCDpuYE=
 github.com/zazhedho/logus v0.2.0/go.mod h1:OUvtmlNBeTutNRZOBj1BkBCEU0Refas3u63Xuq8nLtI=
 github.com/zeebo/assert v1.3.0 h1:g7C04CbJuIDKNPFHmsk4hwZDO5O+kntRxzaUoNXj+IQ=
