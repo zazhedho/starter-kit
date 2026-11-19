@@ -10,7 +10,7 @@ A Go service template to start a project from. It gives you:
 - a layered module structure whose dependency rule is enforced by tests
 
 Two example modules show the pattern: [`location`](docs/modules/location.md) (reference data and a background
-sync job) and [`media`](docs/modules/media.md) (authenticated file upload, list and delete on object storage, with `_any` permissions for other users' files). Build your own
+sync job) and [`media`](docs/modules/media.md) (authenticated file upload, list and delete on object storage, with `_any` permissions for other users' files, see [Ownership and the `_any` permissions](docs/adding-a-module.md#ownership-and-the-_any-permissions)). Build your own
 business features the same way; see [Adding a module](docs/adding-a-module.md). Per-module routes,
 permissions, environment variables and operational notes are in [`docs/modules/`](docs/modules/).
 
@@ -88,6 +88,8 @@ starter-kit/
 │   ├── postman/                   # API collection (see its README)
 │   └── smoke-test.md              # end-to-end check of a fresh checkout
 ├── .env.example                   # every variable, grouped by section and by module
+├── .github/                       # CI and lint workflows, Dependabot
+├── .githooks/                     # pre-commit and pre-push hooks (make hook-install)
 ├── Dockerfile
 ├── Makefile
 └── go.mod
@@ -341,6 +343,8 @@ make lint        # golangci-lint (install with: make lint-install)
 make fmt         # golangci-lint fmt: formats the code and the import groups
 make hook-install   # git hooks: lint on commit, lint and tests on push
 ```
+
+The Docker image builds from `golang:1.27-alpine` and ships a static binary, the migrations and `deploy/entrypoint.sh`. Dependabot (`.github/dependabot.yml`) opens weekly pull requests for Go modules, GitHub Actions and the Docker base image; the base image is pinned to the minor line, so only a new minor opens a PR.
 
 CI runs build, vet and test in `.github/workflows/ci.yml` and lint in `.github/workflows/lint.yml`. The unit tests need no services.
 `internal/infrastructure/database` also has integration tests against a real PostgreSQL; they are skipped unless
