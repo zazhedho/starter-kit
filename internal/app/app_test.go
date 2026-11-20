@@ -45,8 +45,6 @@ func testConfig() config.Config {
 	}
 }
 
-// mockDB returns a sqlmock-backed gorm database and an opener that hands it
-// out and counts how often it was asked for it.
 func mockDB(t *testing.T) (sqlmock.Sqlmock, *atomic.Int32, func(config.Database, string) (*gorm.DB, *sql.DB, error)) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
@@ -69,8 +67,6 @@ func mockDB(t *testing.T) (sqlmock.Sqlmock, *atomic.Int32, func(config.Database,
 	return mock, &calls, open
 }
 
-// newTestApp builds an App over a mock database and a listener on a random
-// port. The mock expects exactly one Close.
 func newTestApp(t *testing.T, cfg config.Config, routes func(*gin.Engine)) (*App, net.Listener) {
 	t.Helper()
 	mock, _, open := mockDB(t)
@@ -241,8 +237,7 @@ func TestServeReturnsListenError(t *testing.T) {
 	if err := a.buildRoutes(); err != nil {
 		t.Fatal(err)
 	}
-	// Bind to the exact busy address: ":port" may coexist with a loopback
-	// listener on some platforms.
+	// Bind to the exact busy address: ":port" may coexist with a loopback listener on some platforms.
 	a.server.Addr = busy.Addr().String()
 
 	if err := a.Serve(context.Background()); err == nil {
@@ -278,7 +273,6 @@ func TestServerTimeoutsComeFromConfig(t *testing.T) {
 	}
 }
 
-// Closing a go-redis client twice errors; Close must guard against that.
 func TestCloseIsIdempotent(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectClose()
@@ -302,7 +296,6 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-// Pins shutdown order: module hooks run while the database is still open.
 func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectPing()
@@ -314,7 +307,7 @@ func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	hookRan := false
 	a.lifecycle.OnClose("test job", func(ctx context.Context) error {
 		hookRan = true
-		return a.sqlDB.PingContext(ctx) // fails if the database were closed already
+		return a.sqlDB.PingContext(ctx)
 	})
 
 	if err := a.Close(); err != nil {
@@ -328,10 +321,6 @@ func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	}
 }
 
-// authkit.Kit.Close is registered as the first lifecycle hook, so it runs after
-// every module hook (the hooks run in reverse order), after the HTTP server has
-// drained (Serve runs the hooks only then) and before Redis and the database
-// close (closeBy does those last).
 func TestNewRegistersAuthkitCloseOnTheLifecycle(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectClose()
@@ -356,7 +345,6 @@ func TestNewRegistersAuthkitCloseOnTheLifecycle(t *testing.T) {
 	}
 }
 
-// A hook that never finishes must not block Close forever; connections are still released.
 func TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 20 * time.Millisecond
@@ -434,8 +422,6 @@ func TestNewWithoutRedisDoesNotDial(t *testing.T) {
 	}
 }
 
-// TestBrevoConfigMapsEverySMTPField checks that brevoConfig copies each SMTP
-// setting into the matching field of authkit's public BrevoConfig, unchanged.
 func TestBrevoConfigMapsEverySMTPField(t *testing.T) {
 	tests := []struct {
 		name string
@@ -632,7 +618,6 @@ func TestNewRejectsUnknownTimezone(t *testing.T) {
 	}
 }
 
-// countingListener records Accept calls.
 type countingListener struct {
 	net.Listener
 	accepts atomic.Int32
@@ -680,8 +665,6 @@ func TestRunMigrateOnlyDoesNotListen(t *testing.T) {
 	}
 }
 
-// TestStartupOrder: open dependencies, migrate, build routes (some query migrated
-// tables), then serve.
 func TestStartupOrder(t *testing.T) {
 	cfg := testConfig()
 	cfg.Migrate.Run = true
@@ -819,7 +802,6 @@ func TestMigrateProjectBadSourceDoesNotLeak(t *testing.T) {
 	if err == nil {
 		t.Fatal("migrateProject accepted a missing source directory")
 	}
-	// The application's pool is still usable, and the caller closes it.
 	if err := sqlDB.Close(); err != nil {
 		t.Fatalf("pool close: %v", err)
 	}
@@ -838,7 +820,6 @@ func TestSetServerIPEnv(t *testing.T) {
 	}
 }
 
-// logs captures what the service logs during the tests (see logcapture).
 var logs *logcapture.Capture
 
 func TestMain(m *testing.M) {
@@ -859,8 +840,6 @@ func TestCloseWithoutLifecycleDoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestShutdownSharesOneDeadline: the drain and the lifecycle hooks spend the
-// same HTTP_SHUTDOWN_TIMEOUT, counted from the moment shutdown starts.
 func TestShutdownSharesOneDeadline(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 300 * time.Millisecond
@@ -911,8 +890,6 @@ func TestShutdownSharesOneDeadline(t *testing.T) {
 	}
 }
 
-// ModuleDeps is what the routes (and a later worker or second transport) are
-// wired from: the App's own connections, config and shutdown hooks.
 func TestModuleDepsExposesTheAppsDependencies(t *testing.T) {
 	cfg := testConfig()
 	cfg.Media.Enabled = true
@@ -946,7 +923,7 @@ func TestRunWarnsAboutUnsafeSettings(t *testing.T) {
 	t.Setenv("APP_TIMEZONE", "UTC")
 	t.Setenv("PORT", "8080")
 	t.Setenv("DB_HOST", "127.0.0.1")
-	t.Setenv("DB_PORT", "1") // nothing listens here
+	t.Setenv("DB_PORT", "1")
 	t.Setenv("DB_USERNAME", "u")
 	t.Setenv("DB_PASS", "CHANGE_ME_DB_PASSWORD")
 	t.Setenv("DB_NAME", "n")
@@ -960,10 +937,9 @@ func TestRunWarnsAboutUnsafeSettings(t *testing.T) {
 	for _, key := range []string{"REDIS_URL", "REDIS_HOST", "CONSUL"} {
 		t.Setenv(key, "")
 	}
-	t.Chdir(t.TempDir()) // no .env here
+	t.Chdir(t.TempDir())
 
 	mark := logs.Mark()
-	// The database does not exist, so the run fails after the warnings are logged.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = Run(ctx, []string{"-migrate=false"})
@@ -979,10 +955,6 @@ func TestRunWarnsAboutUnsafeSettings(t *testing.T) {
 	}
 }
 
-// Background work is told to stop when the signal arrives, not after the HTTP
-// drain, which could use the whole budget and leave it no time to record its
-// final state. The drain hook must therefore run while a request is in flight,
-// and /readyz must already answer 503 then.
 func TestServeDrainsBackgroundWorkAndReadinessBeforeTheHTTPDrain(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 5 * time.Second
@@ -1022,8 +994,6 @@ func TestServeDrainsBackgroundWorkAndReadinessBeforeTheHTTPDrain(t *testing.T) {
 	}
 }
 
-// Shutdown closes the listener, so a load balancer can only see /readyz turn 503
-// if the listener stays open for HTTP_SHUTDOWN_DELAY after the signal.
 func TestReadyzAnswers503DuringTheShutdownDelay(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownDelay = 400 * time.Millisecond
@@ -1049,7 +1019,6 @@ func TestReadyzAnswers503DuringTheShutdownDelay(t *testing.T) {
 	}
 }
 
-// The delay is part of the one shutdown budget: it ends early when the deadline does.
 func TestShutdownDelayIsBoundedByTheShutdownDeadline(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 200 * time.Millisecond
@@ -1058,5 +1027,5 @@ func TestShutdownDelayIsBoundedByTheShutdownDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := serveAsync(ctx, a)
 	cancel()
-	_ = waitServe(t, done, 3*time.Second) // returns instead of waiting an hour
+	_ = waitServe(t, done, 3*time.Second)
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// TestNoEnvReadsOutsideConfig keeps environment access in one place.
 func TestNoEnvReadsOutsideConfig(t *testing.T) {
 	root := filepath.Join("..", "..")
 	banned := []string{"GetEnv(", "DurationFromEnv(", "os.Getenv(", "os.LookupEnv("}
@@ -25,7 +24,7 @@ func TestNoEnvReadsOutsideConfig(t *testing.T) {
 			case path == filepath.Join("internal", "config"):
 				return fs.SkipDir
 			case path == filepath.Join("internal", "testutil"):
-				return fs.SkipDir // test helpers read test-only variables such as STARTER_KIT_TEST_DATABASE_URL
+				return fs.SkipDir
 			}
 			return nil
 		}
@@ -48,8 +47,6 @@ func TestNoEnvReadsOutsideConfig(t *testing.T) {
 	}
 }
 
-// TestSingleConfigPackage: the Consul/file loader lives in internal/config
-// too, so there is no second package that reads the environment.
 func TestSingleConfigPackage(t *testing.T) {
 	if _, err := os.Stat(filepath.Join("..", "..", "pkg", "config")); err == nil {
 		t.Fatal("pkg/config still exists; the loader belongs in internal/config")

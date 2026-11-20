@@ -11,8 +11,6 @@ import (
 	"github.com/zazhedho/logus"
 )
 
-// LoadRemote exports Consul or config file settings to the environment, but only
-// for variables that are unset or blank: the environment wins. Call it before FromEnv.
 func LoadRemote() {
 	var appConf map[string]string
 	if consul := gokit.GetEnv("CONSUL", ""); consul != "" {
@@ -23,10 +21,8 @@ func LoadRemote() {
 	applyAppConfig(appConf)
 }
 
-// normalizeKey trims and lower-cases a setting name or enum-like value.
 func normalizeKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
 
-// normalizeUpperKey trims and upper-cases a setting name from the remote source.
 func normalizeUpperKey(value string) string { return strings.ToUpper(strings.TrimSpace(value)) }
 
 func loadConsulConfig(consul string) map[string]string {
@@ -59,7 +55,6 @@ func loadFileConfig() map[string]string {
 	fileViper.SetConfigType("env")
 	fileViper.SetConfigName(configName)
 	if err := fileViper.ReadInConfig(); err != nil {
-		// Most projects have no config file; only an unreadable one is a problem.
 		level := logus.LevelError
 		if _, missing := errors.AsType[viper.ConfigFileNotFoundError](err); missing {
 			level = logus.LevelDebug

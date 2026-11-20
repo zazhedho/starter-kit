@@ -18,7 +18,7 @@ func TestLocationDefaults(t *testing.T) {
 func TestValidateLocationBaseURL(t *testing.T) {
 	cases := []struct {
 		name, env, url string
-		want           string // empty: valid
+		want           string
 	}{
 		{"https in production", "production", "https://locations.example.invalid", ""},
 		{"https with a path", "", "https://locations.example.invalid/base", ""},

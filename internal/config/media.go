@@ -13,36 +13,29 @@ import (
 )
 
 type Media struct {
-	Enabled             bool
-	MaxFileSizeBytes    int64
-	AllowedContentTypes []string
-	UploadRateLimit     int
-	UploadRateWindow    time.Duration
-	// UserUploadLimit uploads per UserUploadWindow and user, on top of the per-IP limit.
-	UserUploadLimit  int
-	UserUploadWindow time.Duration
-	UploadTimeout    time.Duration
-	// UploadMaxConcurrent caps the uploads in progress; more are answered 503.
-	UploadMaxConcurrent int
-	// UploadMaxConcurrentPerUser caps one user's uploads in progress; more are answered 429.
+	Enabled                    bool
+	MaxFileSizeBytes           int64
+	AllowedContentTypes        []string
+	UploadRateLimit            int
+	UploadRateWindow           time.Duration
+	UserUploadLimit            int
+	UserUploadWindow           time.Duration
+	UploadTimeout              time.Duration
+	UploadMaxConcurrent        int
 	UploadMaxConcurrentPerUser int
 }
 
 type Storage struct {
 	Provider, Endpoint, AccessKey, SecretKey, Bucket, BaseURL, Region, R2AccountID string
 	UseSSL                                                                         bool
-	// PublicRead lets MinIO create a missing bucket with an anonymous
-	// read policy; otherwise the bucket is private.
-	PublicRead bool
+	PublicRead                                                                     bool
 }
 
-// String redacts both keys.
 func (s Storage) String() string {
 	return fmt.Sprintf("Storage{Provider:%q Endpoint:%q AccessKey:%s SecretKey:%s Bucket:%q BaseURL:%q Region:%q R2AccountID:%q UseSSL:%t PublicRead:%t}",
 		s.Provider, s.Endpoint, redact(s.AccessKey), redact(s.SecretKey), s.Bucket, withoutUserinfo(s.BaseURL), s.Region, s.R2AccountID, s.UseSSL, s.PublicRead)
 }
 
-// GoString keeps %#v from printing the raw fields.
 func (s Storage) GoString() string { return s.String() }
 
 func mediaFromEnv() (Media, Storage) {
@@ -74,8 +67,7 @@ func mediaFromEnv() (Media, Storage) {
 	return media, storage
 }
 
-// defaultRegion is "auto" for R2, which requires it, and empty for MinIO, whose
-// server picks its own region (us-east-1 unless configured).
+// R2 requires "auto"; MinIO picks its own region when empty.
 func defaultRegion(provider string) string {
 	if isR2(provider) {
 		return "auto"
@@ -91,8 +83,6 @@ func isR2(provider string) bool {
 	return false
 }
 
-// validateMedia covers the media module's own settings, its storage and the
-// request-body limit it depends on.
 func (c Config) validateMedia() []string {
 	var problems []string
 	if c.Media.Enabled && c.HTTP.MaxBodyBytes <= c.Media.MaxFileSizeBytes {
@@ -126,7 +116,6 @@ func (c Config) validateStorage() []string {
 	switch {
 	case provider == "minio":
 	case isR2(provider):
-		// R2 signs every request with the secret key; plain http would send it in clear text.
 		if !s.UseSSL {
 			problems = append(problems, "STORAGE_USE_SSL must be true for the r2, cloudflare and cloudflare-r2 providers")
 		}
@@ -153,9 +142,6 @@ func (c Config) validateStorage() []string {
 	return problems
 }
 
-// validateContentTypes rejects any configured type the service cannot serve
-// safely or can never match, because the content type comes from sniffing the
-// file's first bytes.
 func (c Config) validateContentTypes() []string {
 	supported := domainmedia.SupportedContentTypes()
 	for _, configured := range c.Media.AllowedContentTypes {
@@ -192,7 +178,6 @@ func (c Config) validateMediaRate() []string {
 	return problems
 }
 
-// withoutUserinfo drops any user:password part of a URL so it can be printed.
 func withoutUserinfo(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {

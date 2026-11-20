@@ -7,8 +7,6 @@ import (
 	"github.com/zazhedho/gokit"
 )
 
-// LoadDotEnv loads path without overriding variables already set. A missing
-// file is an error only when APP_ENV is unset (containers inject the environment).
 func LoadDotEnv(path string) error {
 	err := godotenv.Load(path)
 	if err != nil && gokit.GetEnv("APP_ENV", "") == "" {

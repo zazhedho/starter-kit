@@ -19,20 +19,16 @@ const (
 type Location struct {
 	ServiceBaseURL           string
 	ServiceTimeout, CacheTTL time.Duration
-	// MaxResponseBytes caps one Location Service response body.
-	MaxResponseBytes int64
-	// RateLimit requests per RateWindow and client IP on the public reads.
-	RateLimit  int
-	RateWindow time.Duration
+	MaxResponseBytes         int64
+	RateLimit                int
+	RateWindow               time.Duration
 }
 
-// String redacts any userinfo of the service URL.
 func (l Location) String() string {
 	return fmt.Sprintf("Location{ServiceBaseURL:%q ServiceTimeout:%s CacheTTL:%s MaxResponseBytes:%d RateLimit:%d RateWindow:%s}",
 		withoutUserinfo(l.ServiceBaseURL), l.ServiceTimeout, l.CacheTTL, l.MaxResponseBytes, l.RateLimit, l.RateWindow)
 }
 
-// GoString keeps %#v from printing the raw fields.
 func (l Location) GoString() string { return l.String() }
 
 func locationFromEnv() Location {
@@ -47,8 +43,6 @@ func locationFromEnv() Location {
 	}
 }
 
-// locationTimeout reads LOCATION_SERVICE_TIMEOUT_SECONDS as whole seconds; a
-// non-positive value means the default.
 func locationTimeout() time.Duration {
 	sec := gokit.GetEnv("LOCATION_SERVICE_TIMEOUT_SECONDS", defaultLocationTimeoutSeconds)
 	if sec <= 0 {
@@ -57,8 +51,6 @@ func locationTimeout() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-// locationCacheTTL accepts a Go duration, plain seconds or "eod"; a
-// non-positive value means the default.
 func locationCacheTTL() time.Duration {
 	ttl := gokit.GetEnv("LOCATION_CACHE_TTL", defaultLocationCacheTTL)
 	if ttl <= 0 {
@@ -67,9 +59,6 @@ func locationCacheTTL() time.Duration {
 	return ttl
 }
 
-// validateLocation checks the Location Service URL (http or https with a host,
-// and https outside development, because the responses are stored as reference
-// data), the response cap and the public read rate limit.
 func (c Config) validateLocation() []string {
 	l := c.Location
 	var problems []string

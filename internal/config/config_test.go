@@ -28,15 +28,10 @@ var managedEnv = []string{
 	"LOCATION_SERVICE_MAX_RESPONSE_MB", "LOCATION_RATE_LIMIT", "LOCATION_RATE_WINDOW_SECONDS", "STORAGE_PUBLIC_READ",
 	"STORAGE_PROVIDER", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME",
 	"STORAGE_BASE_URL", "STORAGE_REGION", "STORAGE_USE_SSL", "R2_ACCOUNT_ID",
-	// authkit's own variables, read by authkit.ConfigFromEnv.
 	"JWT_EXP", "JWT_EXP_MINUTES", "SESSION_MAX_LIFETIME_HOURS", "AUTH_RATE_LIMIT", "AUTH_RATE_WINDOW_SECONDS",
 	"LIMITER_FAIL_CLOSED", "LOGIN_WITH_PHONE",
 }
 
-// clearEnv unsets every variable the config reads; t.Setenv registers the
-// restore of the original value before it is removed.
-// It also clears gokit's recorded parse errors, before and after the test, so
-// invalid values never leak between tests.
 func clearEnv(t *testing.T) {
 	t.Helper()
 	gokit.ResetEnvErrors()
@@ -501,7 +496,6 @@ func TestStringRedactsSecrets(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("JWT_KEY", "jwt-SECRET-0123456789-0123456789-0123")
 	cfg := FromEnv()
-	// Fake credentials: the test checks that none of them is ever printed.
 	//nolint:gosec // G101: fixture values, not real credentials
 	cfg.Database = Database{
 		URL: "postgres://u:db-URL-SECRET@h/db", Host: "h", Password: "db-PASS-SECRET",
@@ -552,8 +546,6 @@ func TestDatabaseDSNRoundTripsAwkwardValues(t *testing.T) {
 	}
 }
 
-// authkit.ConfigFromEnv reports unparsable authkit variables by name; Validate
-// folds that error in with the rest, so the service refuses to start on it.
 func TestValidateReportsAuthkitEnvironmentErrors(t *testing.T) {
 	clearEnv(t)
 	setRequiredEnv(t)

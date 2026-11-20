@@ -14,7 +14,6 @@ import (
 	"time"
 )
 
-// When helperEnv is set, TestMain runs execute with a stand-in for app.Run instead of the tests.
 const helperEnv = "STARTER_KIT_TEST_HELPER"
 
 func TestMain(m *testing.M) {
@@ -24,7 +23,6 @@ func TestMain(m *testing.M) {
 	case "fail":
 		os.Exit(execute(nil, func(context.Context, []string) error { return errors.New("boom while serving") }))
 	case "slow-shutdown":
-		// Like a service whose graceful shutdown takes a long time.
 		os.Exit(execute(nil, func(ctx context.Context, _ []string) error {
 			fmt.Println("ready")
 			<-ctx.Done()
@@ -73,7 +71,6 @@ func TestErrorFromRunExitsWithOneAndIsNotCalledAStartupFailure(t *testing.T) {
 	}
 }
 
-// waitLine reads lines until one equals want.
 func waitLine(t *testing.T, out *bufio.Scanner, want string) {
 	t.Helper()
 	for out.Scan() {
@@ -84,8 +81,6 @@ func waitLine(t *testing.T, out *bufio.Scanner, want string) {
 	t.Fatalf("the service never printed %q", want)
 }
 
-// TestSecondSignalEndsTheProcess: the first SIGTERM starts a graceful
-// shutdown (which here takes 30 s); a second one must end the process at once.
 func TestSecondSignalEndsTheProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("a process cannot be sent SIGTERM on Windows")
@@ -99,14 +94,12 @@ func TestSecondSignalEndsTheProcess(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		for out.Scan() { // drain until the pipe closes with the process
+		for out.Scan() {
 		}
 		done <- cmd.Wait()
 	}()
 
-	// Signal again until the process goes: the handler is restored a moment
-	// after the first signal is seen, so an early second signal can still be
-	// absorbed. Without the fix none of them ever ends it.
+	// The handler is restored a moment after the first signal, so an early second signal can still be absorbed.
 	deadline := time.After(5 * time.Second)
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()

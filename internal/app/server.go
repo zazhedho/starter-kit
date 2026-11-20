@@ -11,13 +11,8 @@ import (
 	"github.com/zazhedho/logus"
 )
 
-// ErrShutdownTimeout is returned by Serve when requests were still running
-// when the shutdown time limit ran out and had to be cut off.
 var ErrShutdownTimeout = errors.New("app: shutdown timed out with requests still in flight")
 
-// Serve handles requests until ctx ends, then waits up to HTTP_SHUTDOWN_TIMEOUT
-// (one deadline) for requests and background work, and closes the App on every path.
-// It returns nil on clean shutdown, ErrShutdownTimeout if requests were cut off.
 func (a *App) Serve(ctx context.Context) error {
 	if err := a.buildRoutes(); err != nil {
 		return a.closeAfter(err)
@@ -45,20 +40,16 @@ func (a *App) Serve(ctx context.Context) error {
 	}
 
 	logus.Log(logus.LevelInfo, "Shutdown started")
-	// Before the drain: /readyz turns 503 and background work is told to stop,
-	// so it can record its final state while the requests finish.
+	// Before the drain: /readyz turns 503 and background work is told to stop, so it can record its final state.
 	if a.lifecycle != nil {
 		a.lifecycle.Drain()
 	}
-	// One deadline for the whole shutdown: the HTTP drain, the lifecycle hooks
-	// and the final writes of the jobs they stop all end by it. The caller's
-	// ctx is already canceled; the limit is its own.
+	// One deadline covers the HTTP drain, the lifecycle hooks and the jobs' final writes; the caller's ctx is already canceled.
 	deadline := time.Now().Add(a.cfg.HTTP.ShutdownTimeout)
 	shutdownCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 
-	// The listener stays open for the delay, so a load balancer polling /readyz
-	// sees the 503 before connections are refused. The deadline still bounds it.
+	// The listener stays open for the delay so a load balancer sees /readyz turn 503 before connections are refused.
 	if delay := a.cfg.HTTP.ShutdownDelay; delay > 0 {
 		select {
 		case <-time.After(delay):
@@ -67,14 +58,14 @@ func (a *App) Serve(ctx context.Context) error {
 	}
 	err := a.server.Shutdown(shutdownCtx)
 	if err != nil {
-		_ = a.server.Close() // cut off whatever is still running
+		_ = a.server.Close()
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = ErrShutdownTimeout
 		} else {
 			err = fmt.Errorf("shutdown: %w", err)
 		}
 	}
-	<-serveErr // Serve has returned http.ErrServerClosed by now
+	<-serveErr
 
 	if closeErr := a.closeBy(deadline); closeErr != nil {
 		err = errors.Join(err, closeErr)

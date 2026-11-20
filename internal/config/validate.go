@@ -12,11 +12,8 @@ import (
 	"github.com/zazhedho/gokit"
 )
 
-// Validate returns one error joining every problem with "; ". Problems name
-// their variable and never include a value.
 func (c Config) Validate() error {
 	var problems []string
-	// Read after FromEnv has finished reading everything, authkit included.
 	if err := gokit.EnvErrors(); err != nil {
 		problems = append(problems, strings.ReplaceAll(err.Error(), "\n", "; "))
 	}
@@ -193,7 +190,6 @@ func validPort(value string) bool {
 	return err == nil && port >= 1 && port <= 65535
 }
 
-// isDevelopment reports a local APP_ENV, where plain http to a dependency is acceptable.
 func (c Config) isDevelopment() bool {
 	switch normalizeKey(c.App.Env) {
 	case "development", "dev", "local", "test":

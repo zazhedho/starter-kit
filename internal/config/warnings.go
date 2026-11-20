@@ -2,8 +2,6 @@ package config
 
 import "strings"
 
-// Warnings lists settings that are valid but unsafe. Each names its variable and
-// never the value; the app logs them at startup.
 func (c Config) Warnings() []string {
 	var warnings []string
 	if !c.Redis.Configured() {
@@ -26,8 +24,6 @@ func (c Config) Warnings() []string {
 	return warnings
 }
 
-// validatePlaceholders rejects placeholder secrets outside development, where
-// they only warn.
 func (c Config) validatePlaceholders() []string {
 	if c.isDevelopment() {
 		return nil
@@ -39,8 +35,6 @@ func (c Config) validatePlaceholders() []string {
 	return problems
 }
 
-// placeholderSecrets names the secrets that still hold an example value. The
-// storage keys count only when media uses them.
 func (c Config) placeholderSecrets() []string {
 	secrets := []struct{ key, value string }{
 		{"JWT_KEY", c.Auth.JWTKey}, {"DB_PASS", c.Database.Password}, {"REDIS_PASSWORD", c.Redis.Password},
@@ -59,8 +53,6 @@ func (c Config) placeholderSecrets() []string {
 	return named
 }
 
-// isPlaceholder recognizes the CHANGE_ME values of .env.example and the
-// well-known defaults earlier examples used.
 func isPlaceholder(value string) bool {
 	v := normalizeKey(value)
 	return strings.HasPrefix(v, "change_me") || strings.HasPrefix(v, "changeme") ||

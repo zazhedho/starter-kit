@@ -1,9 +1,4 @@
-// Package app owns the service lifecycle: New, Migrate, Serve, Close.
-// Failures are returned as errors; only cmd/api exits the process.
 package app
-
-// To add a config field, a dependency or a module, see the README sections
-// "Runtime Configuration" and "Adding a module".
 
 import (
 	"context"
@@ -30,33 +25,28 @@ import (
 	"starter-kit/internal/router/module"
 )
 
-// App holds the open connections and the HTTP server of one running service.
 type App struct {
 	cfg    config.Config
 	db     *gorm.DB
 	sqlDB  *sql.DB
 	redis  *redis.Client
 	kit    *authkit.Kit
-	engine *gin.Engine  // nil until buildRoutes has run
-	server *http.Server // nil until buildRoutes has run
+	engine *gin.Engine
+	server *http.Server
 
-	storage storage.Provider // nil unless media is enabled
+	storage storage.Provider
 
-	// lifecycle holds the shutdown hooks of background work the modules start
-	// (the location sync job). Close runs it before releasing Redis and the
-	// database, so that work can still use them while it finishes.
+	// Close runs the hooks before releasing Redis and the database, so the work they stop can still use them.
 	lifecycle *module.Lifecycle
-	routes    func(*gin.Engine) // extra routes added by tests
+	routes    func(*gin.Engine)
 
-	listener net.Listener                    // nil: Serve listens on server.Addr
-	migrate  func(ctx context.Context) error // replaces the real migrations in tests
+	listener net.Listener
+	migrate  func(ctx context.Context) error
 
 	closeMu sync.Mutex
 	closed  bool
 }
 
-// deps lets tests replace the pieces that need a real database or a fixed
-// port. The zero value is production behavior.
 type deps struct {
 	openDB      func(config.Database, string) (*gorm.DB, *sql.DB, error)
 	listener    net.Listener
@@ -65,8 +55,6 @@ type deps struct {
 	migrate     func(ctx context.Context) error
 }
 
-// Run loads configuration, builds the App, migrates when asked, and serves until
-// ctx is canceled. args exclude the program name.
 func Run(ctx context.Context, args []string) error {
 	return run(ctx, args, deps{})
 }
@@ -78,7 +66,7 @@ func run(ctx context.Context, args []string, d deps) error {
 
 	cfg, err := loadConfig(args)
 	if errors.Is(err, flag.ErrHelp) {
-		return nil // usage has been printed
+		return nil
 	}
 	if err != nil {
 		return err
@@ -91,8 +79,6 @@ func run(ctx context.Context, args []string, d deps) error {
 	return execute(ctx, cfg, d)
 }
 
-// loadConfig applies .env (never overriding the environment), Consul or file,
-// environment, flags, then validation, in that order.
 func loadConfig(args []string) (config.Config, error) {
 	if err := config.LoadDotEnv(".env"); err != nil {
 		return config.Config{}, fmt.Errorf("load environment: %w", err)
@@ -109,8 +95,6 @@ func loadConfig(args []string) (config.Config, error) {
 	return cfg, nil
 }
 
-// applyFlags parses args on a private FlagSet, so Run can be called more than
-// once and from tests. Flag defaults are the values already in cfg.
 func applyFlags(cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("api", flag.ContinueOnError)
 	fs.StringVar(&cfg.App.Port, "port", cfg.App.Port, "port of the service")
@@ -126,8 +110,6 @@ func applyFlags(cfg *config.Config, args []string) error {
 	return nil
 }
 
-// execute builds the App from a validated config and runs the requested mode.
-// The App is closed on every path.
 func execute(ctx context.Context, cfg config.Config, d deps) (err error) {
 	a, err := newApp(ctx, cfg, d)
 	if err != nil {
@@ -148,16 +130,13 @@ func execute(ctx context.Context, cfg config.Config, d deps) (err error) {
 		logus.Log(logus.LevelInfo, "Migration finished; not serving (migrate-only)")
 		return nil
 	}
-	// Routes come after the migration: some modules query their tables when
-	// they are registered.
+	// Routes come after the migration: some modules query their tables when they are registered.
 	if err := a.buildRoutes(); err != nil {
 		return err
 	}
 	return a.Serve(ctx)
 }
 
-// New opens the connections and builds authkit, but no routes (Serve does),
-// so callers can Migrate first. On failure everything opened is closed.
 func New(ctx context.Context, cfg config.Config) (*App, error) {
 	return newApp(ctx, cfg, deps{})
 }
@@ -167,8 +146,8 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load time zone: %w", err)
 	}
-	// A process-wide setting: write it only when it changes, so a second App
-	// in the same process (tests) does not race with readers of time.Local.
+	// Process-wide setting: write it only when it changes, or a second App (tests) races with
+	// readers of time.Local.
 	if loc.String() != time.Local.String() {
 		time.Local = loc
 	}
@@ -183,7 +162,6 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// From here on, a failure must release what is open.
 	fail := func(err error) (*App, error) {
 		if closeErr := a.Close(); closeErr != nil {
 			err = errors.Join(err, closeErr)
@@ -191,8 +169,6 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		return nil, err
 	}
 
-	// Redis is optional: not configured means no connection attempt, and
-	// configured but unreachable is a startup failure.
 	if cfg.Redis.Configured() {
 		if a.redis, err = database.OpenRedis(ctx, cfg.Redis); err != nil {
 			return fail(fmt.Errorf("open redis: %w", err))
@@ -200,8 +176,6 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		logus.Log(logus.LevelInfo, "Redis initialized, session management enabled")
 	}
 
-	// The storage provider exists only when media is enabled; a failure to
-	// start it is a startup failure, not a missing route.
 	if cfg.Media.Enabled {
 		initStorage := d.initStorage
 		if initStorage == nil {
@@ -215,15 +189,12 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 	if a.kit, err = authkit.New(authConfig(cfg, a.db, a.redis)); err != nil {
 		return fail(fmt.Errorf("initialize authkit: %w", err))
 	}
-	// authkit drains its in-flight mail sends after the HTTP server has stopped
-	// and before Redis and the database close; hooks run in reverse order, so
-	// module hooks registered later run before it.
+	// authkit drains its in-flight mail after the HTTP server stops and before Redis and the database close;
+	// hooks run in reverse order, so later module hooks run before it.
 	a.lifecycle.OnClose("authkit", a.kit.Close)
 	return a, nil
 }
 
-// authConfig adds the open connections to authkit's config. The mailer is
-// set only with Redis and full SMTP settings; otherwise the service runs without it.
 func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Config {
 	authCfg := cfg.Auth
 	authCfg.DB = db
@@ -243,8 +214,6 @@ func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Confi
 	return authCfg
 }
 
-// brevoConfig maps this service's SMTP settings onto authkit's public Brevo
-// configuration. Empty values are passed through; authkit applies its defaults.
 func brevoConfig(s config.SMTP) authkit.BrevoConfig {
 	return authkit.BrevoConfig{
 		Host: s.Host, Port: s.Port, User: s.User, Pass: s.Password, From: s.From,
@@ -252,15 +221,10 @@ func brevoConfig(s config.SMTP) authkit.BrevoConfig {
 	}
 }
 
-// ModuleDeps returns what the modules are wired from: the open connections, the
-// config and the shutdown Lifecycle. The routes use it, and so can a second
-// binary or transport that builds the App with New.
 func (a *App) ModuleDeps() module.Deps {
 	return module.Deps{Config: a.cfg, DB: a.db, SQLDB: a.sqlDB, Redis: a.redis, Kit: a.kit, Storage: a.storage, Lifecycle: a.lifecycle}
 }
 
-// buildRoutes creates the router and server once; it runs after the migrations
-// because some routes query the database.
 func (a *App) buildRoutes() error {
 	if a.engine != nil {
 		return nil
@@ -293,14 +257,10 @@ func (a *App) Handler() http.Handler {
 	return a.engine
 }
 
-// Close stops background work (waiting at most HTTP_SHUTDOWN_TIMEOUT), then closes
-// Redis and the database. Only the first call acts.
 func (a *App) Close() error {
 	return a.closeBy(time.Now().Add(a.cfg.HTTP.ShutdownTimeout))
 }
 
-// closeBy is Close with an explicit deadline so Serve's drain, hooks and final
-// writes share one.
 func (a *App) closeBy(deadline time.Time) error {
 	a.closeMu.Lock()
 	defer a.closeMu.Unlock()
@@ -330,8 +290,6 @@ func (a *App) closeBy(deadline time.Time) error {
 	return errors.Join(errs...)
 }
 
-// setServerIPEnv publishes the first non-loopback IPv4 address as SERVER_IP for the
-// logger; the only environment write outside internal/config.
 func setServerIPEnv() error {
 	addr := "unknown"
 	addrs, _ := net.InterfaceAddrs()

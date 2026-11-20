@@ -9,12 +9,11 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source"
-	_ "github.com/golang-migrate/migrate/v4/source/file" // Register the file:// migration source.
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/zazhedho/logus"
 )
 
-// Migrate applies authkit's tables first (project migrations may reference users
-// and roles), then the project's migrations.
+// Migrate applies authkit's tables first: project migrations may reference users and roles.
 func (a *App) Migrate(ctx context.Context) error {
 	if a.migrate != nil {
 		return a.migrate(ctx)
@@ -29,8 +28,6 @@ func (a *App) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// migrateProject runs the migrations on one dedicated connection that holds
-// golang-migrate's advisory lock. The pool is never closed; errors carry no connection settings.
 func migrateProject(ctx context.Context, db *sql.DB, sourceURL string) error {
 	src, err := source.Open(sourceURL)
 	if err != nil {
@@ -54,8 +51,7 @@ func migrateProject(ctx context.Context, db *sql.DB, sourceURL string) error {
 		_ = drv.Close()
 		return fmt.Errorf("create migrator: %w", err)
 	}
-	// Close releases the source and the driver; the driver hands the
-	// connection back instead of closing it.
+	// Close releases the source and the driver, which hands the connection back instead of closing it.
 	defer func() { _, _ = m.Close() }()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
