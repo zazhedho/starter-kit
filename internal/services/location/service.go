@@ -232,7 +232,6 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, re
 	return mapSyncJob(job), nil
 }
 
-// GetSyncJob returns a job, or ErrSyncJobNotFound.
 func (s *Service) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error) {
 	job, err := s.repo.GetSyncJobByID(ctx, id)
 	if errors.Is(err, domainlocation.ErrNotFound) {

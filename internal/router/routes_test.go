@@ -30,9 +30,7 @@ func routeOwners(t *testing.T, d module.Deps) (owners map[string]string, duplica
 
 	add("authkit", routertest.AuthkitRoutes(t, d))
 	probes := gin.New()
-	if err := registerHealth(probes, d); err != nil {
-		t.Fatalf("registerHealth: %v", err)
-	}
+	registerHealth(probes, d)
 	add("health", routertest.RouteSet(probes))
 	for _, m := range modules {
 		add(m.Name, routertest.RouteSet(routertest.Mount(t, m.Register, d)))

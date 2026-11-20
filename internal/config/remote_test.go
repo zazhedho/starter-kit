@@ -23,14 +23,13 @@ func writeAppEnv(t *testing.T, content string) {
 }
 
 func TestLoadRemoteExportsTheConfigFile(t *testing.T) {
-	writeAppEnv(t, "CONFIG_ID=remote-file\nREMOTE_FLAG=on\nREMOTE_INT=42\n")
-	t.Setenv("CONFIG_ID", "")
+	writeAppEnv(t, "REMOTE_FLAG=on\nREMOTE_INT=42\n")
 	t.Setenv("REMOTE_FLAG", "")
 	t.Setenv("REMOTE_INT", "")
 
 	LoadRemote()
 
-	for key, want := range map[string]string{"REMOTE_FLAG": "on", "REMOTE_INT": "42", "CONFIG_ID": "remote-file"} {
+	for key, want := range map[string]string{"REMOTE_FLAG": "on", "REMOTE_INT": "42"} {
 		if got := os.Getenv(key); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)
 		}
@@ -58,21 +57,6 @@ func TestLoadRemoteDoesNotOverrideTheEnvironment(t *testing.T) {
 		t.Fatalf("BLANK_IN_ENV = %q, want the file value for a blank variable", got)
 	}
 	t.Cleanup(func() { _ = os.Unsetenv("FILLED_FROM_FILE") })
-}
-
-func TestLoadRemoteSkipsAConfigAlreadyApplied(t *testing.T) {
-	writeAppEnv(t, "CONFIG_ID=same\nSKIPPED_FLAG=on\n")
-	t.Setenv("CONFIG_ID", "same")
-	t.Setenv("SKIPPED_FLAG", "")
-	if err := os.Unsetenv("SKIPPED_FLAG"); err != nil {
-		t.Fatal(err)
-	}
-
-	LoadRemote()
-
-	if _, ok := os.LookupEnv("SKIPPED_FLAG"); ok {
-		t.Fatal("a config whose CONFIG_ID is already applied must not be exported again")
-	}
 }
 
 func TestLoadRemoteLogsAMissingFileAtDebugOnly(t *testing.T) {

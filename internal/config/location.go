@@ -16,7 +16,6 @@ const (
 	maxLocationResponseMB         = 64
 )
 
-// Location is the location module's setting.
 type Location struct {
 	ServiceBaseURL           string
 	ServiceTimeout, CacheTTL time.Duration

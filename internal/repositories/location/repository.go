@@ -14,7 +14,6 @@ import (
 	domainlocation "starter-kit/internal/domain/location"
 )
 
-// Repository is the GORM adapter for the location tables.
 type Repository struct {
 	db *gorm.DB
 }
@@ -24,40 +23,43 @@ const (
 	locationCodeFilter = "code = ? AND deleted_at IS NULL"
 )
 
-// NewRepository returns a Repository over db.
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) ListProvinces(ctx context.Context) (ret []domainlocation.Province, err error) {
-	err = r.db.WithContext(ctx).Where("deleted_at IS NULL").Order(locationNameOrder).Find(&ret).Error
-	return
+func (r *Repository) ListProvinces(ctx context.Context) ([]domainlocation.Province, error) {
+	var ret []domainlocation.Province
+	err := r.db.WithContext(ctx).Where("deleted_at IS NULL").Order(locationNameOrder).Find(&ret).Error
+	return ret, err
 }
 
-func (r *Repository) ListCitiesByProvince(ctx context.Context, provinceCode string) (ret []domainlocation.City, err error) {
-	err = r.db.WithContext(ctx).Where("province_code = ? AND deleted_at IS NULL", provinceCode).Order(locationNameOrder).Find(&ret).Error
-	return
+func (r *Repository) ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error) {
+	var ret []domainlocation.City
+	err := r.db.WithContext(ctx).Where("province_code = ? AND deleted_at IS NULL", provinceCode).Order(locationNameOrder).Find(&ret).Error
+	return ret, err
 }
 
-func (r *Repository) ListDistrictsByCity(ctx context.Context, cityCode string) (ret []domainlocation.District, err error) {
-	err = r.db.WithContext(ctx).Where("city_code = ? AND deleted_at IS NULL", cityCode).Order(locationNameOrder).Find(&ret).Error
-	return
+func (r *Repository) ListDistrictsByCity(ctx context.Context, cityCode string) ([]domainlocation.District, error) {
+	var ret []domainlocation.District
+	err := r.db.WithContext(ctx).Where("city_code = ? AND deleted_at IS NULL", cityCode).Order(locationNameOrder).Find(&ret).Error
+	return ret, err
 }
 
-func (r *Repository) ListVillagesByDistrict(ctx context.Context, districtCode string) (ret []domainlocation.Village, err error) {
-	err = r.db.WithContext(ctx).Where("district_code = ? AND deleted_at IS NULL", districtCode).Order(locationNameOrder).Find(&ret).Error
-	return
+func (r *Repository) ListVillagesByDistrict(ctx context.Context, districtCode string) ([]domainlocation.Village, error) {
+	var ret []domainlocation.Village
+	err := r.db.WithContext(ctx).Where("district_code = ? AND deleted_at IS NULL", districtCode).Order(locationNameOrder).Find(&ret).Error
+	return ret, err
 }
 
-func (r *Repository) GetProvinceByCode(ctx context.Context, code string) (ret domainlocation.Province, err error) {
+func (r *Repository) GetProvinceByCode(ctx context.Context, code string) (domainlocation.Province, error) {
 	return getByCode[domainlocation.Province](ctx, r.db, code)
 }
 
-func (r *Repository) GetCityByCode(ctx context.Context, code string) (ret domainlocation.City, err error) {
+func (r *Repository) GetCityByCode(ctx context.Context, code string) (domainlocation.City, error) {
 	return getByCode[domainlocation.City](ctx, r.db, code)
 }
 
-func (r *Repository) GetDistrictByCode(ctx context.Context, code string) (ret domainlocation.District, err error) {
+func (r *Repository) GetDistrictByCode(ctx context.Context, code string) (domainlocation.District, error) {
 	return getByCode[domainlocation.District](ctx, r.db, code)
 }
 
@@ -179,13 +181,15 @@ func (r *Repository) updateOwned(ctx context.Context, id, owner string, statuses
 	return nil
 }
 
-func (r *Repository) GetSyncJobByID(ctx context.Context, id string) (ret domainlocation.SyncJob, err error) {
-	err = r.db.WithContext(ctx).Where("id = ?", id).First(&ret).Error
+func (r *Repository) GetSyncJobByID(ctx context.Context, id string) (domainlocation.SyncJob, error) {
+	var ret domainlocation.SyncJob
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&ret).Error
 	return ret, translateNotFound(err)
 }
 
-func (r *Repository) GetActiveSyncJob(ctx context.Context) (ret domainlocation.SyncJob, err error) {
-	err = r.db.WithContext(ctx).
+func (r *Repository) GetActiveSyncJob(ctx context.Context) (domainlocation.SyncJob, error) {
+	var ret domainlocation.SyncJob
+	err := r.db.WithContext(ctx).
 		Where("status IN ?", activeStatuses).
 		Order("created_at ASC").
 		First(&ret).Error

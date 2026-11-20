@@ -12,7 +12,6 @@ import (
 	domainmedia "starter-kit/internal/domain/media"
 )
 
-// Media is the media module's setting.
 type Media struct {
 	Enabled             bool
 	MaxFileSizeBytes    int64
@@ -27,7 +26,6 @@ type Media struct {
 	UploadMaxConcurrent int
 }
 
-// Storage is the object-storage setting the media module needs.
 type Storage struct {
 	Provider, Endpoint, AccessKey, SecretKey, Bucket, BaseURL, Region, R2AccountID string
 	UseSSL                                                                         bool

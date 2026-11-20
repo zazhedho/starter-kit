@@ -29,7 +29,6 @@ type Repository struct {
 	*gokit.Repository[domainmedia.Media]
 }
 
-// NewRepository returns a Repository over db.
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{Repository: gokit.NewRepository[domainmedia.Media](db)}
 }

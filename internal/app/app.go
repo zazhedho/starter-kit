@@ -286,8 +286,6 @@ func (a *App) buildRoutes() error {
 	return nil
 }
 
-// Handler returns the HTTP handler with every route mounted, or nil before
-// the routes are built (Serve builds them).
 func (a *App) Handler() http.Handler {
 	if a.engine == nil {
 		return nil

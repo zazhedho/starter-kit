@@ -50,11 +50,6 @@ func TestSyncIndividualLevels(t *testing.T) {
 			}
 		})
 	}
-
-	svc := newScopedSync(t, &locationRepoTestDouble{})
-	if _, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "bad"}, func(domainlocation.SyncProgress) {}); err == nil {
-		t.Fatal("expected invalid sync level error")
-	}
 }
 
 // A level the Location Service has no rows for is a no-op, not a failure (gorm

@@ -54,9 +54,7 @@ func New(d module.Deps) (*gin.Engine, error) {
 	engine.Use(authkit.RequestLogger())
 	engine.Use(bodyLimit(d.Config.HTTP.MaxBodyBytes))
 
-	if err := registerHealth(engine, d); err != nil {
-		return nil, fmt.Errorf("register health routes: %w", err)
-	}
+	registerHealth(engine, d)
 
 	api := engine.Group("/api")
 	if err := d.Kit.Mount(api); err != nil {

@@ -64,7 +64,6 @@ func NewDepsWithMock(t *testing.T, mutate func(*config.Config)) (module.Deps, sq
 	return module.Deps{Config: cfg, DB: db, SQLDB: sqlDB, Kit: kit, Lifecycle: &module.Lifecycle{}}, mock
 }
 
-// NewDeps is NewDepsWithMock without the mock.
 func NewDeps(t *testing.T, mutate func(*config.Config)) module.Deps {
 	t.Helper()
 	d, _ := NewDepsWithMock(t, mutate)
@@ -90,7 +89,6 @@ func NewExecDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	return db, mock
 }
 
-// RouteSet returns the engine's routes as "METHOD /path" keys.
 func RouteSet(engine *gin.Engine) map[string]bool {
 	set := map[string]bool{}
 	for _, r := range engine.Routes() {
@@ -99,7 +97,6 @@ func RouteSet(engine *gin.Engine) map[string]bool {
 	return set
 }
 
-// SortedKeys returns the keys of set in order.
 func SortedKeys(set map[string]bool) []string {
 	keys := make([]string, 0, len(set))
 	for k := range set {
@@ -139,7 +136,6 @@ func Serve(h http.Handler, method, path string) int {
 	return rec.Code
 }
 
-// FakeStorage is a storage provider that keeps nothing.
 type FakeStorage struct{}
 
 var _ storage.Provider = FakeStorage{}

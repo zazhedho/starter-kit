@@ -98,11 +98,11 @@ func (s *Service) settleContext() (context.Context, context.CancelFunc, bool) {
 func (s *Service) settle(jobID string, write func(ctx context.Context) error, what string) {
 	ctx, cancel, ok := s.settleContext()
 	if !ok {
-		logus.Logf(logus.LevelWarn, "location sync job %s: shutdown deadline passed before it was %s; its state is not recorded", jobID, what)
+		logus.Logf(logus.LevelWarn, "location: sync job %s: shutdown deadline passed before it was %s; its state is not recorded", jobID, what)
 		return
 	}
 	defer cancel()
 	if err := write(ctx); err != nil {
-		logus.Logf(logus.LevelError, "failed to record location sync job %s as %s: %v", jobID, what, err)
+		logus.Logf(logus.LevelError, "location: failed to record sync job %s as %s: %v", jobID, what, err)
 	}
 }

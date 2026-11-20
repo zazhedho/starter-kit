@@ -10,7 +10,6 @@ import (
 	"github.com/zazhedho/authkit"
 )
 
-// Config is the whole application configuration.
 type Config struct {
 	App      App
 	HTTP     HTTP

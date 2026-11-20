@@ -12,8 +12,7 @@ import (
 )
 
 // LoadRemote exports Consul or config file settings to the environment, but only
-// for variables that are unset or blank: the environment wins. A source whose
-// CONFIG_ID equals the environment's was applied before. Call it before FromEnv.
+// for variables that are unset or blank: the environment wins. Call it before FromEnv.
 func LoadRemote() {
 	var appConf map[string]string
 	if consul := gokit.GetEnv("CONSUL", ""); consul != "" {
@@ -75,9 +74,6 @@ func loadFileConfig() map[string]string {
 }
 
 func applyAppConfig(appConf map[string]string) {
-	if id := appConf["config_id"]; id != "" && id == gokit.GetEnv("CONFIG_ID", "") {
-		return
-	}
 	for key, value := range appConf {
 		name := normalizeUpperKey(key)
 		if current, set := os.LookupEnv(name); set && strings.TrimSpace(current) != "" {

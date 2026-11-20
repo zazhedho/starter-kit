@@ -8,7 +8,6 @@ import (
 	"starter-kit/internal/config"
 )
 
-// InitStorage builds the provider named in cfg.
 func InitStorage(cfg config.Storage) (Provider, error) {
 	logus.Log(logus.LevelDebug, "InitStorage; Initializing storage provider...")
 

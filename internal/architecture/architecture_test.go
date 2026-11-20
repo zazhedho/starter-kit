@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"os"
 	"path"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 const modulePath = "starter-kit"
@@ -49,12 +51,25 @@ func repoFiles(t *testing.T, visit func(path string, data []byte)) {
 }
 
 // fatalCalls lists the calls to log.Fatal* and os.Exit in src. It reads the
-// syntax tree, so comments and strings that mention them do not count.
+// syntax tree and resolves import aliases, so comments, strings and a renamed
+// import are judged by what they are.
 func fatalCalls(t *testing.T, name string, src []byte) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
 	if err != nil {
 		t.Fatalf("parse %s: %v", name, err)
+	}
+	local := map[string]string{} // local package name -> import path
+	for _, spec := range file.Imports {
+		importPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || (importPath != "log" && importPath != "os") {
+			continue
+		}
+		localName := importPath
+		if spec.Name != nil {
+			localName = spec.Name.Name
+		}
+		local[localName] = importPath
 	}
 	var found []string
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -70,13 +85,68 @@ func fatalCalls(t *testing.T, name string, src []byte) []string {
 		if !ok {
 			return true
 		}
-		switch {
-		case pkg.Name == "log" && strings.HasPrefix(sel.Sel.Name, "Fatal"), pkg.Name == "os" && sel.Sel.Name == "Exit":
-			found = append(found, pkg.Name+"."+sel.Sel.Name)
+		switch importPath := local[pkg.Name]; {
+		case importPath == "log" && strings.HasPrefix(sel.Sel.Name, "Fatal"), importPath == "os" && sel.Sel.Name == "Exit":
+			found = append(found, importPath+"."+sel.Sel.Name)
 		}
 		return true
 	})
 	return found
+}
+
+// panicCalls counts the calls to the builtin panic in src.
+func panicCalls(t *testing.T, name string, src []byte) int {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	count := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "panic" && id.Obj == nil {
+				count++
+			}
+		}
+		return true
+	})
+	return count
+}
+
+// panicAllowed lists the files whose panic is deliberate, each with its reason.
+// Elsewhere errors are returned, and only cmd/ may end the process.
+var panicAllowed = map[string]string{
+	// Start has no error result and runs from TestMain, where a missing pipe cannot be handled.
+	"internal/testutil/logcapture/logcapture.go": "test helper setup",
+}
+
+func TestNoPanicOutsideCmd(t *testing.T) {
+	repoFiles(t, func(path string, data []byte) {
+		if strings.HasPrefix(path, "cmd"+string(filepath.Separator)) || panicAllowed[filepath.ToSlash(path)] != "" {
+			return
+		}
+		if n := panicCalls(t, path, data); n > 0 {
+			t.Errorf("%s calls panic %d time(s) outside cmd/; return an error, or list the file in panicAllowed with the reason", path, n)
+		}
+	})
+}
+
+func TestPanicGuardReadsTheSyntaxTree(t *testing.T) {
+	for name, c := range map[string]struct {
+		src  string
+		want int
+	}{
+		"call":      {"package p\nfunc f() { panic(\"x\") }", 1},
+		"comment":   {"package p\n// panic(x) is banned\nfunc f() {}", 0},
+		"string":    {"package p\nvar s = \"panic(x)\"", 0},
+		"method":    {"package p\nfunc f(l T) { l.panic(1) }", 0},
+		"shadowed":  {"package p\nfunc f() { panic := func(string) {}; panic(\"x\") }", 0},
+		"two calls": {"package p\nfunc f() { panic(1); panic(2) }", 2},
+	} {
+		if got := panicCalls(t, "x.go", []byte(c.src)); got != c.want {
+			t.Errorf("%s: panicCalls = %d, want %d", name, got, c.want)
+		}
+	}
 }
 
 func TestNoFatalOutsideCmd(t *testing.T) {
@@ -102,6 +172,10 @@ func TestFatalGuardReadsTheSyntaxTree(t *testing.T) {
 		{"in a string", "package p\nvar s = \"os.Exit(1) log.Fatal(x)\"", 0},
 		{"logus level", "package p\nimport \"x/logus\"\nfunc f() { logus.Log(logus.LevelFatal, 1) }", 0},
 		{"other receiver", "package p\nfunc f(l T) { l.Fatal(1) }", 0},
+		{"aliased log", "package p\nimport stdlog \"log\"\nfunc f() { stdlog.Fatalln(1) }", 1},
+		{"aliased os", "package p\nimport quit \"os\"\nfunc f() { quit.Exit(1) }", 1},
+		{"a local named log", "package p\nimport \"fmt\"\nfunc f(log T) { log.Fatal(fmt.Sprint(1)) }", 0},
+		{"another package aliased to os", "package p\nimport os \"example.com/other\"\nfunc f() { os.Exit(1) }", 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -128,10 +202,12 @@ func longComments(t *testing.T, name string, src []byte) []string {
 	for _, group := range file.Comments {
 		lines := 0
 		for _, c := range group.List {
-			if strings.HasPrefix(c.Text, "//go:") || strings.HasPrefix(c.Text, "//nolint") {
-				continue
+			for _, line := range strings.Split(c.Text, "\n") {
+				if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "//go:") || strings.HasPrefix(trimmed, "//nolint") {
+					continue
+				}
+				lines++
 			}
-			lines += strings.Count(c.Text, "\n") + 1
 		}
 		if lines > maxCommentLines {
 			found = append(found, fmt.Sprintf("%s:%d has %d lines", name, fset.Position(group.Pos()).Line, lines))
@@ -155,10 +231,12 @@ func TestCommentGuardCountsBlocks(t *testing.T) {
 	three := "package p\n// a\n// b\n// c\nfunc f() {}"
 	split := "package p\n// a\n// b\n// c\n\n// d\n// e\nfunc f() {}"
 	block := "package p\n/* a\nb\nc\nd */\nfunc f() {}"
+	mixed := "package p\n/* a\nb */\n// c\n// d\nfunc f() {}"
+	directive := "package p\n// a\n// b\n// c\n//nolint:x\nfunc f() {}"
 	for name, c := range map[string]struct {
 		src  string
 		want int
-	}{"four lines": {four, 1}, "three lines": {three, 0}, "two blocks": {split, 0}, "block comment": {block, 1}} {
+	}{"four lines": {four, 1}, "three lines": {three, 0}, "two blocks": {split, 0}, "block comment": {block, 1}, "block then lines": {mixed, 1}, "directives do not count": {directive, 0}} {
 		if got := longComments(t, "x.go", []byte(c.src)); len(got) != c.want {
 			t.Errorf("%s: %v, want %d", name, got, c.want)
 		}
@@ -1075,6 +1153,136 @@ func TestConstructorRuleDetectsViolations(t *testing.T) {
 		files := parseSources(t, decls+c.fn)
 		if got := len(constructorViolations(files)); got != c.want {
 			t.Errorf("%s: %d violations, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// restatingStopwords are the words a restating comment is built from.
+var restatingStopwords = map[string]bool{
+	"returns": true, "return": true, "is": true, "a": true, "an": true, "the": true, "of": true, "for": true,
+	"to": true, "over": true, "with": true, "from": true, "and": true, "wraps": true, "creates": true,
+	"builds": true, "in": true, "on": true, "by": true, "as": true, "it": true, "that": true, "holds": true,
+	"new": true, "makes": true, "gets": true, "get": true, "sets": true, "set": true,
+}
+
+// words lower-cases s and splits it at case changes and non-alphanumerics, so
+// "NewRepository" and "new repository" give the same words.
+func words(s string) []string {
+	var out []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, strings.ToLower(string(cur)))
+			cur = nil
+		}
+	}
+	runes := []rune(s)
+	for i, r := range runes {
+		switch {
+		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
+			flush()
+		case unicode.IsUpper(r) && i > 0 && (unicode.IsLower(runes[i-1]) || (i+1 < len(runes) && unicode.IsLower(runes[i+1]))):
+			flush()
+			cur = append(cur, r)
+		default:
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	return out
+}
+
+// restatingComments lists the one-line doc comments of src that only repeat
+// the declaration they sit on, such as "// NewRepository returns a Repository
+// over db.": the name, its parameters and results, and filler words say it all.
+func restatingComments(t *testing.T, name string, src []byte) []string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	var found []string
+	check := func(declName string, doc *ast.CommentGroup, known map[string]bool) {
+		if doc == nil || len(doc.List) != 1 || strings.HasPrefix(doc.List[0].Text, "/*") {
+			return
+		}
+		text := strings.TrimSpace(strings.TrimPrefix(doc.List[0].Text, "//"))
+		if !strings.HasPrefix(text, declName+" ") {
+			return
+		}
+		for _, w := range words(text) {
+			if !known[w] && !restatingStopwords[w] {
+				return
+			}
+		}
+		found = append(found, fmt.Sprintf("%s: %s", declName, text))
+	}
+	ident := func(known map[string]bool, texts ...string) {
+		for _, text := range texts {
+			for _, w := range words(text) {
+				known[w] = true
+			}
+		}
+	}
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			known := map[string]bool{}
+			ident(known, d.Name.Name)
+			fields := []*ast.FieldList{d.Recv, d.Type.Params, d.Type.Results}
+			for _, list := range fields {
+				if list == nil {
+					continue
+				}
+				for _, f := range list.List {
+					ident(known, types.ExprString(f.Type))
+					for _, n := range f.Names {
+						ident(known, n.Name)
+					}
+				}
+			}
+			check(d.Name.Name, d.Doc, known)
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if ts, ok := spec.(*ast.TypeSpec); ok {
+					doc := ts.Doc
+					if doc == nil && len(d.Specs) == 1 {
+						doc = d.Doc
+					}
+					known := map[string]bool{}
+					ident(known, ts.Name.Name)
+					check(ts.Name.Name, doc, known)
+				}
+			}
+		}
+	}
+	return found
+}
+
+// TestCommentsDoNotRestateTheDeclaration: a comment must add something the name
+// and signature do not say. Test files are exempt.
+func TestCommentsDoNotRestateTheDeclaration(t *testing.T) {
+	repoFiles(t, func(path string, data []byte) {
+		for _, problem := range restatingComments(t, path, data) {
+			t.Errorf("%s restates its declaration: %s", path, problem)
+		}
+	})
+}
+
+func TestRestatingCommentGuard(t *testing.T) {
+	for name, c := range map[string]struct {
+		src  string
+		want int
+	}{
+		"restates a constructor": {"package p\n// NewRepository returns a Repository over db.\nfunc NewRepository(db *gorm.DB) *Repository { return nil }", 1},
+		"restates a wrapper":     {"package p\n// New wraps client.\nfunc New(client *redis.Client) *Cache { return nil }", 1},
+		"restates a type":        {"package p\n// Handler is the handler.\ntype Handler struct{}", 1},
+		"says why":               {"package p\n// NewRepository returns a Repository over db; it never opens a connection.\nfunc NewRepository(db *gorm.DB) *Repository { return nil }", 0},
+		"several lines":          {"package p\n// Handler is the handler.\n// It also logs.\ntype Handler struct{}", 0},
+		"another subject":        {"package p\n// Close stops the job.\nfunc Close() {}", 0},
+	} {
+		if got := restatingComments(t, "x.go", []byte(c.src)); len(got) != c.want {
+			t.Errorf("%s: %v, want %d", name, got, c.want)
 		}
 	}
 }

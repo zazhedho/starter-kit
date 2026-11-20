@@ -28,7 +28,6 @@ func SupportedContentTypes() []string {
 	return types
 }
 
-// ExtensionFor is the extension of a supported content type, or "".
 func ExtensionFor(contentType string) string {
 	return contentTypeExtensions[NormalizeContentType(contentType)]
 }

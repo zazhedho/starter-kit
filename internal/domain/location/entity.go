@@ -101,7 +101,6 @@ type SyncProgress struct {
 	VillageCount  int
 }
 
-// SyncFinish is the final state of a sync job.
 type SyncFinish struct {
 	Status       string // "completed" or "failed"
 	Message      string

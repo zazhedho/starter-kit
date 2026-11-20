@@ -310,7 +310,6 @@ A variable takes its value from the first of these that sets it (a blank value c
 | `CONSUL` | Consul agent address, for example `127.0.0.1:8500`; enables the Consul source |
 | `CONSUL_PATH` | key prefix; the key read is `<CONSUL_PATH>/<APP_ENV>` and holds a JSON object of settings |
 | `APP_CONFIG` | directory holding `app.env`; without it the file is `config/<APP_ENV>.env` |
-| `CONFIG_ID` | a source whose `config_id` equals this value was applied before and is skipped |
 
 A missing config file is logged at debug level only; a source that exists but cannot be read is logged as an error and
 ignored. Remote configuration never overrides a variable that is already set.

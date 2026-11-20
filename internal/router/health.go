@@ -15,7 +15,7 @@ import (
 
 const readyTimeout = 2 * time.Second
 
-func registerHealth(r gin.IRouter, d module.Deps) error {
+func registerHealth(r gin.IRouter, d module.Deps) {
 	r.GET("/healthcheck", func(ctx *gin.Context) {
 		logus.LogContext(ctx, logus.LevelDebug, "ClientIP:", ctx.ClientIP())
 		ctx.JSON(http.StatusOK, gin.H{
@@ -26,7 +26,7 @@ func registerHealth(r gin.IRouter, d module.Deps) error {
 	r.GET("/readyz", func(ctx *gin.Context) {
 		// Once shutdown has started the service is still up but must receive no
 		// new traffic, so the load balancer is told before the server drains.
-		if d.Lifecycle != nil && d.Lifecycle.Draining() {
+		if d.Lifecycle.Draining() {
 			logus.LogContext(ctx, logus.LevelDebug, "readyz; shutting down")
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
 			return
@@ -41,7 +41,6 @@ func registerHealth(r gin.IRouter, d module.Deps) error {
 		}
 		ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	return nil
 }
 
 func ping(ctx context.Context, d module.Deps) error {

@@ -28,7 +28,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	}
 	if err := s.repo.StartSyncJob(ctx, jobID, s.instanceID, time.Now()); err != nil {
 		s.markIfInterrupted(ctx, jobID)
-		logus.Logf(logus.LevelError, "failed to mark location sync job %s as running: %v", jobID, err)
+		logus.Logf(logus.LevelError, "location: failed to mark sync job %s as running: %v", jobID, err)
 		return
 	}
 
@@ -42,7 +42,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 		case s.baseCtx.Err() != nil:
 			s.markInterrupted(jobID)
 		case ctx.Err() != nil:
-			logus.Logf(logus.LevelWarn, "location sync job %s was taken over by another instance; stopping", jobID)
+			logus.Logf(logus.LevelWarn, "location: sync job %s was taken over by another instance; stopping", jobID)
 		default:
 			s.markFailed(jobID, err.Error())
 		}
@@ -81,7 +81,7 @@ func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID 
 					cancelJob()
 					return
 				case err != nil && ctx.Err() == nil:
-					logus.Logf(logus.LevelWarn, "failed to send the heartbeat of location sync job %s: %v", jobID, err)
+					logus.Logf(logus.LevelWarn, "location: failed to send the heartbeat of sync job %s: %v", jobID, err)
 				}
 			}
 		}
@@ -113,7 +113,7 @@ func (w *progressWriter) report(p domainlocation.SyncProgress) {
 	case errors.Is(err, domainlocation.ErrNotFound):
 		w.cancelJob() // another instance took the job over
 	case err != nil && w.ctx.Err() == nil:
-		logus.Logf(logus.LevelWarn, "failed to update location sync job progress %s: %v", w.jobID, err)
+		logus.Logf(logus.LevelWarn, "location: failed to update sync job progress %s: %v", w.jobID, err)
 	}
 }
 
@@ -182,11 +182,8 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, report 
 			},
 			s.repo.UpsertVillages, villageKey(req.DistrictCode))
 		return domainlocation.SyncProgress{Message: "Village sync completed", VillageCount: len(rows)}, err
-	case "all":
-		return s.syncAll(ctx, report)
-	default:
-		return domainlocation.SyncProgress{}, errors.New("invalid sync level")
 	}
+	return s.syncAll(ctx, report) // level "all": StartSync has validated the level
 }
 
 func (s *Service) syncAll(ctx context.Context, report func(domainlocation.SyncProgress)) (domainlocation.SyncProgress, error) {

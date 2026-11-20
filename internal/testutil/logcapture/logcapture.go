@@ -33,7 +33,6 @@ type Capture struct {
 	readEnd chan struct{}
 }
 
-// Mark is a position in the captured output.
 type Mark int
 
 // Start captures logus output and the standard log package. It panics if the
@@ -90,7 +89,6 @@ func (c *Capture) flush() {
 	}
 }
 
-// Mark returns the current end of the output.
 func (c *Capture) Mark() Mark {
 	c.flush()
 	c.mu.Lock()
@@ -98,7 +96,6 @@ func (c *Capture) Mark() Mark {
 	return Mark(c.buf.Len())
 }
 
-// Since returns what was logged after m.
 func (c *Capture) Since(m Mark) string {
 	c.flush()
 	c.mu.Lock()
@@ -107,7 +104,6 @@ func (c *Capture) Since(m Mark) string {
 	return syncMarker.ReplaceAllString(out, "")
 }
 
-// All returns everything captured so far.
 func (c *Capture) All() string { return c.Since(0) }
 
 // Stop restores log output (logus goes back to os.Stdout) and ends the capture.
