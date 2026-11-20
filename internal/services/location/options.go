@@ -10,7 +10,6 @@ type Options struct {
 	// NewID returns the identifier of a new sync job; nil means UUIDv7.
 	NewID             func() string
 	BaseURL           string
-	SourceYear        string
 	Timeout, CacheTTL time.Duration
 }
 

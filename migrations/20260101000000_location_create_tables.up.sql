@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS location_sync_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     status VARCHAR(20) NOT NULL,
     level VARCHAR(20) NOT NULL,
-    year VARCHAR(10) NOT NULL,
     province_code VARCHAR(20),
     city_code VARCHAR(20),
     district_code VARCHAR(20),

@@ -25,7 +25,7 @@ func jobFixture(t *testing.T, rt http.RoundTripper) (*Service, *locationRepoTest
 	t.Helper()
 	repo := &locationRepoTestDouble{
 		activeJobErr: domainlocation.ErrNotFound,
-		syncJob:      domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: time.Now()},
+		syncJob:      domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", CreatedAt: time.Now()},
 	}
 	svc := NewService(repo, Options{NewID: func() string { return "job-1" }})
 	svc.httpClient = &http.Client{Transport: rt}
@@ -145,7 +145,7 @@ func TestACompletedSyncIsNotMarkedInterrupted(t *testing.T) {
 	svc, repo := jobFixture(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return okResponse(provinceBody), nil
 	}))
-	svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province", Year: "2026"})
+	svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province"})
 	if got := lastUpdate(t, repo); got.Status != "completed" {
 		t.Fatalf("got %+v, want completed", got)
 	}
@@ -193,7 +193,7 @@ func stuckJobService(t *testing.T, rt http.RoundTripper) (*Service, *deadlineRep
 	t.Helper()
 	repo := &deadlineRepo{locationRepoTestDouble: &locationRepoTestDouble{
 		activeJobErr: domainlocation.ErrNotFound,
-		syncJob:      domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: time.Now()},
+		syncJob:      domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", CreatedAt: time.Now()},
 	}}
 	svc := NewService(repo, Options{NewID: func() string { return "job-1" }})
 	svc.httpClient = &http.Client{Transport: rt}

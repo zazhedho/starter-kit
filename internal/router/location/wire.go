@@ -29,12 +29,11 @@ func wire(d module.Deps) (*wired, error) {
 	loc := d.Config.Location
 	repo := repositorylocation.NewRepository(d.DB)
 	svc := servicelocation.NewService(repo, servicelocation.Options{
-		Cache:      cachelocation.New(d.Redis),
-		NewID:      gokit.CreateUUID,
-		BaseURL:    loc.ServiceBaseURL,
-		SourceYear: loc.SourceYear,
-		Timeout:    loc.ServiceTimeout,
-		CacheTTL:   loc.CacheTTL,
+		Cache:    cachelocation.New(d.Redis),
+		NewID:    gokit.CreateUUID,
+		BaseURL:  loc.ServiceBaseURL,
+		Timeout:  loc.ServiceTimeout,
+		CacheTTL: loc.CacheTTL,
 	})
 	// A sync job left queued or running by a previous process will never
 	// finish: fail it now, then let the application stop this process's job at

@@ -1965,9 +1965,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"province\"\n}"
+              "raw": "{\n  \"level\": \"province\"\n}"
             },
-            "description": "Start an asynchronous province-only sync job. Payload requires only `year` and `level=province`. The returned job ID is automatically saved into `location_sync_job_id`.",
+            "description": "Start an asynchronous province-only sync job. Payload requires only `level=province`. The returned job ID is automatically saved into `location_sync_job_id`.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2019,7 +2019,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"city\",\n  \"province_code\": \"11\"\n}"
+              "raw": "{\n  \"level\": \"city\",\n  \"province_code\": \"11\"\n}"
             },
             "description": "Start an asynchronous city sync job for one province. Required payload: `level=city` and `province_code`.",
             "auth": {
@@ -2073,7 +2073,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"district\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\"\n}"
+              "raw": "{\n  \"level\": \"district\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\"\n}"
             },
             "description": "Start an asynchronous district sync job for one city. Required payload: `level=district`, `province_code`, and `city_code`.",
             "auth": {
@@ -2127,7 +2127,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"village\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\",\n  \"district_code\": \"1101010\"\n}"
+              "raw": "{\n  \"level\": \"village\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\",\n  \"district_code\": \"1101010\"\n}"
             },
             "description": "Start an asynchronous village sync job for one district. Required payload: `level=village`, `province_code`, `city_code`, and `district_code`.",
             "auth": {
@@ -2181,7 +2181,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"all\"\n}"
+              "raw": "{\n  \"level\": \"all\"\n}"
             },
             "description": "Start a full asynchronous hierarchical import. Use this for initial bootstrap only because it is much heavier than scoped sync requests.",
             "auth": {

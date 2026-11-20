@@ -101,8 +101,7 @@ func decodeLocationMap(body []byte) (map[string]string, error) {
 	return dataMap, nil
 }
 
-func (s *Service) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
-	_ = year
+func (s *Service) fetchProvinces(ctx context.Context) ([]domainlocation.Province, error) {
 	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/provinces", nil), "province")
 	if err != nil {
 		return nil, err
@@ -121,8 +120,7 @@ func (s *Service) fetchProvinces(ctx context.Context, year string) ([]domainloca
 	return sortProvinces(items), nil
 }
 
-func (s *Service) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
-	_ = year
+func (s *Service) fetchCities(ctx context.Context, provinceCode string) ([]domainlocation.City, error) {
 	cleanProvinceCode := normalizeCodeSegment(provinceCode)
 	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/regencies", map[string]string{
 		"province_code": cleanProvinceCode,
@@ -146,8 +144,7 @@ func (s *Service) fetchCities(ctx context.Context, year, provinceCode string) ([
 	return sortCities(items), nil
 }
 
-func (s *Service) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
-	_ = year
+func (s *Service) fetchDistricts(ctx context.Context, provinceCode, cityCode string) ([]domainlocation.District, error) {
 	cleanProvinceCode := normalizeCodeSegment(provinceCode)
 	cleanCityCode := normalizeCodeSegment(cityCode)
 	cityParam := childCodeParam(cleanProvinceCode, cleanCityCode)
@@ -174,8 +171,7 @@ func (s *Service) fetchDistricts(ctx context.Context, year, provinceCode, cityCo
 	return sortDistricts(items), nil
 }
 
-func (s *Service) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
-	_ = year
+func (s *Service) fetchVillages(ctx context.Context, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
 	cleanProvinceCode := normalizeCodeSegment(provinceCode)
 	cleanCityCode := normalizeCodeSegment(cityCode)
 	cleanDistrictCode := normalizeCodeSegment(districtCode)

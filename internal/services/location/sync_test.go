@@ -17,7 +17,7 @@ func TestLocationSyncAll(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := newScopedLocationSyncService(t, repo)
 	var progressCalls int
-	result, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2026"}, func(progress syncProgress) {
+	result, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "all"}, func(progress syncProgress) {
 		progressCalls++
 	})
 	if err != nil {
@@ -57,10 +57,10 @@ func TestLocationSyncIndividualLevels(t *testing.T) {
 	}
 
 	tests := []dtolocation.SyncRequest{
-		{Level: "province", Year: "2026"},
-		{Level: "city", Year: "2026", ProvinceCode: "31"},
-		{Level: "district", Year: "2026", ProvinceCode: "31", CityCode: "3171"},
-		{Level: "village", Year: "2026", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"},
+		{Level: "province"},
+		{Level: "city", ProvinceCode: "31"},
+		{Level: "district", ProvinceCode: "31", CityCode: "3171"},
+		{Level: "village", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"},
 	}
 
 	for _, req := range tests {
@@ -105,10 +105,10 @@ func TestLocationSyncUpsertErrors(t *testing.T) {
 		repo *locationRepoTestDouble
 		req  dtolocation.SyncRequest
 	}{
-		{name: "province", repo: &locationRepoTestDouble{upsertProvinceErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "province", Year: "2026"}},
-		{name: "city", repo: &locationRepoTestDouble{upsertCityErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "city", Year: "2026", ProvinceCode: "31"}},
-		{name: "district", repo: &locationRepoTestDouble{upsertDistrictErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "district", Year: "2026", ProvinceCode: "31", CityCode: "3171"}},
-		{name: "village", repo: &locationRepoTestDouble{upsertVillageErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "village", Year: "2026", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"}},
+		{name: "province", repo: &locationRepoTestDouble{upsertProvinceErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "province"}},
+		{name: "city", repo: &locationRepoTestDouble{upsertCityErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "city", ProvinceCode: "31"}},
+		{name: "district", repo: &locationRepoTestDouble{upsertDistrictErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "district", ProvinceCode: "31", CityCode: "3171"}},
+		{name: "village", repo: &locationRepoTestDouble{upsertVillageErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "village", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"}},
 	}
 
 	for _, tt := range tests {
@@ -123,12 +123,12 @@ func TestLocationSyncUpsertErrors(t *testing.T) {
 
 func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	now := time.Now()
-	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: now}}
+	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", CreatedAt: now}}
 	svc := newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`)), Header: make(http.Header)}, nil
 	}))
 
-	svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province", Year: "2026"})
+	svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province"})
 	if len(repo.updatedJobs) < 2 {
 		t.Fatalf("expected running and completed job updates, got %+v", repo.updatedJobs)
 	}
@@ -139,7 +139,7 @@ func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
 	repo = &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-2", Status: "queued", CreatedAt: now}}
 	svc = newTestService(t, repo, nil)
 	svc.syncing.Store(true)
-	svc.runSyncJob("job-2", dtolocation.SyncRequest{Level: "province", Year: "2026"})
+	svc.runSyncJob("job-2", dtolocation.SyncRequest{Level: "province"})
 	if len(repo.updatedJobs) != 1 || repo.updatedJobs[0].Status != "failed" {
 		t.Fatalf("expected busy sync to mark failed, got %+v", repo.updatedJobs)
 	}

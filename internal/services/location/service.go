@@ -3,7 +3,6 @@ package location
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -24,9 +23,8 @@ type Service struct {
 	newID      func() string
 	syncing    atomic.Bool
 
-	baseURL    string
-	sourceYear string
-	cacheTTL   time.Duration
+	baseURL  string
+	cacheTTL time.Duration
 
 	// lifecycle: background sync jobs run under baseCtx, which Close cancels.
 	baseCtx context.Context
@@ -63,7 +61,6 @@ func NewService(repo Repository, opts Options) *Service {
 		httpClient: &http.Client{Timeout: timeout},
 		newID:      newID,
 		baseURL:    opts.BaseURL,
-		sourceYear: opts.SourceYear,
 		cacheTTL:   opts.CacheTTL,
 		baseCtx:    baseCtx,
 		cancel:     cancel,
@@ -94,7 +91,7 @@ func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, erro
 
 	locations := mapProvinces(rows)
 	if len(locations) == 0 {
-		fetched, fetchErr := s.fetchProvinces(ctx, "")
+		fetched, fetchErr := s.fetchProvinces(ctx)
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
@@ -122,7 +119,7 @@ func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocati
 
 	locations := mapCities(rows)
 	if len(locations) == 0 {
-		fetched, fetchErr := s.fetchCities(ctx, "", provinceCode)
+		fetched, fetchErr := s.fetchCities(ctx, provinceCode)
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
@@ -154,7 +151,7 @@ func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocati
 		if cityErr != nil {
 			return nil, cityErr
 		}
-		fetched, fetchErr := s.fetchDistricts(ctx, "", city.ProvinceCode, cityCode)
+		fetched, fetchErr := s.fetchDistricts(ctx, city.ProvinceCode, cityCode)
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
@@ -190,7 +187,7 @@ func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtoloc
 		if cityErr != nil {
 			return nil, cityErr
 		}
-		fetched, fetchErr := s.fetchVillages(ctx, "", city.ProvinceCode, district.CityCode, districtCode)
+		fetched, fetchErr := s.fetchVillages(ctx, city.ProvinceCode, district.CityCode, districtCode)
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
@@ -224,7 +221,6 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, re
 		ID:           s.newID(),
 		Status:       "queued",
 		Level:        normalizedReq.Level,
-		Year:         normalizedReq.Year,
 		ProvinceCode: normalizedReq.ProvinceCode,
 		CityCode:     normalizedReq.CityCode,
 		DistrictCode: normalizedReq.DistrictCode,
@@ -261,7 +257,6 @@ func (s *Service) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJo
 
 func (s *Service) normalizeAndValidateRequest(req dtolocation.SyncRequest) (dtolocation.SyncRequest, error) {
 	req.Level = normalizeSyncLevel(req.Level)
-	req.Year = s.normalizeSyncYear(req.Year)
 
 	switch req.Level {
 	case "province":
@@ -297,16 +292,4 @@ func normalizeSyncLevel(level string) string {
 	default:
 		return level
 	}
-}
-
-func (s *Service) normalizeSyncYear(year string) string {
-	if year != "" {
-		return year
-	}
-
-	if s.sourceYear != "" {
-		return s.sourceYear
-	}
-
-	return fmt.Sprintf("%d", time.Now().Year())
 }

@@ -38,7 +38,6 @@ The migration seeds the permission `sync_locations` (resource `locations`, actio
 | Field | Meaning |
 |---|---|
 | `level` | `all` (default), `province`, `city`, `district` or `village` |
-| `year` | source year; defaults to `LOCATION_SOURCE_YEAR`, then to the current calendar year |
 | `province_code` | required for `city`, `district` and `village` |
 | `city_code` | required for `district` and `village` |
 | `district_code` | required for `village` |
@@ -52,7 +51,6 @@ bootstrap.
 |---|---|---|
 | `LOCATION_SERVICE_BASE_URL` | `https://location-service-y7si.onrender.com` | base URL of the Location Service (a trailing `/` is removed) |
 | `LOCATION_SERVICE_TIMEOUT_SECONDS` | `20` | per-request timeout in whole seconds; zero or less means the default |
-| `LOCATION_SOURCE_YEAR` | empty | default sync year; empty means the current year |
 | `LOCATION_CACHE_TTL` | `4320h` (180 days) | cache lifetime; a Go duration, plain seconds or `eod`; zero or less means the default |
 
 ### Location Service contract
@@ -77,7 +75,7 @@ Created by `migrations/20260101000000_location_create_tables.up.sql`:
 | `cities` | `code` (unique), `province_code`, `name` |
 | `districts` | `code` (unique), `city_code`, `name` |
 | `villages` | `code` (unique), `district_code`, `name` |
-| `location_sync_jobs` | one row per sync: `status` (`queued`, `running`, `completed`, `failed`), `level`, `year`, the scope codes, `requested_by_user_id`, `message`, `error_message`, the four counts, `started_at`, `finished_at` |
+| `location_sync_jobs` | one row per sync: `status` (`queued`, `running`, `completed`, `failed`), `level`, the scope codes, `requested_by_user_id`, `message`, `error_message`, the four counts, `started_at`, `finished_at` |
 
 ## Operational notes
 

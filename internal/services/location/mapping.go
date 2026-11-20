@@ -68,7 +68,6 @@ func mapSyncJob(job domainlocation.SyncJob) dtolocation.SyncJob {
 		ID:            job.ID,
 		Status:        job.Status,
 		Level:         job.Level,
-		Year:          job.Year,
 		ProvinceCode:  job.ProvinceCode,
 		CityCode:      job.CityCode,
 		DistrictCode:  job.DistrictCode,

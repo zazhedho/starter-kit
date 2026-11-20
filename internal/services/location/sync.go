@@ -134,7 +134,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 	switch req.Level {
 	case "province":
 		progress(syncProgress{Message: "Fetching provinces"})
-		provinces, err := s.fetchProvinces(ctx, req.Year)
+		provinces, err := s.fetchProvinces(ctx)
 		if err != nil {
 			return syncProgress{}, err
 		}
@@ -148,7 +148,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		}, nil
 	case "city":
 		progress(syncProgress{Message: fmt.Sprintf("Fetching cities for province %s", req.ProvinceCode)})
-		cities, err := s.fetchCities(ctx, req.Year, req.ProvinceCode)
+		cities, err := s.fetchCities(ctx, req.ProvinceCode)
 		if err != nil {
 			return syncProgress{}, err
 		}
@@ -162,7 +162,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		}, nil
 	case "district":
 		progress(syncProgress{Message: fmt.Sprintf("Fetching districts for city %s", req.CityCode)})
-		districts, err := s.fetchDistricts(ctx, req.Year, req.ProvinceCode, req.CityCode)
+		districts, err := s.fetchDistricts(ctx, req.ProvinceCode, req.CityCode)
 		if err != nil {
 			return syncProgress{}, err
 		}
@@ -176,7 +176,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 		}, nil
 	case "village":
 		progress(syncProgress{Message: fmt.Sprintf("Fetching villages for district %s", req.DistrictCode)})
-		villages, err := s.fetchVillages(ctx, req.Year, req.ProvinceCode, req.CityCode, req.DistrictCode)
+		villages, err := s.fetchVillages(ctx, req.ProvinceCode, req.CityCode, req.DistrictCode)
 		if err != nil {
 			return syncProgress{}, err
 		}
@@ -189,15 +189,15 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progres
 			VillageCount: len(villages),
 		}, nil
 	case "all":
-		return s.syncAll(ctx, req.Year, progress)
+		return s.syncAll(ctx, progress)
 	default:
 		return syncProgress{}, errors.New("invalid sync level")
 	}
 }
 
-func (s *Service) syncAll(ctx context.Context, year string, progress func(syncProgress)) (syncProgress, error) {
+func (s *Service) syncAll(ctx context.Context, progress func(syncProgress)) (syncProgress, error) {
 	progress(syncProgress{Message: "Fetching provinces"})
-	provinces, err := s.fetchProvinces(ctx, year)
+	provinces, err := s.fetchProvinces(ctx)
 	if err != nil {
 		return syncProgress{}, err
 	}
@@ -213,7 +213,7 @@ func (s *Service) syncAll(ctx context.Context, year string, progress func(syncPr
 	})
 
 	for provinceIndex, province := range provinces {
-		if err := s.syncProvince(ctx, year, provinces, provinceIndex, province, &totals, progress); err != nil {
+		if err := s.syncProvince(ctx, provinces, provinceIndex, province, &totals, progress); err != nil {
 			return syncProgress{}, err
 		}
 	}
@@ -228,8 +228,8 @@ func (s *Service) syncAll(ctx context.Context, year string, progress func(syncPr
 	}, nil
 }
 
-func (s *Service) syncProvince(ctx context.Context, year string, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
-	cities, err := s.fetchCities(ctx, year, province.Code)
+func (s *Service) syncProvince(ctx context.Context, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
+	cities, err := s.fetchCities(ctx, province.Code)
 	if err != nil {
 		return err
 	}
@@ -249,7 +249,7 @@ func (s *Service) syncProvince(ctx context.Context, year string, provinces []dom
 	})
 
 	for cityIndex, city := range cities {
-		if err := s.syncCity(ctx, year, province, city, totals); err != nil {
+		if err := s.syncCity(ctx, province, city, totals); err != nil {
 			return err
 		}
 		progress(syncProgress{
@@ -263,8 +263,8 @@ func (s *Service) syncProvince(ctx context.Context, year string, provinces []dom
 	return nil
 }
 
-func (s *Service) syncCity(ctx context.Context, year string, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
-	districts, err := s.fetchDistricts(ctx, year, province.Code, city.Code)
+func (s *Service) syncCity(ctx context.Context, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
+	districts, err := s.fetchDistricts(ctx, province.Code, city.Code)
 	if err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func (s *Service) syncCity(ctx context.Context, year string, province domainloca
 		s.cache.DeleteKeys(context.Background(), districtKey(city.Code))
 	}
 	for _, district := range districts {
-		villages, err := s.fetchVillages(ctx, year, province.Code, city.Code, district.Code)
+		villages, err := s.fetchVillages(ctx, province.Code, city.Code, district.Code)
 		if err != nil {
 			return err
 		}

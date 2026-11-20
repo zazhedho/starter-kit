@@ -46,7 +46,6 @@ func TestLocationServiceReadMethodsMapRepositoryRows(t *testing.T) {
 			ID:        "job-1",
 			Status:    "done",
 			Level:     "province",
-			Year:      "2026",
 			CreatedAt: now,
 			UpdatedAt: &now,
 		},
@@ -122,14 +121,13 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 			ID:        "job-1",
 			Status:    "running",
 			Level:     "all",
-			Year:      "2025",
 			Message:   "running",
 			CreatedAt: now,
 			UpdatedAt: &now,
 		},
 	}, Options{})
 
-	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2025"}, "user-1")
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "user-1")
 	if !errors.Is(err, domainlocation.ErrSyncRunning) {
 		t.Fatalf("expected domainlocation.ErrSyncRunning, got %v", err)
 	}
@@ -140,7 +138,7 @@ func TestStartSyncReturnsActiveJobWhenAlreadyRunning(t *testing.T) {
 
 func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 	repo := &locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound}
-	svc := NewService(repo, Options{SourceYear: "2026"})
+	svc := NewService(repo, Options{})
 	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
 	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "user-1")
@@ -148,7 +146,7 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 		t.Fatalf("expected success, got %v", err)
 	}
 
-	if got.Status != "queued" || got.Level != "province" || got.Year != "2026" {
+	if got.Status != "queued" || got.Level != "province" {
 		t.Fatalf("unexpected job response: %+v", got)
 	}
 	if repo.createdJob == nil {
@@ -161,12 +159,12 @@ func TestStartSyncCreatesQueuedJobWithDefaults(t *testing.T) {
 
 func TestStartSyncRepositoryErrors(t *testing.T) {
 	svc := NewService(&locationRepoTestDouble{activeJobErr: errors.New("database down")}, Options{})
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "user-1"); err == nil {
 		t.Fatal("expected active job lookup error")
 	}
 
 	svc = NewService(&locationRepoTestDouble{activeJobErr: domainlocation.ErrNotFound, createSyncJobErr: errors.New("database down")}, Options{})
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2026"}, "user-1"); err == nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "user-1"); err == nil {
 		t.Fatal("expected create sync job error")
 	}
 }

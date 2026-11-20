@@ -154,15 +154,15 @@ func newScopedLocationSyncService(t *testing.T, repo *locationRepoTestDouble) *S
 func TestLocationFetchScopedLevelsNormalizeCodes(t *testing.T) {
 	svc := newScopedLocationSyncService(t, &locationRepoTestDouble{})
 	ctx := context.Background()
-	cities, err := svc.fetchCities(ctx, "2026", "31")
+	cities, err := svc.fetchCities(ctx, "31")
 	if err != nil || len(cities) != 1 || cities[0].Code != "3171" {
 		t.Fatalf("fetch cities: cities=%+v err=%v", cities, err)
 	}
-	districts, err := svc.fetchDistricts(ctx, "2026", "31", "3171")
+	districts, err := svc.fetchDistricts(ctx, "31", "3171")
 	if err != nil || len(districts) != 1 || districts[0].Code != "317101" {
 		t.Fatalf("fetch districts: districts=%+v err=%v", districts, err)
 	}
-	villages, err := svc.fetchVillages(ctx, "2026", "31", "3171", "317101")
+	villages, err := svc.fetchVillages(ctx, "31", "3171", "317101")
 	if err != nil || len(villages) != 1 || villages[0].Code != "31710101" {
 		t.Fatalf("fetch villages: villages=%+v err=%v", villages, err)
 	}

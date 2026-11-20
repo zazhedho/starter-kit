@@ -15,14 +15,13 @@ const (
 
 // Location is the location module's setting.
 type Location struct {
-	ServiceBaseURL, SourceYear string
-	ServiceTimeout, CacheTTL   time.Duration
+	ServiceBaseURL           string
+	ServiceTimeout, CacheTTL time.Duration
 }
 
 func locationFromEnv() Location {
 	return Location{
 		ServiceBaseURL: strings.TrimRight(gokit.GetEnv("LOCATION_SERVICE_BASE_URL", defaultLocationServiceBaseURL), "/"),
-		SourceYear:     gokit.GetEnv("LOCATION_SOURCE_YEAR", ""),
 		ServiceTimeout: locationTimeout(),
 		CacheTTL:       locationCacheTTL(),
 	}

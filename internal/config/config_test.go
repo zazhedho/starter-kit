@@ -19,7 +19,7 @@ var managedEnv = []string{
 	"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 	"REDIS_URL", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
 	"RUN_MIGRATION", "PATH_MIGRATE",
-	"LOCATION_SERVICE_BASE_URL", "LOCATION_SOURCE_YEAR", "LOCATION_SERVICE_TIMEOUT_SECONDS", "LOCATION_CACHE_TTL",
+	"LOCATION_SERVICE_BASE_URL", "LOCATION_SERVICE_TIMEOUT_SECONDS", "LOCATION_CACHE_TTL",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SUBJECT", "RESET_SUBJECT", "AUTH_EMAIL_APP_NAME",
 	"MEDIA_ENABLED", "MEDIA_MAX_FILE_SIZE_MB", "MEDIA_ALLOWED_CONTENT_TYPES", "MEDIA_UPLOAD_RATE_LIMIT",
 	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT",
@@ -145,8 +145,8 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 		"DB_MAX_OPEN_CONNS":    "50", "DB_MAX_IDLE_CONNS": "5", "DB_CONN_MAX_LIFETIME": "30m", "DB_CONN_MAX_IDLE_TIME": "2m",
 		"RUN_MIGRATION": "false", "REDIS_HOST": "cache",
 		"LOCATION_SERVICE_TIMEOUT_SECONDS": "7", "MEDIA_UPLOAD_RATE_WINDOW_SECONDS": "90",
-		"LOCATION_CACHE_TTL": "24h", "LOCATION_SOURCE_YEAR": "2024",
-		"SMTP_HOST": "smtp.example.com", "SMTP_PASS": "x", "SMTP_FROM": "a@example.com",
+		"LOCATION_CACHE_TTL": "24h",
+		"SMTP_HOST":          "smtp.example.com", "SMTP_PASS": "x", "SMTP_FROM": "a@example.com",
 	} {
 		t.Setenv(k, v)
 	}
@@ -172,7 +172,7 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if cfg.Redis.Host != "cache" || !cfg.Redis.Configured() {
 		t.Fatalf("Redis = %+v", cfg.Redis)
 	}
-	if cfg.Location.ServiceTimeout != 7*time.Second || cfg.Location.CacheTTL != 24*time.Hour || cfg.Location.SourceYear != "2024" {
+	if cfg.Location.ServiceTimeout != 7*time.Second || cfg.Location.CacheTTL != 24*time.Hour {
 		t.Fatalf("Location = %+v", cfg.Location)
 	}
 	if !cfg.SMTP.Configured() {

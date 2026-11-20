@@ -65,7 +65,6 @@ type SyncJob struct {
 	ID            string     `json:"id" gorm:"column:id;primaryKey"`
 	Status        string     `json:"status" gorm:"column:status"`
 	Level         string     `json:"level" gorm:"column:level"`
-	Year          string     `json:"year" gorm:"column:year"`
 	ProvinceCode  string     `json:"province_code,omitempty" gorm:"column:province_code"`
 	CityCode      string     `json:"city_code,omitempty" gorm:"column:city_code"`
 	DistrictCode  string     `json:"district_code,omitempty" gorm:"column:district_code"`
