@@ -102,7 +102,7 @@ rm -rf "$SCRATCH"
 Notes:
 - Check 11 depends on an external service. With empty location tables the first `GET /api/location/province`
   fetches the list from the Location Service (`LOCATION_SERVICE_BASE_URL`) and stores it (the read fallback in
-  `internal/services/location`), so a `5xx` there means the service was unreachable, not that the project is
+  `internal/services/location`), so a `502` there means the service was unreachable, not that the project is
   broken. Later calls read PostgreSQL.
 - Check 13 holds the shutdown with an open, unfinished request because the drain waits for running requests; the
   first signal restores default signal handling, which is why the second one ends the process.

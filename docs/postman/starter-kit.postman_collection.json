@@ -120,6 +120,27 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/readyz",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "readyz"
+              ]
+            },
+            "description": "Readiness: 200 {\"status\":\"ok\"} when PostgreSQL (and Redis, when configured) answer; 503 {\"status\":\"unavailable\"} when one does not, and from the moment shutdown starts."
+          },
+          "response": []
         }
       ]
     },

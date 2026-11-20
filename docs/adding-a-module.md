@@ -30,7 +30,7 @@ The few shared files:
 |---|---|---|
 | 1 | `migrations/<UTC timestamp>_<m>_create_table.up.sql` and `.down.sql` | the table plus the `module-seed` output (menu and permissions) |
 | 2 | `internal/router/modules.go` | one import line and one entry in `modules`, alphabetical |
-| 3 (only with settings) | `internal/config/config.go`, `load.go`, `validate.go` | one field in `Config` and its section in the `Config.String` format (`config.go` ≈121), one line in `FromEnv`, one call in `Validate` |
+| 3 (only with settings) | `internal/config/config.go`, `load.go`, `validate.go` | one field in `Config` and its section in the `Config.String` format, one line in `FromEnv`, one call in `Validate` |
 | 4 (only with env variables) | `.env.example` | its own `# --- <m> ---` block |
 
 Apart from the composition-root edit under "Extension points" below (needed only for a new shared
@@ -71,8 +71,8 @@ A module that needs a new shared infrastructure client (a mailer, a queue, a sea
 expected edit outside its own folders: add a field to `module.Deps` (`internal/router/module/module.go`),
 open and close the client in `internal/app`, and set the field in `App.ModuleDeps()`. `internal/app` is the
 composition root, the only place that opens connections. Note that storage is opened only when media is
-enabled (`internal/app/app.go` ≈200-209): another module that uses `d.Storage` must widen that condition,
-or `Storage` is nil for it.
+enabled (the `if cfg.Media.Enabled` block of `newApp` in `internal/app/app.go`): another module that uses `d.Storage`
+must widen that condition, or `Storage` is nil for it.
 
 Order of work: migration, domain, dto, service (with a fake-based test), repository, handler,
 `router/<m>` (wire, register, route test), the `modules.go` line, config if needed, then
@@ -98,7 +98,9 @@ adapt; it is not part of this repository.
 
 Generate the timestamp when you create the file (`date -u +%Y%m%d%H%M%S`); the name is
 `<timestamp>_projects_create_table`. See [`migrations/README.md`](../migrations/README.md) for the rules.
-Create the `.up.sql` with the table, then append the menu and permission seed that authkit generates:
+Create the `.up.sql` with the table, then append the menu and permission seed that authkit generates. (The two
+reference modules, `location` and `media`, are API-only and seed permissions without a menu; a module with a UI
+seeds both, as below.)
 
 ```bash
 go run github.com/zazhedho/authkit/cmd/module-seed \
@@ -210,7 +212,7 @@ import (
 // Repository is the persistence the service needs. The GORM adapter in
 // internal/repositories/projects satisfies it by method set.
 type Repository interface {
-	Store(ctx context.Context, p domainprojects.Project) error
+	Store(ctx context.Context, p *domainprojects.Project) error
 	List(ctx context.Context, req dtoprojects.ListRequest) ([]domainprojects.Project, int64, error)
 }
 ```
@@ -248,7 +250,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID, name string) (domainp
 		return domainprojects.Project{}, domainprojects.ErrNameRequired
 	}
 	p := domainprojects.Project{ID: s.newID(), OwnerUserID: ownerUserID, Name: name, CreatedAt: time.Now()}
-	if err := s.repo.Store(ctx, p); err != nil {
+	if err := s.repo.Store(ctx, &p); err != nil {
 		return domainprojects.Project{}, err
 	}
 	return p, nil
@@ -279,8 +281,8 @@ type fakeRepository struct {
 	err    error
 }
 
-func (f *fakeRepository) Store(_ context.Context, p domainprojects.Project) error {
-	f.stored = p
+func (f *fakeRepository) Store(_ context.Context, p *domainprojects.Project) error {
+	f.stored = *p
 	return f.err
 }
 
@@ -457,7 +459,7 @@ func clampLimit(limit int) int {
 }
 
 func (h *Handler) List(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "", "", defaultListLimit)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
@@ -479,11 +481,11 @@ func (h *Handler) List(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
 		return
 	}
-	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, items))
+	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, total, params.Page, params.Limit, logID, items))
 }
 
 func (h *Handler) Create(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	var req createRequest
 	if !gokit.BindJSON(ctx, logID, "[ProjectsHandler][Create]", &req) {
 		return
