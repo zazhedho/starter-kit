@@ -12,7 +12,7 @@ import (
 func bodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.ContentLength > maxBytes {
-			logID := gokit.GenerateLogId(c)
+			logID := gokit.RequestID(c)
 			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge,
 				gokit.ErrorResponse(http.StatusRequestEntityTooLarge, gokit.MsgInvalidRequest, logID, "request body too large"))
 			return

@@ -57,7 +57,7 @@ func TestRepositoryStoreInsertsTheMediaRow(t *testing.T) {
 	db, mock := newMockRepo(t)
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	err := NewRepository(db).Store(context.Background(), domainmedia.Media{ID: "m-1", OwnerUserID: "u-1", CreatedAt: time.Now()})
+	err := NewRepository(db).Store(context.Background(), &domainmedia.Media{ID: "m-1", OwnerUserID: "u-1", CreatedAt: time.Now()})
 	if err != nil {
 		t.Fatalf("Store = %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRepositoryStoreReturnsDatabaseErrors(t *testing.T) {
 	boom := errors.New("insert failed")
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnError(boom)
 
-	if err := NewRepository(db).Store(context.Background(), domainmedia.Media{ID: "m-1"}); !errors.Is(err, boom) {
+	if err := NewRepository(db).Store(context.Background(), &domainmedia.Media{ID: "m-1"}); !errors.Is(err, boom) {
 		t.Fatalf("Store = %v, want the database error", err)
 	}
 }
@@ -104,6 +104,17 @@ func TestRepositoryDeleteSoftDeletesTheRow(t *testing.T) {
 	}
 }
 
+// gokit answers ErrNotFound when no row matched (a second delete, or a race);
+// the repository turns it into the domain error the handler maps to 404.
+func TestRepositoryDeleteTranslatesNoMatchToTheDomainError(t *testing.T) {
+	db, mock := newMockRepo(t)
+	mock.ExpectExec(`UPDATE "media" SET "deleted_at"=`).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	if err := NewRepository(db).Delete(context.Background(), "m-1"); !errors.Is(err, domainmedia.ErrNotFound) {
+		t.Fatalf("Delete = %v, want domainmedia.ErrNotFound", err)
+	}
+}
+
 func TestRepositoryDeleteReturnsDatabaseErrors(t *testing.T) {
 	db, mock := newMockRepo(t)
 	boom := errors.New("update failed")
@@ -125,21 +136,56 @@ func expectCount(mock sqlmock.Sqlmock, total int) {
 func TestRepositoryListAppliesSearchFiltersAndOrder(t *testing.T) {
 	db, mock := newMockRepo(t)
 	expectCount(mock, 41)
-	mock.ExpectQuery(`SELECT \* FROM "media" WHERE .*LOWER\(original_name\) LIKE LOWER\(.*owner_user_id = .*"media"."deleted_at" IS NULL ORDER BY size ASC,id ASC LIMIT .* OFFSET`).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "media" WHERE (LOWER("original_name") LIKE LOWER($1) ESCAPE '\') AND "content_type" = $2 AND "owner_user_id" = $3 AND "media"."deleted_at" IS NULL ORDER BY "size","id" LIMIT $4 OFFSET $5`)).
 		WillReturnRows(listRows())
 
-	items, total, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{
+	res, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{
 		Search: "cat", OwnerUserID: "u-1", ContentType: "image/png",
-		OrderBy: "size", OrderDirection: "asc", Page: 2, Limit: 20, Offset: 20,
+		OrderBy: "size", OrderDirection: "asc", Page: 2, Limit: 20,
 	})
 	if err != nil {
 		t.Fatalf("List = %v", err)
 	}
-	if total != 41 || len(items) != 1 || items[0].ID != "m-1" {
-		t.Fatalf("got total=%d items=%+v", total, items)
+	if res.Total != 41 || len(res.Items) != 1 || res.Items[0].ID != "m-1" || res.Limit != 20 {
+		t.Fatalf("got %+v", res)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The repository is the one place the page size is capped (gokit's
+// QueryOptions.MaxLimit) and it reports the limit it applied.
+func TestRepositoryListCapsTheLimitAndReportsIt(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{"within the cap", 50, 50},
+		{"the cap itself", 100, 100},
+		{"above the cap", 5000, 100},
+		{"minus one is not unbounded", -1, 100},
+		{"zero is the cap too", 0, 100},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db, mock := newMockRepo(t)
+			expectCount(mock, 500)
+			mock.ExpectQuery(`SELECT \* FROM "media" .* LIMIT \$\d+`).
+				WithArgs(c.want).
+				WillReturnRows(listRows())
+
+			res, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{Page: 1, Limit: c.limit})
+			if err != nil {
+				t.Fatalf("List = %v", err)
+			}
+			if res.Limit != c.want {
+				t.Fatalf("reported limit = %d, want %d", res.Limit, c.want)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -150,7 +196,7 @@ func TestRepositoryListFiltersByOwnerAndContentType(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(`SELECT \* FROM "media" WHERE`).WillReturnRows(listRows())
 
-	_, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OwnerUserID: "u-1", ContentType: "image/png", Limit: 20})
+	_, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OwnerUserID: "u-1", ContentType: "image/png", Limit: 20})
 	if err != nil {
 		t.Fatalf("List = %v", err)
 	}
@@ -164,9 +210,9 @@ func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) 
 		t.Run(orderBy, func(t *testing.T) {
 			db, mock := newMockRepo(t)
 			expectCount(mock, 1)
-			mock.ExpectQuery(`ORDER BY created_at DESC,id DESC LIMIT`).WillReturnRows(listRows())
+			mock.ExpectQuery(`ORDER BY "created_at" DESC,"id" DESC LIMIT`).WillReturnRows(listRows())
 
-			if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: orderBy, OrderDirection: "asc", Limit: 20}); err != nil {
+			if _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: orderBy, OrderDirection: "asc", Limit: 20}); err != nil {
 				t.Fatalf("List = %v", err)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
@@ -179,9 +225,9 @@ func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) 
 func TestRepositoryListFallsBackToDefaultOrderForBadDirection(t *testing.T) {
 	db, mock := newMockRepo(t)
 	expectCount(mock, 1)
-	mock.ExpectQuery(`ORDER BY created_at DESC,id DESC LIMIT`).WillReturnRows(listRows())
+	mock.ExpectQuery(`ORDER BY "created_at" DESC,"id" DESC LIMIT`).WillReturnRows(listRows())
 
-	if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: "size", OrderDirection: "sideways; DROP", Limit: 20}); err != nil {
+	if _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: "size", OrderDirection: "sideways; DROP", Limit: 20}); err != nil {
 		t.Fatalf("List = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -194,7 +240,7 @@ func TestRepositoryListReturnsDatabaseErrors(t *testing.T) {
 	boom := errors.New("count failed")
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "media"`)).WillReturnError(boom)
 
-	if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{Limit: 20}); !errors.Is(err, boom) {
+	if _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{Limit: 20}); !errors.Is(err, boom) {
 		t.Fatalf("List = %v, want the database error", err)
 	}
 }
@@ -205,10 +251,10 @@ func TestRepositoryListOrderByPinsTheTieBreaker(t *testing.T) {
 	cases := []struct {
 		name, orderBy, direction, want string
 	}{
-		{"default", "", "", `ORDER BY created_at DESC,id DESC LIMIT`},
-		{"explicit ascending", "size", "asc", `ORDER BY size ASC,id ASC LIMIT`},
-		{"explicit descending", "original_name", "DESC", `ORDER BY original_name DESC,id DESC LIMIT`},
-		{"column without direction", "size", "", `ORDER BY created_at DESC,id DESC LIMIT`},
+		{"default", "", "", `ORDER BY "created_at" DESC,"id" DESC LIMIT`},
+		{"explicit ascending", "size", "asc", `ORDER BY "size","id" LIMIT`},
+		{"explicit descending", "original_name", "DESC", `ORDER BY "original_name" DESC,"id" DESC LIMIT`},
+		{"column without direction", "size", "", `ORDER BY "created_at" DESC,"id" DESC LIMIT`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -216,7 +262,7 @@ func TestRepositoryListOrderByPinsTheTieBreaker(t *testing.T) {
 			expectCount(mock, 1)
 			mock.ExpectQuery(regexp.QuoteMeta(c.want)).WillReturnRows(listRows())
 
-			if _, _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: c.orderBy, OrderDirection: c.direction, Limit: 20}); err != nil {
+			if _, err := NewRepository(db).List(context.Background(), dtomedia.ListRequest{OrderBy: c.orderBy, OrderDirection: c.direction, Limit: 20}); err != nil {
 				t.Fatalf("List = %v", err)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {

@@ -23,7 +23,7 @@ import (
 // and its errors can quote it, so they are never returned or logged: failures
 // map to a fixed message.
 func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
-	logus.WriteLog(logus.LogLevelDebug, "database.Open; initialize db connection")
+	logus.Log(logus.LevelDebug, "database.Open; initialize db connection")
 
 	connCfg, err := pgx.ParseConfig(cfg.DSN(timezone))
 	if err != nil {
@@ -98,7 +98,7 @@ func urlNamesTimeZone(raw string) bool {
 }
 
 func failed(msg, logPrefix string) error {
-	logus.WriteLog(logus.LogLevelError, logPrefix+msg)
+	logus.Log(logus.LevelError, logPrefix+msg)
 	return errors.New(msg)
 }
 

@@ -30,7 +30,7 @@ func (a *App) Serve(ctx context.Context) error {
 			return a.closeAfter(fmt.Errorf("listen: %w", err))
 		}
 	}
-	logus.WriteLog(logus.LogLevelInfo, "Listening on "+ln.Addr().String())
+	logus.Log(logus.LevelInfo, "Listening on", ln.Addr())
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- a.server.Serve(ln) }()
@@ -44,7 +44,7 @@ func (a *App) Serve(ctx context.Context) error {
 	case <-ctx.Done():
 	}
 
-	logus.WriteLog(logus.LogLevelInfo, "Shutdown started")
+	logus.Log(logus.LevelInfo, "Shutdown started")
 	// One deadline for the whole shutdown: the HTTP drain, the lifecycle hooks
 	// and the final writes of the jobs they stop all end by it. The caller's
 	// ctx is already canceled; the limit is its own.
@@ -67,7 +67,7 @@ func (a *App) Serve(ctx context.Context) error {
 		err = errors.Join(err, closeErr)
 	}
 	if err == nil {
-		logus.WriteLog(logus.LogLevelInfo, "Shutdown complete")
+		logus.Log(logus.LevelInfo, "Shutdown complete")
 	}
 	return err
 }

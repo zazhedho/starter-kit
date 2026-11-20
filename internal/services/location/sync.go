@@ -38,7 +38,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	job, err := s.repo.GetSyncJobByID(jobCtx, jobID)
 	if err != nil {
 		s.markIfInterrupted(jobCtx, jobID)
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s: %v", jobID, err))
+		logus.Logf(logus.LevelError, "failed to load location sync job %s: %v", jobID, err)
 		return
 	}
 
@@ -49,14 +49,14 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	job.UpdatedAt = &startedAt
 	if err := s.repo.UpdateSyncJob(jobCtx, &job); err != nil {
 		s.markIfInterrupted(jobCtx, jobID)
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as running: %v", jobID, err))
+		logus.Logf(logus.LevelError, "failed to mark location sync job %s as running: %v", jobID, err)
 		return
 	}
 
 	result, err := s.sync(jobCtx, req, func(progress syncProgress) {
 		s.applySyncProgress(&job, progress)
 		if updateErr := s.repo.UpdateSyncJob(jobCtx, &job); updateErr != nil {
-			logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("failed to update location sync job progress %s: %v", job.ID, updateErr))
+			logus.Logf(logus.LevelWarn, "failed to update location sync job progress %s: %v", job.ID, updateErr)
 		}
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	// The job finished; record it even if shutdown began a moment ago.
 	ctx, cancel, ok := s.settleContext()
 	if !ok {
-		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location sync job %s finished after the shutdown deadline; its final state is not recorded", job.ID))
+		logus.Logf(logus.LevelWarn, "location sync job %s finished after the shutdown deadline; its final state is not recorded", job.ID)
 		return
 	}
 	defer cancel()
@@ -83,7 +83,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
 	if err := s.repo.UpdateSyncJob(ctx, &job); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as completed: %v", job.ID, err))
+		logus.Logf(logus.LevelError, "failed to mark location sync job %s as completed: %v", job.ID, err)
 	}
 }
 
@@ -100,13 +100,13 @@ func (s *Service) markSyncJobInterrupted(jobID string) {
 func (s *Service) finishFailed(jobID, message, errorMessage string) {
 	ctx, cancel, ok := s.settleContext()
 	if !ok {
-		logus.WriteLog(logus.LogLevelWarn, fmt.Sprintf("location sync job %s ended after the shutdown deadline; its final state is not recorded", jobID))
+		logus.Logf(logus.LevelWarn, "location sync job %s ended after the shutdown deadline; its final state is not recorded", jobID)
 		return
 	}
 	defer cancel()
 	job, err := s.repo.GetSyncJobByID(ctx, jobID)
 	if err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to load location sync job %s for failure update: %v", jobID, err))
+		logus.Logf(logus.LevelError, "failed to load location sync job %s for failure update: %v", jobID, err)
 		return
 	}
 
@@ -117,7 +117,7 @@ func (s *Service) finishFailed(jobID, message, errorMessage string) {
 	job.FinishedAt = &finishedAt
 	job.UpdatedAt = &finishedAt
 	if err := s.repo.UpdateSyncJob(ctx, &job); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to mark location sync job %s as failed: %v", job.ID, err))
+		logus.Logf(logus.LevelError, "failed to mark location sync job %s as failed: %v", job.ID, err)
 	}
 }
 

@@ -3,7 +3,6 @@ package location
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +14,8 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
+const msgSyncRunning = "Location sync is already running"
+
 type Handler struct {
 	service Service
 }
@@ -24,19 +25,19 @@ func New(s Service) *Handler {
 }
 
 func (h *Handler) GetProvince(ctx *gin.Context) {
-	logId := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[LocationHandler][GetProvince]"
 	reqCtx := ctx.Request.Context()
 
 	data, err := h.service.GetProvince(reqCtx)
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetProvince; Error: %+v", logPrefix, err))
-		res := gokit.InternalServerError(logId)
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.GetProvince; Error: %+v", logPrefix, err)
+		res := gokit.InternalServerError(logID)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
 
-	res := gokit.Response(http.StatusOK, "Get province successfully", logId, data)
+	res := gokit.Response(http.StatusOK, "Get province successfully", logID, data)
 	ctx.JSON(http.StatusOK, res)
 }
 
@@ -55,92 +56,86 @@ func (h *Handler) GetVillage(ctx *gin.Context) {
 // listByParent serves the lookups that need a parent code in the query string,
 // answering 400 when it is missing.
 func (h *Handler) listByParent(ctx *gin.Context, method, param, okMessage string, lookup func(context.Context, string) ([]dtolocation.Location, error)) {
-	logId := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[LocationHandler][" + method + "]"
 
 	code := ctx.Query(param)
 	if code == "" {
-		res := gokit.Response(http.StatusBadRequest, gokit.MsgInvalidRequest, logId, nil)
-		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: param + " is required"}
-		ctx.JSON(http.StatusBadRequest, res)
+		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, param+" is required"))
 		return
 	}
 
 	data, err := lookup(ctx.Request.Context(), code)
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.%s; Error: %+v", logPrefix, method, err))
-		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logId))
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.%s; Error: %+v", logPrefix, method, err)
+		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, okMessage, logId, data))
+	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, okMessage, logID, data))
 }
 
 func (h *Handler) Sync(ctx *gin.Context) {
-	logId := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[LocationHandler][Sync]"
 	reqCtx := ctx.Request.Context()
 
 	var req dtolocation.SyncRequest
-	if !gokit.BindJSON(ctx, logId, logPrefix, &req) {
+	if !gokit.BindJSON(ctx, logID, logPrefix, &req) {
 		return
 	}
 
 	data, err := h.service.StartSync(reqCtx, req, authkit.ScopeFrom(reqCtx).ActorUserID())
 	if err != nil {
 		if errors.Is(err, domainlocation.ErrSyncRunning) {
-			res := gokit.Response(http.StatusConflict, gokit.MsgSomethingWrong, logId, data)
-			res.Error = gokit.Errors{Code: http.StatusConflict, Message: err.Error()}
+			res := gokit.ErrorResponse(http.StatusConflict, msgSyncRunning, logID, msgSyncRunning)
+			res.Data = data // the job that is already running
 			ctx.JSON(http.StatusConflict, res)
 			return
 		}
 
 		if errors.Is(err, domainlocation.ErrInvalidSync) {
-			logus.WriteLogWithContext(ctx, logus.LogLevelDebug, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
-			res := gokit.Response(http.StatusBadRequest, gokit.MsgSomethingWrong, logId, nil)
-			res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: err.Error()}
-			ctx.JSON(http.StatusBadRequest, res)
+			logus.LogContextf(ctx, logus.LevelDebug, "%s; Service.StartSync; Error: %+v", logPrefix, err)
+			// The text of ErrInvalidSync errors is a fixed validation message
+			// (NewInvalidSync), written for the caller.
+			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, err.Error()))
 			return
 		}
 
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.StartSync; Error: %+v", logPrefix, err))
-		res := gokit.InternalServerError(logId)
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.StartSync; Error: %+v", logPrefix, err)
+		res := gokit.InternalServerError(logID)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
 
-	res := gokit.Response(http.StatusAccepted, "Location sync started", logId, data)
+	res := gokit.Response(http.StatusAccepted, "Location sync started", logID, data)
 	ctx.JSON(http.StatusAccepted, res)
 }
 
 func (h *Handler) GetSyncJob(ctx *gin.Context) {
-	logId := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[LocationHandler][GetSyncJob]"
 	reqCtx := ctx.Request.Context()
 
 	jobID := ctx.Param("id")
 	if jobID == "" {
-		res := gokit.Response(http.StatusBadRequest, gokit.MsgInvalidRequest, logId, nil)
-		res.Error = gokit.Errors{Code: http.StatusBadRequest, Message: "sync job id is required"}
-		ctx.JSON(http.StatusBadRequest, res)
+		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "sync job id is required"))
 		return
 	}
 
 	data, err := h.service.GetSyncJob(reqCtx, jobID)
 	if err != nil {
 		if errors.Is(err, domainlocation.ErrNotFound) {
-			res := gokit.Response(http.StatusNotFound, gokit.MsgNotFound, logId, nil)
-			res.Error = gokit.Errors{Code: http.StatusNotFound, Message: "location sync job not found"}
-			ctx.JSON(http.StatusNotFound, res)
+			ctx.JSON(http.StatusNotFound, gokit.ErrorResponse(http.StatusNotFound, gokit.MsgNotFound, logID, "location sync job not found"))
 			return
 		}
 
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.GetSyncJob; Error: %+v", logPrefix, err))
-		res := gokit.InternalServerError(logId)
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.GetSyncJob; Error: %+v", logPrefix, err)
+		res := gokit.InternalServerError(logID)
 		ctx.JSON(http.StatusInternalServerError, res)
 		return
 	}
 
-	res := gokit.Response(http.StatusOK, "Get location sync job successfully", logId, data)
+	res := gokit.Response(http.StatusOK, "Get location sync job successfully", logID, data)
 	ctx.JSON(http.StatusOK, res)
 }

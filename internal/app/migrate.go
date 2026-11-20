@@ -25,7 +25,7 @@ func (a *App) Migrate(ctx context.Context) error {
 	if err := migrateProject(ctx, a.sqlDB, a.cfg.Migrate.Path); err != nil {
 		return fmt.Errorf("project migrations: %w", err)
 	}
-	logus.WriteLog(logus.LogLevelInfo, "Migration Success")
+	logus.Log(logus.LevelInfo, "Migration Success")
 	return nil
 }
 

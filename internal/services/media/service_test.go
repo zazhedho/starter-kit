@@ -34,13 +34,13 @@ type mediaRepoMock struct {
 	listErr   error
 }
 
-func (m *mediaRepoMock) List(_ context.Context, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+func (m *mediaRepoMock) List(_ context.Context, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	m.listed = req
-	return m.listItems, m.listTotal, m.listErr
+	return dtomedia.ListResult{Items: m.listItems, Total: m.listTotal, Limit: 20}, m.listErr
 }
 
-func (m *mediaRepoMock) Store(_ context.Context, media domainmedia.Media) error {
-	m.stored = media
+func (m *mediaRepoMock) Store(_ context.Context, media *domainmedia.Media) error {
+	m.stored = *media
 	return m.storeErr
 }
 
@@ -260,18 +260,18 @@ func TestListOwnOnlyWithoutListAny(t *testing.T) {
 	repo := &mediaRepoMock{listItems: []domainmedia.Media{{ID: "m-1"}}, listTotal: 1}
 	service := NewService(repo, &mediaStorageMock{}, Options{})
 
-	items, total, err := service.List(context.Background(), domainmedia.Actor{UserID: " " + me + " ", CanDeleteAny: true}, dtomedia.ListRequest{OwnerUserID: other, Search: "cat"})
+	result, err := service.List(context.Background(), domainmedia.Actor{UserID: " " + me + " ", CanDeleteAny: true}, dtomedia.ListRequest{OwnerUserID: other, Search: "cat"})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if repo.listed.OwnerUserID != me {
 		t.Fatalf("owner filter is %q, want the caller %q", repo.listed.OwnerUserID, me)
 	}
-	if repo.listed.Search != "cat" || len(items) != 1 || total != 1 {
-		t.Fatalf("other fields must pass through: %+v items=%d total=%d", repo.listed, len(items), total)
+	if repo.listed.Search != "cat" || len(result.Items) != 1 || result.Total != 1 || result.Limit != 20 {
+		t.Fatalf("other fields must pass through: %+v result=%+v", repo.listed, result)
 	}
 
-	if _, _, err := service.List(context.Background(), domainmedia.Actor{UserID: me}, dtomedia.ListRequest{}); err != nil || repo.listed.OwnerUserID != me {
+	if _, err := service.List(context.Background(), domainmedia.Actor{UserID: me}, dtomedia.ListRequest{}); err != nil || repo.listed.OwnerUserID != me {
 		t.Fatalf("an empty filter must also be forced to the caller, got %q err %v", repo.listed.OwnerUserID, err)
 	}
 }
@@ -282,14 +282,14 @@ func TestListAnyHonorsOwnerFilter(t *testing.T) {
 	service := NewService(repo, &mediaStorageMock{}, Options{})
 	actor := domainmedia.Actor{UserID: uuid.NewString(), CanListAny: true}
 
-	if _, _, err := service.List(context.Background(), actor, dtomedia.ListRequest{OwnerUserID: other}); err != nil {
+	if _, err := service.List(context.Background(), actor, dtomedia.ListRequest{OwnerUserID: other}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if repo.listed.OwnerUserID != other {
 		t.Fatalf("owner filter is %q, want %q", repo.listed.OwnerUserID, other)
 	}
 
-	if _, _, err := service.List(context.Background(), actor, dtomedia.ListRequest{}); err != nil || repo.listed.OwnerUserID != "" {
+	if _, err := service.List(context.Background(), actor, dtomedia.ListRequest{}); err != nil || repo.listed.OwnerUserID != "" {
 		t.Fatalf("list_any without a filter must stay unfiltered, got %q err %v", repo.listed.OwnerUserID, err)
 	}
 }
@@ -297,7 +297,7 @@ func TestListAnyHonorsOwnerFilter(t *testing.T) {
 func TestListReturnsRepositoryErrors(t *testing.T) {
 	boom := errors.New("db down")
 	service := NewService(&mediaRepoMock{listErr: boom}, &mediaStorageMock{}, Options{})
-	if _, _, err := service.List(context.Background(), domainmedia.Actor{UserID: uuid.NewString()}, dtomedia.ListRequest{}); !errors.Is(err, boom) {
+	if _, err := service.List(context.Background(), domainmedia.Actor{UserID: uuid.NewString()}, dtomedia.ListRequest{}); !errors.Is(err, boom) {
 		t.Fatalf("got %v, want the repository error", err)
 	}
 }

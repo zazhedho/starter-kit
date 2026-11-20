@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,10 +25,16 @@ const remoteConfigCacheKey = "cache:config:app"
 // is logged and ignored. Call once, before FromEnv.
 func LoadRemote() {
 	confID := getAppConf("CONFIG_ID", "", nil)
-	logus.WriteLog(logus.LogLevelDebug, fmt.Sprintf("ConfigID: %v", confID))
+	logus.Logf(logus.LevelDebug, "ConfigID: %v", confID)
 }
 
-func getAppConf(key string, def any, rdbCache *redis.Client) any {
+// normalizeKey trims and lower-cases a setting name or enum-like value.
+func normalizeKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
+
+// normalizeUpperKey trims and upper-cases a setting name from the remote source.
+func normalizeUpperKey(value string) string { return strings.ToUpper(strings.TrimSpace(value)) }
+
+func getAppConf(key string, def string, rdbCache *redis.Client) any {
 	cacheKey := remoteConfigCacheKey
 	var appConf map[string]string
 	var cache, getNewConfig bool
@@ -44,14 +51,14 @@ func getAppConf(key string, def any, rdbCache *redis.Client) any {
 
 func loadConsulConfig(consul string, client *redis.Client, cacheKey string) (map[string]string, bool, bool) {
 	appConf := make(map[string]string)
-	cache := gokit.NormalizeKey(gokit.GetEnv("CACHE", "")) == "on" && client != nil
+	cache := normalizeKey(gokit.GetEnv("CACHE", "")) == "on" && client != nil
 	getNewConfig := !cache
 
 	if cache {
 		cachedConfig, err := client.Get(context.Background(), cacheKey).Result()
 		if err == nil {
 			if err := json.Unmarshal([]byte(cachedConfig), &appConf); err != nil {
-				logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Unmarshal conf from cache; %s; error: %+v;", cachedConfig, err))
+				logus.Logf(logus.LevelError, "utils.GetAppConf; Unmarshal conf from cache; %s; error: %+v;", cachedConfig, err)
 				getNewConfig = true
 			}
 		} else if errors.Is(err, redis.Nil) {
@@ -69,13 +76,13 @@ func loadConsulRemoteConfig(consul string, appConf map[string]string) {
 	consulPath := fmt.Sprintf("%s/%s", gokit.GetEnv("CONSUL_PATH", ""), gokit.GetEnv("APP_ENV", ""))
 	runtimeViper := viper.New()
 	if err := runtimeViper.AddRemoteProvider("consul", consul, consulPath); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err))
+		logus.Logf(logus.LevelError, "utils.GetAppConf; AddRemoteProvider: %s/%s; error: %+v;", consul, consulPath, err)
 	}
 	runtimeViper.SetConfigType("json")
 	if err := runtimeViper.ReadRemoteConfig(); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s/%s; error: %+v;", consul, consulPath, err))
+		logus.Logf(logus.LevelError, "utils.GetAppConf; Loading config: %s/%s; error: %+v;", consul, consulPath, err)
 	} else if err := runtimeViper.Unmarshal(&appConf); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading congif: %s/%s; error: unable to decode into map, %+v;", consul, consulPath, err))
+		logus.Logf(logus.LevelError, "utils.GetAppConf; Loading congif: %s/%s; error: unable to decode into map, %+v;", consul, consulPath, err)
 	}
 }
 
@@ -92,7 +99,7 @@ func loadFileConfig() map[string]string {
 	viper.SetConfigType("env")
 	viper.SetConfigName(configName)
 	if err := viper.ReadInConfig(); err != nil {
-		logus.WriteLog(logus.LogLevelError, fmt.Sprintf("utils.GetAppConf; Loading config: %s - %s.env; error:  %+v;", pathConfig, configName, err))
+		logus.Logf(logus.LevelError, "utils.GetAppConf; Loading config: %s - %s.env; error:  %+v;", pathConfig, configName, err)
 	} else {
 		_ = viper.Unmarshal(&appConf)
 	}
@@ -108,8 +115,8 @@ func applyAppConfig(appConf map[string]string, cache, getNewConfig bool, client 
 	}
 	if appConf["config_id"] != gokit.GetEnv("CONFIG_ID", "") {
 		for key, value := range appConf {
-			if err := os.Setenv(gokit.NormalizeUpperKey(key), value); err != nil {
-				logus.WriteLog(logus.LogLevelError, fmt.Sprintf("failed to set app config %s: %v", key, err))
+			if err := os.Setenv(normalizeUpperKey(key), value); err != nil {
+				logus.Logf(logus.LevelError, "failed to set app config %s: %v", key, err)
 			}
 		}
 	}

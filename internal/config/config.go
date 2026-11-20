@@ -23,6 +23,10 @@ type Config struct {
 	Auth     authkit.Config // from authkit.ConfigFromEnv(); DB, Redis and Mailer are filled in later by the app
 
 	SMTP SMTP
+
+	// authErr is the error of authkit.ConfigFromEnv: it names unparsable
+	// authkit variables, never their values. Validate reports it.
+	authErr error
 }
 
 // SMTP is the mail setting for OTP and password-reset emails. Empty means the

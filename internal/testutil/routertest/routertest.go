@@ -116,7 +116,9 @@ func SortedKeys(set map[string]bool) []string {
 func AuthkitRoutes(t *testing.T, d module.Deps) map[string]bool {
 	t.Helper()
 	engine := gin.New()
-	d.Kit.Mount(engine.Group("/api"))
+	if err := d.Kit.Mount(engine.Group("/api")); err != nil {
+		t.Fatalf("mount authkit: %v", err)
+	}
 	return RouteSet(engine)
 }
 

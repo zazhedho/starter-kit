@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/zazhedho/authkit"
 
 	"starter-kit/internal/config"
@@ -95,9 +97,37 @@ func mediaDeps(t *testing.T) module.Deps {
 	return d
 }
 
+const (
+	testUserID = "11111111-1111-1111-1111-111111111111"
+	testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"
+)
+
+// authedDeps is mediaDeps over a database that answers what authkit's Auth
+// asks for each request (authkit checks the live user): the blacklist lookup
+// finds nothing and the user exists with the viewer role. Statements are
+// matched in order, so a query a route should not make fails the test.
+func authedDeps(t *testing.T) (module.Deps, sqlmock.Sqlmock) {
+	t.Helper()
+	d := mediaDeps(t)
+	db, mock := routertest.NewExecDB(t)
+	kit, err := authkit.New(authkit.Config{DB: db, AppName: "starter-kit-test", JWTKey: testJWTKey})
+	if err != nil {
+		t.Fatalf("authkit.New: %v", err)
+	}
+	d.DB, d.Kit = db, kit
+	expectAuth(mock)
+	return d, mock
+}
+
+// expectAuth queues the two queries Auth makes for a signed-in viewer.
+func expectAuth(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`FROM "blacklist"`).WillReturnRows(sqlmock.NewRows([]string{"?column?"}))
+	mock.ExpectQuery(`FROM "users"`).WillReturnRows(sqlmock.NewRows([]string{"role", "tokens_valid_after"}).AddRow("viewer", nil))
+}
+
 func uploadRequest(t *testing.T, d module.Deps, fileSize int) *http.Request {
 	t.Helper()
-	token, err := d.Kit.IssueAccessToken("11111111-1111-1111-1111-111111111111", "", "viewer")
+	token, err := d.Kit.IssueAccessToken(testUserID, "", "viewer")
 	if err != nil {
 		t.Fatalf("token: %v", err)
 	}
@@ -122,7 +152,8 @@ func uploadRequest(t *testing.T, d module.Deps, fileSize int) *http.Request {
 }
 
 func TestMediaUploadAtMaxSizeIsAccepted(t *testing.T) {
-	d := mediaDeps(t)
+	d, mock := authedDeps(t)
+	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	engine := engineFor(t, d)
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, uploadRequest(t, d, 64<<10))
@@ -144,7 +175,8 @@ func (r *deadlineRecorder) SetReadDeadline(t time.Time) error {
 }
 
 func TestMediaUploadExtendsReadDeadline(t *testing.T) {
-	d := mediaDeps(t)
+	d, mock := authedDeps(t)
+	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	d.Config.Media.UploadTimeout = 90 * time.Second
 	engine := engineFor(t, d)
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -157,26 +189,20 @@ func TestMediaUploadExtendsReadDeadline(t *testing.T) {
 	}
 }
 
-// With Auth passing and no such user in the database, LoadPermissions answers
-// 403 before the handler runs; a route without it would reach the service. The
-// user lookup is asserted too, so the 403 cannot come from anywhere else.
+// With Auth passing and the permission lookup finding no such user,
+// LoadPermissions answers 403 before the handler runs; a route without it would
+// reach the service. Auth's own queries are asserted too, so the 403 cannot come
+// from anywhere else.
 func TestMediaListAndDeleteLoadPermissionsAfterAuth(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{http.MethodGet, "/api/media"},
 		{http.MethodDelete, "/api/media/22222222-2222-2222-2222-222222222222"},
 	} {
 		t.Run(c.method+" "+c.path, func(t *testing.T) {
-			d := mediaDeps(t)
-			db, mock := routertest.NewExecDB(t)
-			kit, err := authkit.New(authkit.Config{DB: db, AppName: "starter-kit-test", JWTKey: "test-jwt-key-that-is-at-least-32-characters-long"})
-			if err != nil {
-				t.Fatalf("authkit.New: %v", err)
-			}
-			d.DB, d.Kit = db, kit
-			mock.ExpectQuery(`FROM "blacklist"`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			d, mock := authedDeps(t)
 			mock.ExpectQuery(`FROM "users"`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-			token, err := kit.IssueAccessToken("11111111-1111-1111-1111-111111111111", "", "viewer")
+			token, err := d.Kit.IssueAccessToken(testUserID, "", "viewer")
 			if err != nil {
 				t.Fatalf("token: %v", err)
 			}
@@ -195,11 +221,58 @@ func TestMediaListAndDeleteLoadPermissionsAfterAuth(t *testing.T) {
 	}
 }
 
+// The mock has no permission query queued: an upload that loaded permissions
+// would fail on the unexpected statement instead of reaching the insert.
 func TestMediaUploadSkipsLoadPermissions(t *testing.T) {
-	d := mediaDeps(t)
+	d, mock := authedDeps(t)
+	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	rec := httptest.NewRecorder()
 	engineFor(t, d).ServeHTTP(rec, uploadRequest(t, d, 1024))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload must not need a permission lookup, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gokit's IPRateLimit panics when Limit or Window is not positive. Config
+// rejects such values; without Redis the limiter is not built at all.
+func TestMediaWithoutRedisSkipsTheUploadLimiter(t *testing.T) {
+	d := routertest.NewDeps(t, func(c *config.Config) {
+		c.Media.Enabled = true
+		c.Media.UploadRateLimit = 0
+		c.Media.UploadRateWindow = 0
+	})
+	d.Storage = routertest.FakeStorage{}
+	d.Redis = nil
+	engineFor(t, d) // must not panic
+}
+
+func TestMediaWithRedisBuildsTheUploadLimiter(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	d, mock := authedDeps(t)
+	d.Redis = client
+	d.Config.Media.UploadRateLimit = 1
+	d.Config.Media.UploadRateWindow = time.Minute
+	engine := engineFor(t, d)
+
+	// First upload passes the limiter; the second is counted over the limit
+	// and answered 429 before the handler (no further database query).
+	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	first := httptest.NewRecorder()
+	engine.ServeHTTP(first, uploadRequest(t, d, 1024))
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first upload = %d: %s", first.Code, first.Body.String())
+	}
+
+	expectAuth(mock)
+	second := httptest.NewRecorder()
+	engine.ServeHTTP(second, uploadRequest(t, d, 1024))
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("second upload = %d, want 429: %s", second.Code, second.Body.String())
 	}
 }

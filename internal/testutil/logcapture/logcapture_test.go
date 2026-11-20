@@ -19,9 +19,9 @@ func TestMain(m *testing.M) {
 }
 
 func TestSinceReturnsOnlyWhatWasLoggedAfterTheMark(t *testing.T) {
-	logus.WriteLog(logus.LogLevelError, "before-mark")
+	logus.Log(logus.LevelError, "before-mark")
 	mark := capture.Mark()
-	logus.WriteLog(logus.LogLevelError, "after-mark-logus")
+	logus.Log(logus.LevelError, "after-mark-logus")
 	log.Print("after-mark-stdlib")
 	got := capture.Since(mark)
 
@@ -35,8 +35,9 @@ func TestSinceReturnsOnlyWhatWasLoggedAfterTheMark(t *testing.T) {
 	}
 }
 
-func TestStdoutIsRestoredForTheTestBinary(t *testing.T) {
+// Start redirects logus through SetOutput; it never swaps os.Stdout.
+func TestStdoutIsLeftAlone(t *testing.T) {
 	if os.Stdout == capture.w {
-		t.Fatal("os.Stdout still points at the capture pipe")
+		t.Fatal("os.Stdout points at the capture pipe")
 	}
 }

@@ -41,9 +41,11 @@ func New(d module.Deps) (*gin.Engine, error) {
 
 	engine := gin.New()
 
-	engine.Use(gokit.CORS())
-	engine.Use(gin.CustomRecovery(gokit.ErrorHandler))
-	engine.Use(gokit.SetContextId())
+	// The request id comes first: recovery, the limiters and every handler then
+	// log and answer with one log_id per request.
+	engine.Use(gokit.RequestIDMiddleware())
+	engine.Use(gokit.Recovery())
+	engine.Use(gokit.CORS(gokit.CORSOptions{})) // open by default: any origin, no credentials
 	engine.Use(authkit.RequestLogger())
 	engine.Use(bodyLimit(d.Config.HTTP.MaxBodyBytes))
 
@@ -52,7 +54,9 @@ func New(d module.Deps) (*gin.Engine, error) {
 	}
 
 	api := engine.Group("/api")
-	d.Kit.Mount(api)
+	if err := d.Kit.Mount(api); err != nil {
+		return nil, fmt.Errorf("mount authkit routes: %w", err)
+	}
 	for _, m := range modules {
 		if err := m.Register(api, d); err != nil {
 			return nil, fmt.Errorf("register %s routes: %w", m.Name, err)

@@ -256,7 +256,7 @@ func jsonEqual(t *testing.T, a, b []byte) bool {
 
 func TestLocationSyncValidationErrorIsLoggedAtDebug(t *testing.T) {
 	prev := logus.GetLevel()
-	logus.SetLevel(logus.LogLevelDebug)
+	logus.SetLevel(logus.LevelDebug)
 	t.Cleanup(func() { logus.SetLevel(prev) })
 	handler := New(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("province_code is required for city sync")})
 	mark := logs.Mark()
@@ -265,5 +265,90 @@ func TestLocationSyncValidationErrorIsLoggedAtDebug(t *testing.T) {
 	out := logs.Since(mark)
 	if !strings.Contains(out, "province_code is required for city sync") || !strings.Contains(out, `"level":"DEBUG"`) {
 		t.Fatalf("expected a debug log line with the validation error, got:\n%s", out)
+	}
+}
+
+// envelope is the wire shape every handler answers with: error is always a
+// list of {field, code, message}, and message is the handler's fixed text.
+type envelope struct {
+	LogID   uuid.UUID       `json:"log_id"`
+	Code    int             `json:"code"`
+	Status  bool            `json:"status"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
+	Error   []struct {
+		Field   string `json:"field"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) envelope {
+	t.Helper()
+	var res envelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("not an envelope: %v: %s", err, rec.Body.String())
+	}
+	if res.LogID == uuid.Nil || res.Code != rec.Code {
+		t.Fatalf("log_id %v code %d, want a log id and code %d: %s", res.LogID, res.Code, rec.Code, rec.Body.String())
+	}
+	return res
+}
+
+func TestLocationErrorsUseTheErrorListEnvelope(t *testing.T) {
+	cases := []struct {
+		name        string
+		service     *locationServiceTestDouble
+		method      string
+		route, path string
+		call        func(*Handler) gin.HandlerFunc
+		body        any
+		status      int
+		message     string
+		detail      string
+		wantData    bool
+	}{
+		{"missing parent code", &locationServiceTestDouble{}, http.MethodGet, "/city", "/city",
+			func(h *Handler) gin.HandlerFunc { return h.GetCity }, nil,
+			http.StatusBadRequest, gokit.MsgInvalidRequest, "province_code is required", false},
+		{"sync already running", &locationServiceTestDouble{err: domainlocation.ErrSyncRunning, job: dtolocation.SyncJob{ID: "job-1"}}, http.MethodPost, "/sync", "/sync",
+			func(h *Handler) gin.HandlerFunc { return h.Sync }, dtolocation.SyncRequest{Level: "province"},
+			http.StatusConflict, msgSyncRunning, msgSyncRunning, true},
+		{"invalid sync", &locationServiceTestDouble{err: domainlocation.NewInvalidSync("invalid sync level")}, http.MethodPost, "/sync", "/sync",
+			func(h *Handler) gin.HandlerFunc { return h.Sync }, dtolocation.SyncRequest{Level: "province"},
+			http.StatusBadRequest, gokit.MsgInvalidRequest, "invalid sync level", false},
+		{"unknown job", &locationServiceTestDouble{err: domainlocation.ErrNotFound}, http.MethodGet, "/sync/:id", "/sync/job-1",
+			func(h *Handler) gin.HandlerFunc { return h.GetSyncJob }, nil,
+			http.StatusNotFound, gokit.MsgNotFound, "location sync job not found", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := performLocationRequest(c.method, c.route, c.path, c.body, c.call(New(c.service)), nil)
+			if rec.Code != c.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.status, rec.Body.String())
+			}
+			res := decodeEnvelope(t, rec)
+			if res.Status || res.Message != c.message {
+				t.Fatalf("status %v message %q, want false and %q", res.Status, res.Message, c.message)
+			}
+			if len(res.Error) != 1 || res.Error[0].Message != c.detail || res.Error[0].Code == "" {
+				t.Fatalf("error = %+v, want one entry %q with a code", res.Error, c.detail)
+			}
+			if hasData := len(res.Data) > 0 && string(res.Data) != "null"; hasData != c.wantData {
+				t.Fatalf("data = %s, want present=%v", res.Data, c.wantData)
+			}
+		})
+	}
+}
+
+// A nil result list is sent as [], never null.
+func TestLocationEmptyListIsAnEmptyArray(t *testing.T) {
+	handler := New(&locationServiceTestDouble{})
+	rec := performLocationRequest(http.MethodGet, "/province", "/province", nil, handler.GetProvince, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if res := decodeEnvelope(t, rec); !res.Status || strings.TrimSpace(string(res.Data)) != "[]" || len(res.Error) != 0 {
+		t.Fatalf("got %s, want status true, data [] and no error", rec.Body.String())
 	}
 }

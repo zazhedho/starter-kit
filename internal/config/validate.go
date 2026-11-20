@@ -19,6 +19,9 @@ func (c Config) Validate() error {
 	if err := gokit.EnvErrors(); err != nil {
 		problems = append(problems, strings.ReplaceAll(err.Error(), "\n", "; "))
 	}
+	if c.authErr != nil {
+		problems = append(problems, strings.ReplaceAll(c.authErr.Error(), "\n", "; "))
+	}
 	problems = append(problems, c.validatePort()...)
 	problems = append(problems, c.validateApp()...)
 	problems = append(problems, c.validateHTTP()...)

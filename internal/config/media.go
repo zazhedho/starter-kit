@@ -46,7 +46,7 @@ func mediaFromEnv() (Media, Storage) {
 		UploadTimeout:       gokit.GetEnv("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
 	}
 	storage := Storage{
-		Provider:    gokit.NormalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio")),
+		Provider:    normalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio")),
 		Endpoint:    gokit.GetEnv("STORAGE_ENDPOINT", ""),
 		AccessKey:   gokit.GetEnv("STORAGE_ACCESS_KEY", ""),
 		SecretKey:   gokit.GetEnv("STORAGE_SECRET_KEY", ""),

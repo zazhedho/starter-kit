@@ -25,6 +25,9 @@ var managedEnv = []string{
 	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT",
 	"STORAGE_PROVIDER", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME",
 	"STORAGE_BASE_URL", "STORAGE_REGION", "STORAGE_USE_SSL", "R2_ACCOUNT_ID",
+	// authkit's own variables, read by authkit.ConfigFromEnv.
+	"JWT_EXP", "JWT_EXP_MINUTES", "SESSION_MAX_LIFETIME_HOURS", "AUTH_RATE_LIMIT", "AUTH_RATE_WINDOW_SECONDS",
+	"LIMITER_FAIL_CLOSED", "LOGIN_WITH_PHONE",
 }
 
 // clearEnv unsets every variable the config reads; t.Setenv registers the
@@ -542,5 +545,50 @@ func TestDatabaseDSNRoundTripsAwkwardValues(t *testing.T) {
 			cfg.Port != 5433 || cfg.Database != "my db" || cfg.RuntimeParams["TimeZone"] != "Asia/Jakarta" {
 			t.Errorf("password %q: parsed back as %+v", password, cfg)
 		}
+	}
+}
+
+// authkit.ConfigFromEnv reports unparsable authkit variables by name; Validate
+// folds that error in with the rest, so the service refuses to start on it.
+func TestValidateReportsAuthkitEnvironmentErrors(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("AUTH_RATE_LIMIT", "lots")
+	t.Setenv("LOGIN_WITH_PHONE", "maybe")
+
+	err := validateFromEnv(t)
+	wantInError(t, err, "AUTH_RATE_LIMIT must be a valid integer", "LOGIN_WITH_PHONE must be a valid boolean")
+	if strings.Contains(err.Error(), "lots") || strings.Contains(err.Error(), "maybe") {
+		t.Fatalf("error echoes a value: %v", err)
+	}
+}
+
+func TestFromEnvReadsTheNewAuthkitVariables(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("JWT_EXP_MINUTES", "20")
+	t.Setenv("SESSION_MAX_LIFETIME_HOURS", "48")
+	t.Setenv("AUTH_RATE_LIMIT", "7")
+	t.Setenv("AUTH_RATE_WINDOW_SECONDS", "90")
+	t.Setenv("LIMITER_FAIL_CLOSED", "true")
+	t.Setenv("LOGIN_WITH_PHONE", "true")
+
+	cfg := FromEnv()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate = %v", err)
+	}
+	a := cfg.Auth
+	if a.AccessTokenTTL != 20*time.Minute || a.SessionMaxLifetime != 48*time.Hour ||
+		a.AuthRate.Limit != 7 || a.AuthRate.Window != 90*time.Second || !a.FailClosedLimiters || !a.PhoneLogin {
+		t.Fatalf("authkit config not read from the environment: %+v", a)
+	}
+}
+
+func TestNormalizeKey(t *testing.T) {
+	if got := normalizeKey("  R2 "); got != "r2" {
+		t.Fatalf("normalizeKey = %q", got)
+	}
+	if got := normalizeUpperKey(" db_host\t"); got != "DB_HOST" {
+		t.Fatalf("normalizeUpperKey = %q", got)
 	}
 }

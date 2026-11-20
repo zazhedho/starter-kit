@@ -327,6 +327,38 @@ func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	}
 }
 
+// authkit.Kit.Close is registered as the first lifecycle hook, so it runs after
+// every module hook (the hooks run in reverse order), after the HTTP server has
+// drained (Serve runs the hooks only then) and before Redis and the database
+// close (closeBy does those last).
+func TestNewRegistersAuthkitCloseOnTheLifecycle(t *testing.T) {
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), testConfig(), deps{openDB: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close() }()
+	if got := a.lifecycle.Len(); got != 1 {
+		t.Fatalf("lifecycle has %d hooks after New, want authkit's alone", got)
+	}
+
+	var order []string
+	a.lifecycle.OnClose("module", func(context.Context) error {
+		order = append(order, "module")
+		return nil
+	})
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if len(order) != 1 || order[0] != "module" {
+		t.Fatalf("module hook order = %v", order)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A hook that never finishes must not block Close forever; connections are still released.
 func TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout(t *testing.T) {
 	cfg := testConfig()
@@ -800,12 +832,12 @@ func TestMigrateProjectBadSourceDoesNotLeak(t *testing.T) {
 }
 
 func TestSetServerIPEnv(t *testing.T) {
-	t.Setenv("ServerIP", "")
+	t.Setenv("SERVER_IP", "")
 	if err := setServerIPEnv(); err != nil {
 		t.Fatal(err)
 	}
-	if os.Getenv("ServerIP") == "" {
-		t.Fatal("ServerIP was not set")
+	if os.Getenv("SERVER_IP") == "" {
+		t.Fatal("SERVER_IP was not set")
 	}
 }
 

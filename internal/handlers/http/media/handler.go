@@ -3,7 +3,6 @@ package media
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 const (
 	multipartOverhead = int64(1 << 20)
 	defaultListLimit  = 20
-	maxListLimit      = 100
 )
 
 // listFilters are the filters[...] keys read into typed fields below. Which
@@ -43,13 +41,13 @@ func New(service Service, auditService authkit.AuditService, uploadTimeout time.
 }
 
 func (h *Handler) Upload(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[MediaHandler][Upload]"
 	// Uploads may need longer than the server-wide read timeout.
 	if h.uploadTimeout > 0 {
 		rc := http.NewResponseController(ctx.Writer)
 		if err := rc.SetReadDeadline(time.Now().Add(h.uploadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; SetReadDeadline; Error: %v", logPrefix, err))
+			logus.LogContextf(ctx, logus.LevelWarn, "%s; SetReadDeadline; Error: %v", logPrefix, err)
 		}
 	}
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, h.service.MaxFileSize()+multipartOverhead)
@@ -62,13 +60,13 @@ func (h *Handler) Upload(ctx *gin.Context) {
 			statusCode = http.StatusRequestEntityTooLarge
 			message = domainmedia.ErrFileTooLarge.Error()
 		}
-		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; FormFile; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgInvalidRequest, logID, message))
+		logus.LogContextf(ctx, logus.LevelWarn, "%s; FormFile; Error: %v", logPrefix, err)
+		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, mediaMessage(statusCode), logID, message))
 		return
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; CloseFile; Error: %v", logPrefix, closeErr))
+			logus.LogContextf(ctx, logus.LevelWarn, "%s; CloseFile; Error: %v", logPrefix, closeErr)
 		}
 	}()
 
@@ -88,8 +86,8 @@ func (h *Handler) Upload(ctx *gin.Context) {
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Upload; Error: %v", logPrefix, err))
-		writeMediaError(ctx, logID, statusCode, gokit.MsgInvalidRequest, publicError)
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.Upload; Error: %v", logPrefix, err)
+		writeMediaError(ctx, logID, statusCode, publicError)
 		return
 	}
 
@@ -105,18 +103,15 @@ func (h *Handler) Upload(ctx *gin.Context) {
 }
 
 func (h *Handler) List(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[MediaHandler][List]"
 
 	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "", "", defaultListLimit)
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; GetBaseParams; Error: %v", logPrefix, err))
+		logus.LogContextf(ctx, logus.LevelWarn, "%s; GetBaseParams; Error: %v", logPrefix, err)
 		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "invalid query parameters"))
 		return
 	}
-
-	params.Limit = clampLimit(params.Limit)
-	params.Offset = (params.Page - 1) * params.Limit
 
 	filters := gokit.WhitelistStringFilter(params.Filters, listFilters)
 	ownerID, _ := filters["owner_user_id"].(string)
@@ -131,7 +126,7 @@ func (h *Handler) List(ctx *gin.Context) {
 		}
 	}
 
-	data, total, err := h.service.List(ctx.Request.Context(), actor, dtomedia.ListRequest{
+	result, err := h.service.List(ctx.Request.Context(), actor, dtomedia.ListRequest{
 		Search:         params.Search,
 		OwnerUserID:    ownerID,
 		ContentType:    contentType,
@@ -139,32 +134,20 @@ func (h *Handler) List(ctx *gin.Context) {
 		OrderDirection: params.OrderDirection,
 		Page:           params.Page,
 		Limit:          params.Limit,
-		Offset:         params.Offset,
 	})
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.List; Error: %v", logPrefix, err))
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.List; Error: %v", logPrefix, err)
 		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
 		return
 	}
-	if data == nil {
-		data = []domainmedia.Media{} // data is [] for an empty page, never null
-	}
 
-	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, data))
-}
-
-// clampLimit bounds a user-facing list: gokit passes -1 (no limit) through
-// and accepts up to 10000, so anything below 1 becomes the default and
-// anything above maxListLimit becomes the maximum.
-func clampLimit(limit int) int {
-	if limit < 1 {
-		return defaultListLimit
-	}
-	return min(limit, maxListLimit)
+	// The repository clamps the limit (gokit QueryOptions.MaxLimit) and reports
+	// the one it applied; nil items serialize as [].
+	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, result.Total, params.Page, result.Limit, logID, result.Items))
 }
 
 func (h *Handler) Delete(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[MediaHandler][Delete]"
 	id, err := gokit.ValidateUUIDParam(ctx, logID)
 	if err != nil {
@@ -183,8 +166,8 @@ func (h *Handler) Delete(ctx *gin.Context) {
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %v", logPrefix, err))
-		writeMediaError(ctx, logID, statusCode, gokit.MsgSomethingWrong, publicError)
+		logus.LogContextf(ctx, logus.LevelError, "%s; Service.Delete; Error: %v", logPrefix, err)
+		writeMediaError(ctx, logID, statusCode, publicError)
 		return
 	}
 
@@ -211,13 +194,25 @@ func actorFrom(ctx context.Context) domainmedia.Actor {
 }
 
 // writeMediaError answers with the standard 500 body for a plain server error
-// and with the mapped status and message otherwise.
-func writeMediaError(ctx *gin.Context, logID uuid.UUID, statusCode int, msg, publicError string) {
+// and with the mapped status otherwise. The envelope message is a fixed text
+// for the status; publicError is the caller-safe detail.
+func writeMediaError(ctx *gin.Context, logID uuid.UUID, statusCode int, publicError string) {
 	if statusCode == http.StatusInternalServerError {
 		ctx.JSON(statusCode, gokit.InternalServerError(logID))
 		return
 	}
-	ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, msg, logID, publicError))
+	ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, mediaMessage(statusCode), logID, publicError))
+}
+
+func mediaMessage(statusCode int) string {
+	switch statusCode {
+	case http.StatusNotFound:
+		return gokit.MsgResourceNotFound
+	case http.StatusRequestEntityTooLarge:
+		return gokit.MsgRequestTooLarge
+	default:
+		return gokit.MsgInvalidRequest
+	}
 }
 
 func mediaErrorResponse(err error) (int, string) {

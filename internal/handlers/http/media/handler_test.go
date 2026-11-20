@@ -61,12 +61,13 @@ type serviceDouble struct {
 	listReq   dtomedia.ListRequest
 	listItems []domainmedia.Media
 	listTotal int64
+	listLimit int // the page size the repository reports as applied
 }
 
-func (d *serviceDouble) List(_ context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+func (d *serviceDouble) List(_ context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	d.calls++
 	d.listActor, d.listReq = actor, req
-	return d.listItems, d.listTotal, d.err
+	return dtomedia.ListResult{Items: d.listItems, Total: d.listTotal, Limit: d.listLimit}, d.err
 }
 
 func (d *serviceDouble) MaxFileSize() int64 { return d.maxFileSize }
@@ -134,19 +135,30 @@ func multipartBody(t *testing.T, field, filename string, content []byte) ([]byte
 func errorMessage(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
 	var res struct {
-		Error any `json:"error"`
+		Error []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"` // always a list of {field, code, message}
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("response is not JSON with an error list: %v: %s", err, rec.Body.String())
+	}
+	if len(res.Error) != 1 || res.Error[0].Code == "" {
+		t.Fatalf("error = %+v, want one entry with a code: %s", res.Error, rec.Body.String())
+	}
+	return res.Error[0].Message
+}
+
+// envelopeMessage returns the top-level message of a response.
+func envelopeMessage(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var res struct {
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
 		t.Fatalf("response is not JSON: %v: %s", err, rec.Body.String())
 	}
-	switch e := res.Error.(type) {
-	case string:
-		return e
-	case map[string]any:
-		msg, _ := e["message"].(string)
-		return msg
-	}
-	return ""
+	return res.Message
 }
 
 func TestUploadHandlerPassesTheAuthenticatedUserToTheService(t *testing.T) {
@@ -350,7 +362,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 	}
 	want = dtomedia.ListRequest{
 		Search: "cat", OwnerUserID: other, ContentType: "image/png",
-		OrderBy: "size", OrderDirection: "asc", Page: 3, Limit: 5, Offset: 10,
+		OrderBy: "size", OrderDirection: "asc", Page: 3, Limit: 5,
 	}
 	if svc.listReq != want {
 		t.Fatalf("got %+v, want %+v", svc.listReq, want)
@@ -358,7 +370,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 }
 
 func TestListHandlerRespondsWithThePaginationShape(t *testing.T) {
-	svc := &serviceDouble{listItems: []domainmedia.Media{{ID: "m-1", OwnerUserID: "u-1"}}, listTotal: 41}
+	svc := &serviceDouble{listItems: []domainmedia.Media{{ID: "m-1", OwnerUserID: "u-1"}}, listTotal: 41, listLimit: 20}
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?limit=20&page=2", nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -393,38 +405,37 @@ func TestListHandlerMapsServiceErrors(t *testing.T) {
 	}
 }
 
-// A user-facing list is bounded: gokit keeps limit=-1 (no limit) and accepts
-// up to 10000, so the handler clamps before the service sees the value.
-func TestListHandlerClampsTheLimit(t *testing.T) {
+// The handler does not clamp: the repository applies the one cap (gokit's
+// QueryOptions.MaxLimit) and reports the limit it used, which is what the
+// response carries. The handler only normalises what GetBaseParams does: a
+// missing, zero or negative limit (other than -1) becomes the default.
+func TestListHandlerPassesTheLimitAndReportsTheAppliedOne(t *testing.T) {
 	cases := []struct {
-		name       string
-		query      string
-		wantLimit  int
-		wantOffset int
+		name      string
+		query     string
+		wantLimit int // what the service receives
 	}{
-		// gokit resets the page to 1 for -1, so the offset is 0.
-		{"minus one is not unbounded", "limit=-1&page=3", defaultListLimit, 0},
-		{"zero falls back", "limit=0", defaultListLimit, 0},
-		{"above the maximum", "limit=101&page=2", maxListLimit, maxListLimit},
-		{"huge value", "limit=10000", maxListLimit, 0},
-		{"normal value", "limit=5&page=3", 5, 10},
-		{"the maximum itself", "limit=100", maxListLimit, 0},
+		{"minus one is the unbounded sentinel, left for the repository to refuse", "limit=-1&page=3", -1},
+		{"zero falls back", "limit=0", defaultListLimit},
+		{"missing falls back", "page=2", defaultListLimit},
+		{"above the cap is left for the repository", "limit=10000", 10000},
+		{"normal value", "limit=5&page=3", 5},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			svc := &serviceDouble{}
+			svc := &serviceDouble{listLimit: 77}
 			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?"+c.query, nil, "")
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
-			if svc.listReq.Limit != c.wantLimit || svc.listReq.Offset != c.wantOffset {
-				t.Fatalf("limit/offset = %d/%d, want %d/%d", svc.listReq.Limit, svc.listReq.Offset, c.wantLimit, c.wantOffset)
+			if svc.listReq.Limit != c.wantLimit {
+				t.Fatalf("limit passed to the service = %d, want %d", svc.listReq.Limit, c.wantLimit)
 			}
 			var res struct {
 				Limit int `json:"limit"`
 			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || res.Limit != c.wantLimit {
-				t.Fatalf("response limit = %d (%v), want %d", res.Limit, err, c.wantLimit)
+			if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || res.Limit != 77 {
+				t.Fatalf("response limit = %d (%v), want the repository's 77", res.Limit, err)
 			}
 		})
 	}
@@ -446,7 +457,7 @@ func TestListHandlerIgnoresAMalformedOwnerFilterWithoutListAny(t *testing.T) {
 // An empty page still has the full envelope: data is [], never null, and the
 // totals are zero.
 func TestListHandlerEmptyResultShape(t *testing.T) {
-	svc := &serviceDouble{} // nil items, total 0
+	svc := &serviceDouble{listLimit: defaultListLimit} // nil items, total 0
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -495,5 +506,33 @@ func TestListHandler500UsesTheStandardBody(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "database down") {
 		t.Fatal("the response must not reveal the internal error")
+	}
+}
+
+// The envelope message is a fixed text for the status, never the error text;
+// the detail sits in the error list.
+func TestMediaErrorsUseAFixedEnvelopeMessagePerStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		method  string
+		target  string
+		err     error
+		status  int
+		message string
+		detail  string
+	}{
+		{"delete of a missing row", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrNotFound, http.StatusNotFound, gokit.MsgResourceNotFound, "media not found"},
+		{"delete of another user's row", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrMediaForbidden, http.StatusNotFound, gokit.MsgResourceNotFound, "media not found"},
+		{"too large", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrFileTooLarge, http.StatusRequestEntityTooLarge, gokit.MsgRequestTooLarge, domainmedia.ErrFileTooLarge.Error()},
+		{"bad content", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrEmptyFile, http.StatusBadRequest, gokit.MsgInvalidRequest, domainmedia.ErrEmptyFile.Error()},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := &serviceDouble{err: c.err}
+			rec := serve(t, svc, uuid.NewString(), "viewer", c.method, c.target, nil, "")
+			if rec.Code != c.status || envelopeMessage(t, rec) != c.message || errorMessage(t, rec) != c.detail {
+				t.Fatalf("got %d %s, want %d message %q detail %q", rec.Code, rec.Body.String(), c.status, c.message, c.detail)
+			}
+		})
 	}
 }

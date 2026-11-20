@@ -1,6 +1,7 @@
 package router
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -59,6 +60,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 
 	big := httptest.NewRecorder()
 	bigReq := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(strings.Repeat("a", 4096)))
+	bigReq.Header.Set("Origin", "https://app.example.com") // CORS only answers requests that carry an Origin
 	engine.ServeHTTP(big, bigReq)
 	lines := accessLogLines(logs.Since(mark))
 
@@ -79,6 +81,39 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "status=413") {
 		t.Errorf("the rejected request was not logged with its status: %s", lines[1])
+	}
+}
+
+// RequestIDMiddleware must run before Recovery: a panic is answered with the
+// same log_id the caller sent as X-Request-ID, not a fresh one.
+func TestRequestIDPrecedesRecovery(t *testing.T) {
+	engine := newEngine(t, routertest.NewDeps(t, nil))
+	engine.GET("/boom", func(*gin.Context) { panic("boom") })
+	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
+
+	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	req.Header.Set("X-Request-ID", requestID)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		LogID string `json:"log_id"`
+		Error []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, rec.Body.String())
+	}
+	if body.LogID != requestID || rec.Header().Get("X-Request-ID") != requestID {
+		t.Fatalf("log_id %q / header %q, want the caller's id %q (request id must precede recovery)", body.LogID, rec.Header().Get("X-Request-ID"), requestID)
+	}
+	if len(body.Error) != 1 || strings.Contains(rec.Body.String(), "boom") {
+		t.Fatalf("error must be one entry without the panic value: %s", rec.Body.String())
 	}
 }
 

@@ -112,7 +112,7 @@ func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart
 		Size:         header.Size,
 		CreatedAt:    time.Now(),
 	}
-	if err := s.repo.Store(ctx, media); err != nil {
+	if err := s.repo.Store(ctx, &media); err != nil {
 		cleanupErr := s.storage.DeleteFile(ctx, uploaded.URL)
 		return domainmedia.Media{}, errors.Join(err, cleanupErr)
 	}
@@ -141,7 +141,7 @@ func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string
 
 // List returns a page of media and the total match count. Without list_any the
 // owner filter is forced to the caller, whatever the request asked for.
-func (s *Service) List(ctx context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+func (s *Service) List(ctx context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	if !actor.CanListAny {
 		req.OwnerUserID = strings.TrimSpace(actor.UserID)
 	}

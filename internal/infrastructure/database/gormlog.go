@@ -33,7 +33,7 @@ func (logusWriter) Printf(format string, args ...any) {
 		}
 	}
 	msg := strings.Join(strings.Fields(fmt.Sprintf(format, args...)), " ")
-	logus.WriteLog(logus.LogLevelWarn, "gorm; "+msg)
+	logus.Log(logus.LevelWarn, "gorm; "+msg)
 }
 
 // newQueryLogger warns on failed and slow queries. Bound values are never printed;

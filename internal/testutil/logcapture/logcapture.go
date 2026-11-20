@@ -1,6 +1,6 @@
 // Package logcapture lets a test binary read what the service logs.
-// logus builds its logger on the first write, around the then-current os.Stdout;
-// Start swaps in a pipe for that moment. Call it from TestMain, before any test logs.
+// Start sends logus output (logus.SetOutput) and the standard log package to a
+// pipe that the Capture reads. Call it from TestMain, before any test logs.
 package logcapture
 
 import (
@@ -47,12 +47,7 @@ func Start() *Capture {
 	c.cond = sync.NewCond(&c.mu)
 	go c.read()
 
-	realStdout := os.Stdout
-	os.Stdout = w
-	// Written at error level so that a low LOG_LEVEL cannot skip it: the
-	// first line that passes the level check is what builds the logger.
-	logus.WriteLog(logus.LogLevelError, "logcapture started")
-	os.Stdout = realStdout
+	logus.SetOutput(w)
 	log.SetOutput(w)
 	return c
 }
@@ -115,9 +110,9 @@ func (c *Capture) Since(m Mark) string {
 // All returns everything captured so far.
 func (c *Capture) All() string { return c.Since(0) }
 
-// Stop restores log output and ends the capture; logus cannot be rebuilt, so call
-// it only just before exit.
+// Stop restores log output (logus goes back to os.Stdout) and ends the capture.
 func (c *Capture) Stop() {
+	logus.SetOutput(nil)
 	log.SetOutput(c.prevL)
 	_ = c.w.Close()
 	<-c.readEnd

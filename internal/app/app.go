@@ -83,7 +83,7 @@ func run(ctx context.Context, args []string, d deps) error {
 	if err != nil {
 		return err
 	}
-	logus.WriteLog(logus.LogLevelInfo, "APP: "+cfg.App.Name+"; PORT: "+cfg.App.Port)
+	logus.Logf(logus.LevelInfo, "APP: %s; PORT: %s", cfg.App.Name, cfg.App.Port)
 
 	return execute(ctx, cfg, d)
 }
@@ -142,7 +142,7 @@ func execute(ctx context.Context, cfg config.Config, d deps) (err error) {
 		}
 	}
 	if cfg.Migrate.Only {
-		logus.WriteLog(logus.LogLevelInfo, "Migration finished; not serving (migrate-only)")
+		logus.Log(logus.LevelInfo, "Migration finished; not serving (migrate-only)")
 		return nil
 	}
 	// Routes come after the migration: some modules query their tables when
@@ -194,7 +194,7 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 		if a.redis, err = database.OpenRedis(ctx, cfg.Redis); err != nil {
 			return fail(fmt.Errorf("open redis: %w", err))
 		}
-		logus.WriteLog(logus.LogLevelInfo, "Redis initialized, session management enabled")
+		logus.Log(logus.LevelInfo, "Redis initialized, session management enabled")
 	}
 
 	// The storage provider exists only when media is enabled; a failure to
@@ -212,6 +212,11 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 	if a.kit, err = authkit.New(authConfig(cfg, a.db, a.redis)); err != nil {
 		return fail(fmt.Errorf("initialize authkit: %w", err))
 	}
+	// authkit drains its in-flight mail sends here: after the HTTP server has
+	// stopped (the hooks run once Serve has drained it) and before Redis and the
+	// database close (closeBy). Module hooks registered later run before it,
+	// because the hooks run in reverse order of registration.
+	a.lifecycle.OnClose("authkit", a.kit.Close)
 	return a, nil
 }
 
@@ -229,7 +234,7 @@ func authConfig(cfg config.Config, db *gorm.DB, rdb *redis.Client) authkit.Confi
 	}
 	sender, err := authkit.NewBrevoMailer(brevoConfig(cfg.SMTP))
 	if err != nil {
-		logus.WriteLog(logus.LogLevelWarn, "Email sender not configured: ", err)
+		logus.Log(logus.LevelWarn, "Email sender not configured:", err)
 		return authCfg
 	}
 	authCfg.Mailer = sender
@@ -265,7 +270,7 @@ func (a *App) buildRoutes() error {
 	if a.routes != nil {
 		a.routes(engine)
 	}
-	logus.WriteLog(logus.LogLevelInfo, "All routes registered successfully")
+	logus.Log(logus.LevelInfo, "All routes registered successfully")
 
 	a.engine = engine
 	a.server = &http.Server{
@@ -325,7 +330,7 @@ func (a *App) closeBy(deadline time.Time) error {
 	return errors.Join(errs...)
 }
 
-// setServerIPEnv publishes the first non-loopback IPv4 address as ServerIP for the
+// setServerIPEnv publishes the first non-loopback IPv4 address as SERVER_IP for the
 // logger; the only environment write outside internal/config.
 func setServerIPEnv() error {
 	addr := "unknown"
@@ -337,9 +342,9 @@ func setServerIPEnv() error {
 		}
 	}
 	addr = fmt.Sprintf("%-15s", addr)
-	if err := os.Setenv("ServerIP", addr); err != nil {
+	if err := os.Setenv("SERVER_IP", addr); err != nil {
 		return fmt.Errorf("set server IP: %w", err)
 	}
-	logus.WriteLog(logus.LogLevelInfo, "Server IP: "+addr)
+	logus.Log(logus.LevelInfo, "Server IP:", addr)
 	return nil
 }

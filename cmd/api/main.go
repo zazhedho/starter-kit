@@ -32,7 +32,7 @@ func execute(args []string, run func(context.Context, []string) error) int {
 	if err := run(ctx, args); err != nil {
 		// The error can come from startup, from serving, or from shutdown;
 		// its text says which.
-		logus.WriteLog(logus.LogLevelError, "service exited with error: ", err)
+		logus.Log(logus.LevelError, "service exited with error:", err)
 		return 1
 	}
 	return 0

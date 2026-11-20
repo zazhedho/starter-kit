@@ -46,8 +46,8 @@ func FromEnv() Config {
 			Path: gokit.GetEnv("PATH_MIGRATE", "file://migrations"),
 		},
 		Location: locationFromEnv(),
-		Auth:     authkit.ConfigFromEnv(),
 	}
+	cfg.Auth, cfg.authErr = authkit.ConfigFromEnv()
 
 	cfg.Media, cfg.Storage = mediaFromEnv()
 

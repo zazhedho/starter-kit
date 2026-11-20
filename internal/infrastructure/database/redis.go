@@ -46,7 +46,7 @@ func OpenRedis(ctx context.Context, cfg config.Redis) (*redis.Client, error) {
 		return nil, failed("ping redis: "+classifyRedis(err), "OpenRedis; ")
 	}
 
-	logus.WriteLog(logus.LogLevelInfo, "OpenRedis; connected to Redis at "+client.Options().Addr)
+	logus.Log(logus.LevelInfo, "OpenRedis; connected to Redis at", client.Options().Addr)
 	return client, nil
 }
 
