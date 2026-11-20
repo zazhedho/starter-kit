@@ -47,10 +47,7 @@ func Open(t *testing.T) *gorm.DB {
 	t.Cleanup(func() { _ = admin.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
-		t.Fatalf("create schema: %v", err)
-	}
-	t.Cleanup(func() { _, _ = admin.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
+	createSchema(ctx, t, admin, schema)
 
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -86,6 +83,38 @@ func Open(t *testing.T) *gorm.DB {
 		}
 	}
 	return db
+}
+
+// DDL cannot bind an identifier, so the schema name is bound to two session
+// functions that quote it with format's %I; no statement is built from it.
+const (
+	createSchemaFunc = `CREATE FUNCTION pg_temp.skt_create_schema(name text) RETURNS void LANGUAGE plpgsql
+		AS $$ BEGIN EXECUTE format('CREATE SCHEMA %I', name); END $$`
+	dropSchemaFunc = `CREATE FUNCTION pg_temp.skt_drop_schema(name text) RETURNS void LANGUAGE plpgsql
+		AS $$ BEGIN EXECUTE format('DROP SCHEMA %I CASCADE', name); END $$`
+)
+
+// createSchema creates the schema and drops it when the test ends. The
+// functions live in one connection's pg_temp, so that connection is kept until
+// the schema is dropped.
+func createSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+	t.Helper()
+	conn, err := admin.Conn(ctx)
+	if err != nil {
+		t.Fatalf("admin connection: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	for _, ddl := range []string{createSchemaFunc, dropSchemaFunc} {
+		if _, err := conn.ExecContext(ctx, ddl); err != nil {
+			t.Fatalf("prepare schema functions: %v", err)
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_temp.skt_create_schema($1)", schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_temp.skt_drop_schema($1)", schema)
+	})
 }
 
 // MigrationFiles lists the project's migration files with the given suffix
