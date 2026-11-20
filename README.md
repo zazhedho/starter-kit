@@ -206,6 +206,7 @@ cmd/api/main.go
     |
     `- 5. serve until SIGINT/SIGTERM, then shut down gracefully
            /readyz turns 503 and background work is told to stop (the location sync is canceled),
+           the listener stays open for HTTP_SHUTDOWN_DELAY so load balancers see the 503,
            then stop accepting connections, wait for running requests and for the background work,
            then authkit.Kit.Close drains
            in-flight mail sends, all within one HTTP_SHUTDOWN_TIMEOUT counted from the signal;
@@ -269,8 +270,9 @@ Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic.
 log (`readyz; database ping failed: ...`), never in the response.
 
 On SIGINT or SIGTERM the service logs `Shutdown started`, turns `/readyz` to `503` and tells background work to
-stop (the `Lifecycle` drain functions, so a running location sync records its end while requests finish), then stops
-accepting connections, closes idle keep-alive connections and waits up to `HTTP_SHUTDOWN_TIMEOUT` for running
+stop (the `Lifecycle` drain functions, so a running location sync records its end while requests finish), keeps
+the listener open for `HTTP_SHUTDOWN_DELAY` (default 5 s, inside the one deadline) so a load balancer polling `/readyz`
+sees the `503`, then stops accepting connections, closes idle keep-alive connections and waits up to `HTTP_SHUTDOWN_TIMEOUT` for running
 requests. Then it waits for the background work (the `Lifecycle` close hooks, in reverse order of registration), still inside that one deadline, closes Redis and the
 database, logs `Shutdown complete` and exits `0`. If requests are still running when the limit passes they are cut
 off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM
@@ -325,6 +327,7 @@ Durations accept bare seconds (`60`) or Go syntax (`30s`, `1m`, `1h`) and must b
 | `HTTP_WRITE_TIMEOUT` | `30s` | time to write the response |
 | `HTTP_IDLE_TIMEOUT` | `60s` | keep-alive idle time |
 | `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time the whole shutdown gets after SIGINT/SIGTERM, counted from the signal |
+| `HTTP_SHUTDOWN_DELAY` | `5s` | how long the listener stays open, `/readyz` answering `503`, after the signal; zero or more and below `HTTP_SHUTDOWN_TIMEOUT` |
 | `HTTP_MAX_BODY_MB` | `10` | largest request body, 1-1024 MB |
 | `TRUSTED_PROXIES` | none | comma-separated IPs or CIDRs of reverse proxies whose `X-Forwarded-For` is believed |
 | `DB_MAX_OPEN_CONNS` | `100` | pool: open connections, greater than zero |

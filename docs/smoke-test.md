@@ -49,7 +49,8 @@ curl -i localhost:18080/api/users -H "Authorization: Bearer $TOKEN"        # 403
 curl -i localhost:18080/api/location/province                              # see the note under the table
 
 # 5. Graceful shutdown (check 12)
-kill -TERM $APP; wait $APP; echo "exit $?"                                 # 0
+kill -TERM $APP; sleep 1; curl -i localhost:18080/readyz                   # 503 during HTTP_SHUTDOWN_DELAY
+wait $APP; echo "exit $?"                                                  # 0
 
 # 6. A second signal ends a held shutdown at once (check 13)
 HTTP_SHUTDOWN_TIMEOUT=30s HTTP_READ_TIMEOUT=60s HTTP_READ_HEADER_TIMEOUT=60s \
@@ -94,7 +95,7 @@ rm -rf "$SCRATCH"
 | 9 | `GET /api/users` without a token | 401 |
 | 10 | `GET /api/users` as viewer | 403 |
 | 11 | `GET /api/location/province` | reported |
-| 12 | SIGTERM | exit 0, `Shutdown started` and `Shutdown complete` logged |
+| 12 | SIGTERM, then `GET /readyz` one second later | `/readyz` answers 503 (the listener stays open for `HTTP_SHUTDOWN_DELAY`, default 5 s); exit 0, `Shutdown started` and `Shutdown complete` logged |
 | 13 | second SIGTERM during a held shutdown | process ends at once |
 | 14 | Redis configured but unreachable | exit 1, no credentials in the log |
 | 15 | `docker build .` and run the image | build succeeds, the binary starts |

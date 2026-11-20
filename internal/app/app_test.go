@@ -1021,3 +1021,42 @@ func TestServeDrainsBackgroundWorkAndReadinessBeforeTheHTTPDrain(t *testing.T) {
 		t.Fatalf("Serve = %v", err)
 	}
 }
+
+// Shutdown closes the listener, so a load balancer can only see /readyz turn 503
+// if the listener stays open for HTTP_SHUTDOWN_DELAY after the signal.
+func TestReadyzAnswers503DuringTheShutdownDelay(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownDelay = 400 * time.Millisecond
+	a, ln := newTestApp(t, cfg, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := serveAsync(ctx, a)
+	if status, _ := get(t, "http://"+ln.Addr().String()+"/healthcheck"); status != http.StatusOK {
+		t.Fatalf("healthcheck = %d", status)
+	}
+
+	begin := time.Now()
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	if status, _ := get(t, "http://"+ln.Addr().String()+"/readyz"); status != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz during the delay = %d, want 503 from a listener that is still open", status)
+	}
+	if err := waitServe(t, done, 3*time.Second); err != nil {
+		t.Fatalf("Serve = %v", err)
+	}
+	if elapsed := time.Since(begin); elapsed < cfg.HTTP.ShutdownDelay {
+		t.Fatalf("Serve returned after %s, before the %s delay", elapsed, cfg.HTTP.ShutdownDelay)
+	}
+}
+
+// The delay is part of the one shutdown budget: it ends early when the deadline does.
+func TestShutdownDelayIsBoundedByTheShutdownDeadline(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 200 * time.Millisecond
+	cfg.HTTP.ShutdownDelay = time.Hour
+	a, _ := newTestApp(t, cfg, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := serveAsync(ctx, a)
+	cancel()
+	_ = waitServe(t, done, 3*time.Second) // returns instead of waiting an hour
+}

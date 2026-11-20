@@ -57,6 +57,14 @@ func (a *App) Serve(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 
+	// The listener stays open for the delay, so a load balancer polling /readyz
+	// sees the 503 before connections are refused. The deadline still bounds it.
+	if delay := a.cfg.HTTP.ShutdownDelay; delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-shutdownCtx.Done():
+		}
+	}
 	err := a.server.Shutdown(shutdownCtx)
 	if err != nil {
 		_ = a.server.Close() // cut off whatever is still running

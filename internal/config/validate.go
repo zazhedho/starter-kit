@@ -78,6 +78,9 @@ func (c Config) validateHTTP() []string {
 			problems = append(problems, t.key+" must be greater than zero")
 		}
 	}
+	if c.HTTP.ShutdownDelay < 0 || c.HTTP.ShutdownDelay >= c.HTTP.ShutdownTimeout {
+		problems = append(problems, "HTTP_SHUTDOWN_DELAY must be zero or more and less than HTTP_SHUTDOWN_TIMEOUT")
+	}
 	if c.HTTP.MaxBodyBytes <= 0 {
 		problems = append(problems, "HTTP_MAX_BODY_MB must be between 1 and 1024")
 	}

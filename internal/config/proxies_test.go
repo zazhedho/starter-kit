@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTrustedProxiesDefaultToNone(t *testing.T) {
@@ -35,5 +36,26 @@ func TestInvalidTrustedProxyNamesTheVariableNotTheValue(t *testing.T) {
 	wantInError(t, err, "TRUSTED_PROXIES")
 	if strings.Contains(err.Error(), "not-an-ip-secret") {
 		t.Fatalf("the error leaks the value: %v", err)
+	}
+}
+
+func TestShutdownDelayDefaultsToFiveSecondsAndStaysBelowTheTimeout(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	if got := FromEnv().HTTP.ShutdownDelay; got != 5*time.Second {
+		t.Fatalf("ShutdownDelay = %v, want 5s", got)
+	}
+	for _, c := range []struct{ delay, timeout string }{{"15s", "15s"}, {"20s", "15s"}, {"-1s", "15s"}} {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HTTP_SHUTDOWN_DELAY", c.delay)
+		t.Setenv("HTTP_SHUTDOWN_TIMEOUT", c.timeout)
+		wantInError(t, validateFromEnv(t), "HTTP_SHUTDOWN_DELAY")
+	}
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("HTTP_SHUTDOWN_DELAY", "0")
+	if err := validateFromEnv(t); err != nil {
+		t.Fatalf("a zero delay is allowed: %v", err)
 	}
 }

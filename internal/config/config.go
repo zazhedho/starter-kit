@@ -55,7 +55,10 @@ type App struct{ Name, Env, Port, Timezone string }
 
 type HTTP struct {
 	ReadHeaderTimeout, ReadTimeout, WriteTimeout, IdleTimeout, ShutdownTimeout time.Duration
-	MaxBodyBytes                                                               int64
+	// ShutdownDelay is how long the listener stays open, /readyz answering 503,
+	// between the shutdown signal and the HTTP drain; it is part of ShutdownTimeout.
+	ShutdownDelay time.Duration
+	MaxBodyBytes  int64
 	// TrustedProxies lists the IPs and CIDRs whose X-Forwarded-For is believed.
 	// Empty trusts none: the client IP is the connection's remote address.
 	TrustedProxies []string

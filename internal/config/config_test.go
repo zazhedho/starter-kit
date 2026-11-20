@@ -86,6 +86,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		ShutdownTimeout:   15 * time.Second,
+		ShutdownDelay:     5 * time.Second,
 		MaxBodyBytes:      10 << 20,
 	}
 	if !reflect.DeepEqual(cfg.HTTP, wantHTTP) {
@@ -143,7 +144,7 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	for k, v := range map[string]string{
 		"APP_NAME": "svc", "APP_ENV": "production", "APP_TIMEZONE": "UTC",
 		"HTTP_READ_HEADER_TIMEOUT": "1s", "HTTP_READ_TIMEOUT": "2s", "HTTP_WRITE_TIMEOUT": "3s",
-		"HTTP_IDLE_TIMEOUT": "4s", "HTTP_SHUTDOWN_TIMEOUT": "5s", "HTTP_MAX_BODY_MB": "20",
+		"HTTP_IDLE_TIMEOUT": "4s", "HTTP_SHUTDOWN_TIMEOUT": "5s", "HTTP_SHUTDOWN_DELAY": "1s", "HTTP_MAX_BODY_MB": "20",
 		"MEDIA_UPLOAD_TIMEOUT": "3m",
 		"DB_MAX_OPEN_CONNS":    "50", "DB_MAX_IDLE_CONNS": "5", "DB_CONN_MAX_LIFETIME": "30m", "DB_CONN_MAX_IDLE_TIME": "2m",
 		"RUN_MIGRATION": "false", "REDIS_HOST": "cache",
@@ -158,7 +159,7 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if cfg.App.Name != "svc" || cfg.App.Env != "production" || cfg.App.Timezone != "UTC" {
 		t.Fatalf("App = %+v", cfg.App)
 	}
-	want := HTTP{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second, 20 << 20, nil}
+	want := HTTP{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second, time.Second, 20 << 20, nil}
 	if !reflect.DeepEqual(cfg.HTTP, want) {
 		t.Fatalf("HTTP = %+v, want %+v", cfg.HTTP, want)
 	}

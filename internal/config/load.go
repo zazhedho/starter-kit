@@ -26,6 +26,7 @@ func FromEnv() Config {
 			WriteTimeout:      gokit.GetEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
 			IdleTimeout:       gokit.GetEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout:   gokit.GetEnv("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
+			ShutdownDelay:     gokit.GetEnv("HTTP_SHUTDOWN_DELAY", 5*time.Second),
 			MaxBodyBytes:      megabytes("HTTP_MAX_BODY_MB", 10),
 			TrustedProxies:    gokit.GetEnv("TRUSTED_PROXIES", []string(nil)),
 		},
