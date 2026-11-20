@@ -388,3 +388,22 @@ func TestOrphanCleanupSurvivesACanceledRequestAndLogsFailures(t *testing.T) {
 		t.Fatalf("a failed cleanup must be logged with the object and the cause, got: %s", out)
 	}
 }
+
+// Config rejects unsupported types, but a hand-built Options must not be able to
+// allow what the module can never store safely.
+func TestNewServiceNeverAllowsAnUnsupportedContentType(t *testing.T) {
+	html := []byte("<html><script>alert(1)</script></html>")
+	storage := &mediaStorageMock{}
+	svc := NewService(&mediaRepoMock{}, storage, Options{AllowedContentTypes: []string{"text/html", "image/svg+xml", "text/html; charset=utf-8"}})
+
+	_, err := svc.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(html)}, newMediaHeader("page.html", int64(len(html))))
+	if !errors.Is(err, domainmedia.ErrUnsupportedContentType) {
+		t.Fatalf("Upload of HTML = %v, want ErrUnsupportedContentType", err)
+	}
+	if storage.uploadedHeader != nil {
+		t.Fatal("the HTML reached storage")
+	}
+	if len(svc.allowedContentTypes) != 0 {
+		t.Fatalf("allowed = %v, want none of the unsupported types", svc.allowedContentTypes)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"mime/multipart"
 	"net/textproto"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,7 +27,8 @@ const (
 type Options struct {
 	// MaxFileSize is the largest accepted upload in bytes; zero or less means 10 MiB.
 	MaxFileSize int64
-	// AllowedContentTypes lists accepted media types; empty means every supported one.
+	// AllowedContentTypes lists accepted media types; empty means every supported one,
+	// and a type that is not supported is ignored.
 	AllowedContentTypes []string
 	// NewID returns a new identifier for a stored media row; nil means UUIDv7.
 	NewID func() string
@@ -54,9 +56,11 @@ func NewService(repo Repository, storage Storage, opts Options) *Service {
 		newID = newUUIDv7
 	}
 
+	// Only types the module can store safely are ever allowed, whatever Options says.
+	supported := domainmedia.SupportedContentTypes()
 	allowed := make(map[string]struct{}, len(allowedContentTypes))
 	for _, contentType := range allowedContentTypes {
-		if normalized := domainmedia.NormalizeContentType(contentType); normalized != "" {
+		if normalized := domainmedia.NormalizeContentType(contentType); slices.Contains(supported, normalized) {
 			allowed[normalized] = struct{}{}
 		}
 	}
