@@ -2,12 +2,15 @@ package location
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/zazhedho/authkit"
 
 	"github.com/gin-gonic/gin"
 
@@ -41,7 +44,8 @@ func TestLocationMountsExactlyItsRoutes(t *testing.T) {
 }
 
 func TestLocationRoutesProtection(t *testing.T) {
-	engine := engineFor(t, routertest.NewDeps(t, nil))
+	// The public read falls back to the Location Service; keep it off the network.
+	engine := engineFor(t, routertest.NewDeps(t, func(c *config.Config) { c.Location.ServiceBaseURL = "http://127.0.0.1:1" }))
 
 	switch got := routertest.Serve(engine, http.MethodGet, "/api/location/province"); got {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
@@ -122,5 +126,54 @@ func TestPublicReadsFollowTheFailClosedSetting(t *testing.T) {
 		if got := routertest.Serve(engine, http.MethodGet, "/api/location/city"); got != c.want {
 			t.Fatalf("fail closed = %v: got %d, want %d", c.failClosed, got, c.want)
 		}
+	}
+}
+
+const (
+	viewerID = "11111111-1111-1111-1111-111111111111"
+	jwtKey   = "test-jwt-key-that-is-at-least-32-characters-long"
+)
+
+// signedInDeps is Deps whose database answers what Auth asks for a signed-in
+// user with the given role, after the startup recovery.
+func signedInDeps(t *testing.T, role string) (module.Deps, sqlmock.Sqlmock) {
+	t.Helper()
+	d := routertest.NewDeps(t, nil)
+	db, mock := routertest.NewExecDB(t)
+	kit, err := authkit.New(authkit.Config{DB: db, AppName: "starter-kit-test", JWTKey: jwtKey})
+	if err != nil {
+		t.Fatalf("authkit.New: %v", err)
+	}
+	d.DB, d.Kit = db, kit
+	mock.ExpectExec(`UPDATE .location_sync_jobs. SET`).WillReturnResult(sqlmock.NewResult(0, 0)) // startup recovery
+	mock.ExpectQuery(`FROM "blacklist"`).WillReturnRows(sqlmock.NewRows([]string{"?column?"}))
+	mock.ExpectQuery(`FROM "users"`).WillReturnRows(sqlmock.NewRows([]string{"role", "tokens_valid_after"}).AddRow(role, nil))
+	return d, mock
+}
+
+// A signed-in user without locations:sync is refused by Can, not by the handler.
+func TestSyncRoutesAreForbiddenWithoutThePermission(t *testing.T) {
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/location/sync", `{"level":"province"}`},
+		{http.MethodGet, "/api/location/sync/22222222-2222-2222-2222-222222222222", ""},
+	} {
+		t.Run(c.method+" "+c.path, func(t *testing.T) {
+			d, mock := signedInDeps(t, "viewer")
+			mock.ExpectQuery(`.*`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			token, err := d.Kit.IssueAccessToken(viewerID, "", "viewer")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rec := httptest.NewRecorder()
+			engineFor(t, d).ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("%s %s = %d, want 403: %s", c.method, c.path, rec.Code, rec.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("the permission lookup did not run, so Can did not decide: %v", err)
+			}
+		})
 	}
 }

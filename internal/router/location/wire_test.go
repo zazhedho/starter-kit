@@ -3,14 +3,16 @@ package location
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 
-	domainlocation "starter-kit/internal/domain/location"
-	dtolocation "starter-kit/internal/dto/location"
+	"starter-kit/internal/config"
 	"starter-kit/internal/testutil/routertest"
 )
 
@@ -65,16 +67,44 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 // Drain, the first step of shutdown, interrupts the sync service so it stops
 // accepting jobs while requests still drain; Close then waits for it.
 func TestRegisterLocationRegistersShutdownHooks(t *testing.T) {
-	d := routertest.NewDeps(t, nil)
-	w, err := wire(d)
-	if err != nil {
-		t.Fatalf("wire: %v", err)
-	}
+	d, _ := signedInDeps(t, "superadmin")
+	engine := engineFor(t, d)
 	d.Lifecycle.Drain()
-	if _, err := w.service.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); !errors.Is(err, domainlocation.ErrShuttingDown) {
-		t.Fatalf("StartSync after Drain = %v, want ErrShuttingDown: the drain hook is not registered", err)
+
+	token, err := d.Kit.IssueAccessToken(viewerID, "", "superadmin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/location/sync", strings.NewReader(`{"level":"province"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a sync after Drain = %d, want 503: the drain hook is not registered: %s", rec.Code, rec.Body.String())
 	}
 	if err := d.Lifecycle.Close(context.Background()); err != nil {
 		t.Fatalf("Lifecycle.Close = %v", err)
+	}
+}
+
+// The configured response cap reaches the service: a body over it is an upstream
+// failure (502), not a stored list.
+func TestRegisterLocationPassesTheResponseCap(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"code":"11","name":"` + strings.Repeat("A", 300) + `"}]`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	d := routertest.NewDeps(t, func(c *config.Config) {
+		c.Location.ServiceBaseURL = upstream.URL
+		c.Location.MaxResponseBytes = 100
+	})
+	db, mock := routertest.NewExecDB(t)
+	d.DB = db
+	mock.ExpectExec(`UPDATE .location_sync_jobs. SET`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`FROM "provinces"`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if got := routertest.Serve(engineFor(t, d), http.MethodGet, "/api/location/province"); got != http.StatusBadGateway {
+		t.Fatalf("GET province with an oversized upstream body = %d, want 502", got)
 	}
 }
