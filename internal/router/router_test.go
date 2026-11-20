@@ -225,25 +225,27 @@ func TestReadyz(t *testing.T) {
 		}
 	})
 
-	t.Run("redis checked when present", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-		t.Cleanup(func() { _ = client.Close() })
-		d, mock := routertest.NewDepsWithMock(t, nil)
-		d.Redis = client
-		engine := newEngine(t, d)
+	t.Run("redis checked when present", func(t *testing.T) { requireReadyzFollowsRedis(t, get, compact) })
+}
 
-		mock.ExpectPing()
-		if rec := get(engine); rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 with live redis, got %d", rec.Code)
-		}
-		mr.Close()
-		mock.ExpectPing()
-		rec := get(engine)
-		if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
-			t.Fatalf("expected 503 after redis stops, got %d %s", rec.Code, rec.Body.String())
-		}
-	})
+func requireReadyzFollowsRedis(t *testing.T, get func(http.Handler) *httptest.ResponseRecorder, compact func(*httptest.ResponseRecorder) string) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	d, mock := routertest.NewDepsWithMock(t, nil)
+	d.Redis = client
+	engine := newEngine(t, d)
+
+	mock.ExpectPing()
+	if rec := get(engine); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with live redis, got %d", rec.Code)
+	}
+	mr.Close()
+	mock.ExpectPing()
+	rec := get(engine)
+	if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
+		t.Fatalf("expected 503 after redis stops, got %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
