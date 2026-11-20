@@ -1,5 +1,3 @@
-// Package architecture holds repository-wide guard tests: the import rule
-// between layers and a few hygiene rules. It has no non-test files.
 package architecture
 
 import (
@@ -50,9 +48,6 @@ func repoFiles(t *testing.T, visit func(path string, data []byte)) {
 	}
 }
 
-// fatalCalls lists the calls to log.Fatal* and os.Exit in src. It reads the
-// syntax tree and resolves import aliases, so comments, strings and a renamed
-// import are judged by what they are.
 func fatalCalls(t *testing.T, name string, src []byte) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
@@ -73,7 +68,6 @@ func fatalCalls(t *testing.T, name string, src []byte) []string {
 	return found
 }
 
-// fatalImports maps the local name of each log or os import in file to its path.
 func fatalImports(file *ast.File) map[string]string {
 	local := map[string]string{}
 	for _, spec := range file.Imports {
@@ -90,8 +84,6 @@ func fatalImports(file *ast.File) map[string]string {
 	return local
 }
 
-// packageCall reports the package identifier and function name of a call
-// written as pkg.Func(...).
 func packageCall(n ast.Node) (pkg, name string, ok bool) {
 	call, isCall := n.(*ast.CallExpr)
 	if !isCall {
@@ -108,7 +100,6 @@ func packageCall(n ast.Node) (pkg, name string, ok bool) {
 	return id.Name, sel.Sel.Name, true
 }
 
-// panicCalls counts the calls to the builtin panic in src.
 func panicCalls(t *testing.T, name string, src []byte) int {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
@@ -127,8 +118,6 @@ func panicCalls(t *testing.T, name string, src []byte) int {
 	return count
 }
 
-// panicAllowed lists the files whose panic is deliberate, each with its reason.
-// Elsewhere errors are returned, and only cmd/ may end the process.
 var panicAllowed = map[string]string{
 	// Start has no error result and runs from TestMain, where a missing pipe cannot be handled.
 	"internal/testutil/logcapture/logcapture.go": "test helper setup",
@@ -200,11 +189,8 @@ func TestFatalGuardReadsTheSyntaxTree(t *testing.T) {
 	}
 }
 
-// maxCommentLines is the longest comment block allowed in a non-test file.
-const maxCommentLines = 3
+const maxCommentLines = 2
 
-// longComments lists the comment blocks of src longer than maxCommentLines. A
-// block is a run of adjacent // lines, or one /* */ comment.
 func longComments(t *testing.T, name string, src []byte) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -230,8 +216,6 @@ func longComments(t *testing.T, name string, src []byte) []string {
 	return found
 }
 
-// TestCommentsAreShort: a comment explains why in a few lines; longer text
-// belongs in docs/. Test files are exempt.
 func TestCommentsAreShort(t *testing.T) {
 	repoFiles(t, func(path string, data []byte) {
 		for _, problem := range longComments(t, path, data) {
@@ -241,23 +225,22 @@ func TestCommentsAreShort(t *testing.T) {
 }
 
 func TestCommentGuardCountsBlocks(t *testing.T) {
-	four := "package p\n// a\n// b\n// c\n// d\nfunc f() {}"
 	three := "package p\n// a\n// b\n// c\nfunc f() {}"
-	split := "package p\n// a\n// b\n// c\n\n// d\n// e\nfunc f() {}"
-	block := "package p\n/* a\nb\nc\nd */\nfunc f() {}"
+	two := "package p\n// a\n// b\nfunc f() {}"
+	split := "package p\n// a\n// b\n\n// c\n// d\nfunc f() {}"
+	block := "package p\n/* a\nb\nc */\nfunc f() {}"
 	mixed := "package p\n/* a\nb */\n// c\n// d\nfunc f() {}"
-	directive := "package p\n// a\n// b\n// c\n//nolint:x\nfunc f() {}"
+	directive := "package p\n// a\n// b\n//nolint:x\nfunc f() {}"
 	for name, c := range map[string]struct {
 		src  string
 		want int
-	}{"four lines": {four, 1}, "three lines": {three, 0}, "two blocks": {split, 0}, "block comment": {block, 1}, "block then lines": {mixed, 1}, "directives do not count": {directive, 0}} {
+	}{"three lines": {three, 1}, "two lines": {two, 0}, "two blocks": {split, 0}, "block comment": {block, 1}, "block then lines": {mixed, 1}, "directives do not count": {directive, 0}} {
 		if got := longComments(t, "x.go", []byte(c.src)); len(got) != c.want {
 			t.Errorf("%s: %v, want %d", name, got, c.want)
 		}
 	}
 }
 
-// TestCmdImportsOnlyApp: main wires nothing itself; it starts internal/app.
 func TestCmdImportsOnlyApp(t *testing.T) {
 	root := filepath.Join("..", "..", "cmd")
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -315,30 +298,22 @@ func TestNoPackageLevelConnections(t *testing.T) {
 	})
 }
 
-// rule lists what one package tree under internal/ must not import; internal
-// entries are module-relative prefixes, external entries import-path prefixes.
 type rule struct {
-	tree           string
-	forbidInternal []string
-	forbidExternal []string
-	// internalAllowed, when non-nil, replaces forbidInternal: only these
-	// prefixes of the module's own packages may be imported.
+	tree            string
+	forbidInternal  []string
+	forbidExternal  []string
 	internalAllowed []string
-	externalAllowed []string // when non-nil, only stdlib plus these exact paths may be imported
-	// exceptTrees are subtrees of tree the rule does not apply to.
-	exceptTrees []string
-	// testsToo applies the external bans to _test.go files as well.
-	testsToo bool
+	externalAllowed []string
+	exceptTrees     []string
+	testsToo        bool
 }
 
 var (
-	ginPkg   = "github.com/gin-gonic/gin"
-	gormPkg  = "gorm.io/gorm"
-	redisPkg = "github.com/redis/go-redis"
-	minioPkg = "github.com/minio/minio-go"
-	gokitPkg = "github.com/zazhedho/gokit"
-	// authkit is the project's auth framework: handlers translate its scope into
-	// plain inputs (an Actor, a user id) so services never import it.
+	ginPkg     = "github.com/gin-gonic/gin"
+	gormPkg    = "gorm.io/gorm"
+	redisPkg   = "github.com/redis/go-redis"
+	minioPkg   = "github.com/minio/minio-go"
+	gokitPkg   = "github.com/zazhedho/gokit"
 	authkitPkg = "github.com/zazhedho/authkit"
 )
 
@@ -352,7 +327,7 @@ var rules = []rule{
 	{
 		tree:            "internal/dto",
 		internalAllowed: []string{"internal/domain"},
-		externalAllowed: []string{}, // standard library only
+		externalAllowed: []string{},
 		testsToo:        true,
 	},
 	{
@@ -377,15 +352,12 @@ var rules = []rule{
 		forbidInternal: []string{"internal/services", "internal/handlers", "internal/repositories", "internal/router", "internal/app"},
 	},
 	{
-		// Infrastructure owns its own types. The one exception is
-		// infrastructure/cache/<module>, which implements that module's port.
+		// The one exception is infrastructure/cache/<module>, which implements that module's port.
 		tree:           "internal/infrastructure",
 		forbidInternal: []string{"internal/domain"},
 		exceptTrees:    []string{"internal/infrastructure/cache"},
 	},
 	{
-		// config may import a domain package: the module's own facts, such as the
-		// content types it can store, are validated there once.
 		tree:           "internal/config",
 		forbidInternal: []string{"internal/dto", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/router", "internal/app"},
 	},
@@ -394,25 +366,17 @@ var rules = []rule{
 		forbidInternal: []string{"internal/app"},
 	},
 	{
-		// app opens the connections and starts the router; the modules are wired
-		// only in router, so app never names a module's layers.
 		tree:           "internal/app",
 		forbidInternal: []string{"internal/domain", "internal/dto", "internal/services", "internal/repositories", "internal/handlers"},
 	},
 	{
-		// The leaf imports no feature module, so a module never reaches another
-		// through it.
 		tree:           routerLeaf,
 		forbidInternal: []string{"internal/domain", "internal/dto", "internal/services", "internal/repositories", "internal/handlers", "internal/infrastructure/cache", "internal/app"},
 	},
 }
 
-// knownLayers is every top-level directory of internal/. A new layer needs a
-// rule in rules above and a line in the README's dependency rule before it is
-// added here.
 var knownLayers = []string{"app", "architecture", "config", "domain", "dto", "handlers", "infrastructure", "repositories", "router", "services", "testutil"}
 
-// layerProblems compares the directories found under internal/ with knownLayers.
 func layerProblems(found []string) []string {
 	known := map[string]bool{}
 	for _, l := range knownLayers {
@@ -474,7 +438,6 @@ func isStdlib(importPath string) bool {
 	return !strings.Contains(first, ".")
 }
 
-// applies reports whether r governs the package in dir.
 func applies(r rule, dir string) bool {
 	if !underTree(dir, r.tree) {
 		return false
@@ -591,9 +554,6 @@ func TestImportRule(t *testing.T) {
 	}
 }
 
-// TestInfrastructureDoesNotImportDomain: infrastructure owns its own types; only
-// infrastructure/cache/<module>, which implements a module's port, may name a
-// domain type.
 func TestInfrastructureDoesNotImportDomain(t *testing.T) {
 	cases := []struct {
 		name string
@@ -620,8 +580,6 @@ func TestInfrastructureDoesNotImportDomain(t *testing.T) {
 	}
 }
 
-// TestSharedRespectsLayerRules: a shared package belongs to its tree, so the
-// layer rules still apply to it and to importers of it.
 func TestSharedRespectsLayerRules(t *testing.T) {
 	cases := []struct {
 		name, dir, ip string
@@ -713,8 +671,6 @@ func TestRulesDetectViolations(t *testing.T) {
 	}
 }
 
-// Interfaces are declared by their consumer (ports.go), never in a producer-side
-// package, and carry no "Interface" suffix.
 func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 	if _, err := os.Stat(filepath.Join("..", "..", "internal", "interfaces")); err == nil {
 		t.Error("internal/interfaces must not exist: declare interfaces in the consuming package (ports.go)")
@@ -740,9 +696,6 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 	})
 }
 
-// moduleAliasPrefix maps each per-module tree to its import-alias prefix
-// (domainlocation, routermedia). Handler trees derive theirs from the transport
-// directory (internal/handlers/<transport>/<module>), so a new transport needs no edit.
 var moduleAliasPrefix = map[string]string{
 	"internal/domain":               "domain",
 	"internal/dto":                  "dto",
@@ -754,19 +707,10 @@ var moduleAliasPrefix = map[string]string{
 
 const (
 	handlersTree = "internal/handlers"
-	// routerLeaf is the package every router/<module> imports for Deps and
-	// Lifecycle. It is shared infrastructure, not a module: it has no alias prefix
-	// and is skipped by the cross-module rule.
-	routerLeaf = "internal/router/module"
-	// sharedName is the one reserved directory name in a per-module tree
-	// (<tree>/shared). It holds helpers every module of the tree may import, is
-	// not a business module, and must not import one. Alias: prefix + "shared".
-	sharedName = "shared"
+	routerLeaf   = "internal/router/module"
+	sharedName   = "shared"
 )
 
-// moduleTree splits a module-relative path under a per-module tree into alias
-// prefix, module and the path below it ("" for the module's own package). ok is
-// false outside those trees and for the router leaf; shared comes back as a module.
 func moduleTree(p string) (prefix, module, rest string, ok bool) {
 	if p == routerLeaf || strings.HasPrefix(p, routerLeaf+"/") {
 		return "", "", "", false
@@ -788,8 +732,6 @@ func moduleTree(p string) (prefix, module, rest string, ok bool) {
 	return "", "", "", false
 }
 
-// expectedAlias returns the alias the import convention demands for importPath,
-// or "" when importPath is not a module package.
 func expectedAlias(importPath string) string {
 	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
 	if !ok {
@@ -802,8 +744,6 @@ func expectedAlias(importPath string) string {
 	return prefix + module
 }
 
-// goFiles calls visit for every .go file (tests included) of the module,
-// parsed with imports only.
 func goFiles(t *testing.T, visit func(p string, file *ast.File)) {
 	t.Helper()
 	root := filepath.Join("..", "..")
@@ -886,8 +826,6 @@ func TestExpectedAlias(t *testing.T) {
 	}
 }
 
-// TestPackageNameMatchesDirectory enforces the Go convention that a package is
-// named after its directory (an external test package may add _test).
 func TestPackageNameMatchesDirectory(t *testing.T) {
 	goFiles(t, func(p string, file *ast.File) {
 		if strings.HasPrefix(p, "cmd/") {
@@ -901,8 +839,6 @@ func TestPackageNameMatchesDirectory(t *testing.T) {
 	})
 }
 
-// moduleOf returns the business module a module-relative path belongs to, or ""
-// outside the per-module trees and for a reserved shared package (see moduleTree).
 func moduleOf(p string) string {
 	_, module, _, _ := moduleTree(p)
 	if module == sharedName {
@@ -911,16 +847,11 @@ func moduleOf(p string) string {
 	return module
 }
 
-// isShared reports whether the module-relative path is a reserved shared package
-// (or below one) of a per-module tree.
 func isShared(p string) bool {
 	_, module, _, ok := moduleTree(p)
 	return ok && module == sharedName
 }
 
-// sharedEntityTrees hold the entities and data shapes a module exposes; the
-// higher layers of another module may reference them, as a projects module
-// references users.
 var sharedEntityTrees = []string{"internal/domain", "internal/dto"}
 
 func underAny(p string, trees []string) bool {
@@ -932,9 +863,6 @@ func underAny(p string, trees []string) bool {
 	return false
 }
 
-// crossesModules reports whether a file in dir (module-relative) imports
-// another business module, except that module's domain or dto from a higher
-// layer. domain, dto and shared packages never import a business module.
 func crossesModules(dir, importPath string) bool {
 	internal, ok := strings.CutPrefix(importPath, modulePath+"/")
 	if !ok {
@@ -948,9 +876,6 @@ func crossesModules(dir, importPath string) bool {
 	return !higherLayer || !underAny(internal, sharedEntityTrees)
 }
 
-// Modules must not import each other's peer layers, tests included; they may
-// reference another module's domain and dto from a higher layer (see
-// crossesModules) and otherwise meet only in internal/router and internal/app.
 func TestModulesDoNotImportEachOther(t *testing.T) {
 	goFiles(t, func(p string, file *ast.File) {
 		for _, imp := range file.Imports {
@@ -1022,8 +947,6 @@ func TestCrossModuleRuleDetectsViolations(t *testing.T) {
 	}
 }
 
-// constructorTrees are the layers whose exported New* must return a concrete type;
-// internal/infrastructure factories may return an interface.
 var constructorTrees = []string{"internal/services", "internal/repositories", "internal/handlers"}
 
 func isConstructorName(name string) bool {
@@ -1031,8 +954,6 @@ func isConstructorName(name string) bool {
 	return ok && (rest == "" || rest[0] >= 'A' && rest[0] <= 'Z')
 }
 
-// constructorViolations reports New* functions that do not return a pointer to a
-// struct of the package, optionally followed by an error.
 func constructorViolations(files []*ast.File) []string {
 	structs := map[string]bool{}
 	for _, f := range files {
@@ -1107,8 +1028,6 @@ func parseSources(t *testing.T, sources ...string) []*ast.File {
 	return files
 }
 
-// TestConstructorsReturnConcreteTypes: a service, repository or handler
-// constructor hands back *Struct (and optionally an error), never an interface.
 func TestConstructorsReturnConcreteTypes(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, tree := range constructorTrees {
@@ -1171,7 +1090,6 @@ func TestConstructorRuleDetectsViolations(t *testing.T) {
 	}
 }
 
-// restatingStopwords are the words a restating comment is built from.
 var restatingStopwords = map[string]bool{
 	"returns": true, "return": true, "is": true, "a": true, "an": true, "the": true, "of": true, "for": true,
 	"to": true, "over": true, "with": true, "from": true, "and": true, "wraps": true, "creates": true,
@@ -1179,8 +1097,6 @@ var restatingStopwords = map[string]bool{
 	"new": true, "makes": true, "gets": true, "get": true, "sets": true, "set": true,
 }
 
-// words lower-cases s and splits it at case changes and non-alphanumerics, so
-// "NewRepository" and "new repository" give the same words.
 func words(s string) []string {
 	var out []string
 	var cur []rune
@@ -1206,9 +1122,6 @@ func words(s string) []string {
 	return out
 }
 
-// restatingComments lists the one-line doc comments of src that only repeat
-// the declaration they sit on, such as "// NewRepository returns a Repository
-// over db.": the name, its parameters and results, and filler words say it all.
 func restatingComments(t *testing.T, name string, src []byte) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ParseComments)
@@ -1236,8 +1149,6 @@ func restatingComments(t *testing.T, name string, src []byte) []string {
 	return found
 }
 
-// restatingDoc returns the text of a one-line doc comment that starts with
-// declName and uses only words in known or the stopwords.
 func restatingDoc(declName string, doc *ast.CommentGroup, known map[string]bool) (string, bool) {
 	if doc == nil || len(doc.List) != 1 || strings.HasPrefix(doc.List[0].Text, "/*") {
 		return "", false
@@ -1254,7 +1165,6 @@ func restatingDoc(declName string, doc *ast.CommentGroup, known map[string]bool)
 	return text, true
 }
 
-// addWords adds the words of each text to known and returns it.
 func addWords(known map[string]bool, texts ...string) map[string]bool {
 	for _, text := range texts {
 		for _, w := range words(text) {
@@ -1264,8 +1174,6 @@ func addWords(known map[string]bool, texts ...string) map[string]bool {
 	return known
 }
 
-// funcWords collects the words of a function's name, receiver, parameters and
-// results.
 func funcWords(d *ast.FuncDecl) map[string]bool {
 	known := addWords(map[string]bool{}, d.Name.Name)
 	for _, list := range []*ast.FieldList{d.Recv, d.Type.Params, d.Type.Results} {
@@ -1282,8 +1190,6 @@ func funcWords(d *ast.FuncDecl) map[string]bool {
 	return known
 }
 
-// typeDoc is the doc comment of a type spec, falling back to the declaration's
-// when it holds that one spec.
 func typeDoc(d *ast.GenDecl, ts *ast.TypeSpec) *ast.CommentGroup {
 	if ts.Doc == nil && len(d.Specs) == 1 {
 		return d.Doc
@@ -1291,8 +1197,6 @@ func typeDoc(d *ast.GenDecl, ts *ast.TypeSpec) *ast.CommentGroup {
 	return ts.Doc
 }
 
-// TestCommentsDoNotRestateTheDeclaration: a comment must add something the name
-// and signature do not say. Test files are exempt.
 func TestCommentsDoNotRestateTheDeclaration(t *testing.T) {
 	repoFiles(t, func(path string, data []byte) {
 		for _, problem := range restatingComments(t, path, data) {

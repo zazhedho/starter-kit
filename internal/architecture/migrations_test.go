@@ -8,15 +8,12 @@ import (
 	"testing"
 )
 
-// migrationName is <UTC YYYYMMDDHHMMSS>_<module>_<change>.{up,down}.sql.
 var migrationName = regexp.MustCompile(`^(\d{14})_[a-z0-9]+_[a-z0-9_]+\.(up|down)\.sql$`)
 
-// migrationProblems checks file names only: the format, a down for every up
-// and an up for every down, and one version per migration pair.
 func migrationProblems(names []string) []string {
 	var problems []string
-	direction := map[string]map[string]bool{} // version_name -> {"up","down"}
-	versionOwner := map[string]string{}       // version -> stem
+	direction := map[string]map[string]bool{}
+	versionOwner := map[string]string{}
 	for _, n := range names {
 		m := migrationName.FindStringSubmatch(n)
 		if m == nil {
