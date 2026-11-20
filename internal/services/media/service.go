@@ -2,13 +2,13 @@ package media
 
 import (
 	"context"
-	"errors"
 	"mime/multipart"
 	"net/textproto"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zazhedho/logus"
 
 	domainmedia "starter-kit/internal/domain/media"
 	dtomedia "starter-kit/internal/dto/media"
@@ -17,6 +17,8 @@ import (
 const (
 	defaultMaxFileSize = int64(10 << 20)
 	mediaFolder        = "media"
+	// orphanCleanupTimeout bounds the removal of an object whose row was not stored.
+	orphanCleanupTimeout = 10 * time.Second
 )
 
 // Options tunes the service. The zero value is valid: a 10 MiB limit, the
@@ -113,8 +115,8 @@ func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart
 		CreatedAt:    time.Now(),
 	}
 	if err := s.repo.Store(ctx, &media); err != nil {
-		cleanupErr := s.storage.DeleteFile(ctx, uploaded.URL)
-		return domainmedia.Media{}, errors.Join(err, cleanupErr)
+		s.removeOrphan(ctx, uploaded.ObjectName)
+		return domainmedia.Media{}, err
 	}
 
 	return media, nil
@@ -129,7 +131,7 @@ func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string
 		return domainmedia.Media{}, domainmedia.ErrMediaForbidden
 	}
 
-	if err := s.storage.DeleteFile(ctx, media.URL); err != nil {
+	if err := s.storage.DeleteObject(ctx, media.ObjectKey); err != nil {
 		return domainmedia.Media{}, err
 	}
 	if err := s.repo.Delete(ctx, media.ID); err != nil {
@@ -137,6 +139,17 @@ func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string
 	}
 
 	return media, nil
+}
+
+// removeOrphan deletes an object whose metadata row failed to store. The request
+// context may be canceled (the client gave up), so the removal gets its own
+// short deadline; a failure leaves an orphan, which is logged for cleanup.
+func (s *Service) removeOrphan(ctx context.Context, objectName string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), orphanCleanupTimeout)
+	defer cancel()
+	if err := s.storage.DeleteObject(cleanupCtx, objectName); err != nil {
+		logus.Logf(logus.LevelError, "media: failed to remove orphan object %s after a failed metadata write: %v", objectName, err)
+	}
 }
 
 // List returns a page of media and the total match count. Without list_any the

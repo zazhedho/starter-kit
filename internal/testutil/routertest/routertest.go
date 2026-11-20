@@ -6,12 +6,10 @@ package routertest
 import (
 	"context"
 	"database/sql"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -150,16 +148,4 @@ func (FakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.
 	return storage.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
 }
 
-func (FakeStorage) UploadFileFromBytes(_ context.Context, _ []byte, filename, folder, _ string) (storage.StoredFile, error) {
-	return storage.StoredFile{ObjectName: folder + "/" + filename, URL: "https://files.example.test/" + folder + "/" + filename}, nil
-}
-
-func (FakeStorage) DeleteFile(context.Context, string) error { return nil }
-
-func (FakeStorage) GetFileURL(objectName string) string {
-	return "https://files.example.test/" + objectName
-}
-
-func (FakeStorage) DownloadFile(context.Context, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
-}
+func (FakeStorage) DeleteObject(context.Context, string) error { return nil }

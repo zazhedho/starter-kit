@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -27,11 +26,5 @@ func putObject(ctx context.Context, client *minio.Client, bucket, objectName str
 func uploadMultipart(ctx context.Context, client *minio.Client, bucket string, file multipart.File, header *multipart.FileHeader, folder, errLabel string) (string, error) {
 	objectName := buildObjectName(header.Filename, folder)
 	err := putObject(ctx, client, bucket, objectName, file, header.Size, header.Header.Get("Content-Type"), errLabel)
-	return objectName, err
-}
-
-func uploadBytes(ctx context.Context, client *minio.Client, bucket string, data []byte, filename, folder, contentType, errLabel string) (string, error) {
-	objectName := buildObjectName(filename, folder)
-	err := putObject(ctx, client, bucket, objectName, bytes.NewReader(data), int64(len(data)), contentType, errLabel)
 	return objectName, err
 }

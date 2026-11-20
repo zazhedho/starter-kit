@@ -13,20 +13,19 @@ func TestNewStorageProviderRejectsUnknownProvider(t *testing.T) {
 }
 
 func TestNewStorageProviderCreatesR2AdapterAliases(t *testing.T) {
-	provider, err := NewStorageProvider(Config{
-		Provider:        "cloudflare-r2",
-		Endpoint:        "https://example.r2.cloudflarestorage.com",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-		BaseURL:         "https://cdn.example.com",
-		UseSSL:          true,
-	})
-	if err != nil {
-		t.Fatalf("expected success, got %v", err)
-	}
-	if _, ok := provider.(*R2Adapter); !ok {
-		t.Fatalf("expected R2 adapter, got %T", provider)
+	for _, name := range []string{"r2", "cloudflare", "cloudflare-r2"} {
+		t.Run(name, func(t *testing.T) {
+			_, endpoint := newFakeS3(t, true)
+			cfg := newConfig(endpoint)
+			cfg.Provider = name
+			provider, err := NewStorageProvider(cfg)
+			if err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+			if _, ok := provider.(*R2Adapter); !ok {
+				t.Fatalf("expected R2 adapter, got %T", provider)
+			}
+		})
 	}
 }
 
@@ -44,15 +43,10 @@ func TestNewStorageProviderRejectsInvalidMinIOEndpoint(t *testing.T) {
 }
 
 func TestNewStorageProviderCreatesR2AdapterWithDefaults(t *testing.T) {
-	provider, err := NewStorageProvider(Config{
-		Provider:        "r2",
-		Endpoint:        "custom-endpoint",
-		AccountID:       "account-1",
-		AccessKeyID:     "access",
-		SecretAccessKey: "secret",
-		BucketName:      "bucket",
-		UseSSL:          true,
-	})
+	_, endpoint := newFakeS3(t, true)
+	cfg := newConfig(endpoint)
+	cfg.Provider, cfg.BaseURL = "r2", ""
+	provider, err := NewStorageProvider(cfg)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -60,8 +54,23 @@ func TestNewStorageProviderCreatesR2AdapterWithDefaults(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected R2 adapter, got %T", provider)
 	}
-	if r2.baseURL != "https://bucket.r2.dev" || r2.accountID != "account-1" {
-		t.Fatalf("unexpected r2 defaults: %+v", r2)
+	if r2.baseURL != "https://bucket.r2.dev" {
+		t.Fatalf("unexpected r2 default base URL: %q", r2.baseURL)
+	}
+}
+
+func TestR2EndpointUsesTheAccountHost(t *testing.T) {
+	cases := []struct{ name, endpoint, account, want string }{
+		{"scheme dropped", "https://x.r2.cloudflarestorage.com", "", "x.r2.cloudflarestorage.com"},
+		{"account fills a custom endpoint", "custom-endpoint", "acct", "acct.r2.cloudflarestorage.com"},
+		{"an r2 endpoint is kept", "other.r2.cloudflarestorage.com", "acct", "other.r2.cloudflarestorage.com"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := r2Endpoint(Config{Endpoint: c.endpoint, AccountID: c.account}); got != c.want {
+				t.Fatalf("r2Endpoint = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

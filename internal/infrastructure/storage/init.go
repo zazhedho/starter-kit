@@ -22,6 +22,7 @@ func InitStorage(cfg config.Storage) (Provider, error) {
 		BaseURL:         cfg.BaseURL,
 		Region:          cfg.Region,
 		AccountID:       cfg.R2AccountID,
+		PublicRead:      cfg.PublicRead,
 	})
 	if err != nil {
 		logus.Logf(logus.LevelError, "InitStorage; Failed to initialize storage provider: %s", err.Error())

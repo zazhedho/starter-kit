@@ -23,6 +23,6 @@ func (a storageAdapter) UploadFile(ctx context.Context, file multipart.File, hea
 	return domainmedia.StoredFile{ObjectName: stored.ObjectName, URL: stored.URL}, nil
 }
 
-func (a storageAdapter) DeleteFile(ctx context.Context, fileURL string) error {
-	return a.provider.DeleteFile(ctx, fileURL)
+func (a storageAdapter) DeleteObject(ctx context.Context, objectName string) error {
+	return a.provider.DeleteObject(ctx, objectName)
 }

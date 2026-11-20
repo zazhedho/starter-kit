@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"unicode"
 
 	domainmedia "starter-kit/internal/domain/media"
 )
@@ -57,6 +58,25 @@ func extensionForContentType(contentType string) string {
 	}
 }
 
+// maxOriginalNameChars caps the stored original_name.
+const maxOriginalNameChars = 255
+
+// safeFilename reduces a client-supplied name to its base name without control
+// characters or invalid UTF-8, capped at 255 characters, or "file" when nothing
+// usable is left.
 func safeFilename(filename string) string {
-	return path.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
+	name := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(filename, ""))
+	name = strings.TrimSpace(path.Base(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/")))
+	if runes := []rune(name); len(runes) > maxOriginalNameChars {
+		name = string(runes[:maxOriginalNameChars])
+	}
+	if name == "" || name == "." || name == ".." || name == "/" {
+		return "file"
+	}
+	return name
 }

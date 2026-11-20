@@ -21,5 +21,6 @@ type Repository interface {
 // internal/infrastructure/storage and satisfy it by method set.
 type Storage interface {
 	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error)
-	DeleteFile(ctx context.Context, fileURL string) error
+	// DeleteObject removes an object by StoredFile.ObjectName.
+	DeleteObject(ctx context.Context, objectName string) error
 }

@@ -22,8 +22,8 @@ func TestStorageAdapterConvertsTheStoredFile(t *testing.T) {
 
 func TestStorageAdapterDeleteDelegates(t *testing.T) {
 	boom := errors.New("boom")
-	if err := (storageAdapter{failingDelete{routertest.FakeStorage{}, boom}}).DeleteFile(context.Background(), "u"); !errors.Is(err, boom) {
-		t.Fatalf("DeleteFile error = %v, want %v", err, boom)
+	if err := (storageAdapter{failingDelete{routertest.FakeStorage{}, boom}}).DeleteObject(context.Background(), "media/x.png"); !errors.Is(err, boom) {
+		t.Fatalf("DeleteObject error = %v, want %v", err, boom)
 	}
 }
 
@@ -32,4 +32,4 @@ type failingDelete struct {
 	err error
 }
 
-func (f failingDelete) DeleteFile(context.Context, string) error { return f.err }
+func (f failingDelete) DeleteObject(context.Context, string) error { return f.err }
