@@ -35,8 +35,8 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	stopHeartbeat := s.beat(ctx, cancelJob, jobID)
 	defer stopHeartbeat()
 
-	progress := &progressWriter{s: s, ctx: ctx, cancelJob: cancelJob, jobID: jobID}
-	result, err := s.sync(ctx, req, progress.report)
+	progress := &progressWriter{s: s, cancelJob: cancelJob, jobID: jobID}
+	result, err := s.sync(ctx, req, func(p domainlocation.SyncProgress) { progress.report(ctx, p) })
 	if err != nil {
 		switch {
 		case s.baseCtx.Err() != nil:
@@ -93,7 +93,6 @@ func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID 
 // that a sync of thousands of rows does not become thousands of writes.
 type progressWriter struct {
 	s         *Service
-	ctx       context.Context
 	cancelJob context.CancelFunc
 	jobID     string
 
@@ -101,18 +100,18 @@ type progressWriter struct {
 	last time.Time
 }
 
-func (w *progressWriter) report(p domainlocation.SyncProgress) {
+func (w *progressWriter) report(ctx context.Context, p domainlocation.SyncProgress) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if !w.last.IsZero() && time.Since(w.last) < w.s.progressInterval {
 		return
 	}
 	w.last = time.Now()
-	err := w.s.repo.SaveSyncProgress(w.ctx, w.jobID, w.s.instanceID, p, time.Now())
+	err := w.s.repo.SaveSyncProgress(ctx, w.jobID, w.s.instanceID, p, time.Now())
 	switch {
 	case errors.Is(err, domainlocation.ErrNotFound):
 		w.cancelJob() // another instance took the job over
-	case err != nil && w.ctx.Err() == nil:
+	case err != nil && ctx.Err() == nil:
 		logus.Logf(logus.LevelWarn, "location: failed to update sync job progress %s: %v", w.jobID, err)
 	}
 }

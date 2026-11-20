@@ -150,10 +150,10 @@ func TestProgressWritesAreThrottled(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := NewService(repo, Options{ProgressInterval: time.Hour, HeartbeatInterval: time.Hour})
 	t.Cleanup(func() { _ = svc.Close(context.Background()) })
-	w := &progressWriter{s: svc, ctx: context.Background(), jobID: "job-1"}
+	w := &progressWriter{s: svc, jobID: "job-1"}
 
 	for i := range 100 {
-		w.report(domainlocation.SyncProgress{Message: "step", CityCount: i})
+		w.report(context.Background(), domainlocation.SyncProgress{Message: "step", CityCount: i})
 	}
 	if _, _, progress := repo.counts(); progress != 1 {
 		t.Fatalf("100 reports inside one interval wrote %d times, want 1", progress)
@@ -161,7 +161,7 @@ func TestProgressWritesAreThrottled(t *testing.T) {
 
 	svc.progressInterval = time.Millisecond
 	time.Sleep(5 * time.Millisecond)
-	w.report(domainlocation.SyncProgress{Message: "later", CityCount: 100})
+	w.report(context.Background(), domainlocation.SyncProgress{Message: "later", CityCount: 100})
 	if _, _, progress := repo.counts(); progress != 2 {
 		t.Fatalf("a report after the interval must write, writes = %d", progress)
 	}
