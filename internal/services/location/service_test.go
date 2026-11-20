@@ -90,9 +90,21 @@ func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 		{dtolocation.SyncRequest{Level: "unknown"}, "invalid sync level"},
 	}
 	for _, c := range cases {
-		_, err := svc.StartSync(context.Background(), c.req, "user-1")
+		_, err := svc.StartSync(context.Background(), c.req, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 		if err == nil || err.Error() != c.want || !errors.Is(err, domainlocation.ErrInvalidSync) {
 			t.Fatalf("StartSync(%+v) = %v, want ErrInvalidSync %q", c.req, err, c.want)
+		}
+	}
+}
+
+// requested_by_user_id is a UUID column; an empty or malformed id must fail here,
+// not as a 500 from Postgres.
+func TestStartSyncRejectsAMissingOrMalformedRequester(t *testing.T) {
+	svc := newTestService(t, &locationRepoTestDouble{}, nil)
+	for _, requestedBy := range []string{"", "   ", "user-1"} {
+		_, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, requestedBy)
+		if !errors.Is(err, domainlocation.ErrInvalidSync) {
+			t.Fatalf("StartSync(requestedBy=%q) = %v, want ErrInvalidSync", requestedBy, err)
 		}
 	}
 }
@@ -114,7 +126,7 @@ func TestStartSyncRejectsCodesThatAreNotDigits(t *testing.T) {
 	for _, req := range bad {
 		repo := &locationRepoTestDouble{}
 		svc := newTestService(t, repo, nil)
-		_, err := svc.StartSync(context.Background(), req, "user-1")
+		_, err := svc.StartSync(context.Background(), req, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 		if !errors.Is(err, domainlocation.ErrInvalidCode) {
 			t.Fatalf("StartSync(%+v) = %v, want ErrInvalidCode", req, err)
 		}
@@ -132,7 +144,7 @@ func TestStartSyncReturnsTheActiveJobWhenOneIsAlreadyRunning(t *testing.T) {
 	}
 	svc := newTestService(t, repo, nil)
 
-	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "user-1")
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 	if !errors.Is(err, domainlocation.ErrSyncRunning) {
 		t.Fatalf("expected ErrSyncRunning, got %v", err)
 	}
@@ -147,7 +159,7 @@ func TestStartSyncCreatesAQueuedJobOwnedByThisInstance(t *testing.T) {
 	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
 	before := time.Now()
-	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "user-1")
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -155,7 +167,7 @@ func TestStartSyncCreatesAQueuedJobOwnedByThisInstance(t *testing.T) {
 		t.Fatalf("unexpected job response: %+v", got)
 	}
 	job := repo.createdJob
-	if job == nil || job.RequestedBy != "user-1" || job.OwnerInstanceID != "instance-a" || job.HeartbeatAt.Before(before) {
+	if job == nil || job.RequestedBy != "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99" || job.OwnerInstanceID != "instance-a" || job.HeartbeatAt.Before(before) {
 		t.Fatalf("created job = %+v, want owner instance-a, requester user-1 and a fresh heartbeat", job)
 	}
 	// Before claiming the single active slot, jobs of dead instances are failed.
@@ -170,12 +182,12 @@ func TestStartSyncCreatesAQueuedJobOwnedByThisInstance(t *testing.T) {
 func TestStartSyncRepositoryErrors(t *testing.T) {
 	boom := errors.New("database down")
 	svc := newTestService(t, &locationRepoTestDouble{failStaleErr: boom}, nil)
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "user-1"); !errors.Is(err, boom) {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); !errors.Is(err, boom) {
 		t.Fatalf("StartSync = %v, want the stale-job error", err)
 	}
 
 	svc = newTestService(t, &locationRepoTestDouble{createSyncJobErr: boom}, nil)
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "user-1"); !errors.Is(err, boom) {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "all"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); !errors.Is(err, boom) {
 		t.Fatalf("StartSync = %v, want the create error", err)
 	}
 }
@@ -185,11 +197,11 @@ func TestStartSyncUsesInjectedIDAndRequester(t *testing.T) {
 	svc := NewService(repo, Options{NewID: func() string { return "job-fixed" }, HeartbeatInterval: time.Hour})
 	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
-	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "user-9")
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 	if err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
-	if got.ID != "job-fixed" || repo.createdJob.ID != "job-fixed" || repo.createdJob.RequestedBy != "user-9" {
+	if got.ID != "job-fixed" || repo.createdJob.ID != "job-fixed" || repo.createdJob.RequestedBy != "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99" {
 		t.Fatalf("job = %+v, created = %+v", got, repo.createdJob)
 	}
 }
@@ -200,7 +212,7 @@ func TestDefaultJobIDIsUUIDv7(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := newTestService(t, repo, nil)
 
-	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u")
+	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 	if err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}

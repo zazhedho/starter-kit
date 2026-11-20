@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,6 +184,9 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, re
 	req, err := normalizeAndValidateRequest(req)
 	if err != nil {
 		return dtolocation.SyncJob{}, err
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(requestedBy)); err != nil {
+		return dtolocation.SyncJob{}, domainlocation.NewInvalidSync("requested_by must be a user id")
 	}
 	if !s.startJob() {
 		return dtolocation.SyncJob{}, domainlocation.ErrShuttingDown

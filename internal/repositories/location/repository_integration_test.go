@@ -19,7 +19,7 @@ import (
 
 func newJob(owner string, heartbeat time.Time) *domainlocation.SyncJob {
 	return &domainlocation.SyncJob{
-		ID: uuid.NewString(), Status: "queued", Level: "all", Message: "queued",
+		ID: uuid.NewString(), Status: "queued", Level: "all", Message: "queued", RequestedBy: uuid.NewString(),
 		CreatedAt: time.Now(), OwnerInstanceID: owner, HeartbeatAt: heartbeat,
 	}
 }

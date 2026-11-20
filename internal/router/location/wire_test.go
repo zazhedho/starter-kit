@@ -71,7 +71,7 @@ func TestRegisterLocationRegistersShutdownHooks(t *testing.T) {
 		t.Fatalf("wire: %v", err)
 	}
 	d.Lifecycle.Drain()
-	if _, err := w.service.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); !errors.Is(err, domainlocation.ErrShuttingDown) {
+	if _, err := w.service.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); !errors.Is(err, domainlocation.ErrShuttingDown) {
 		t.Fatalf("StartSync after Drain = %v, want ErrShuttingDown: the drain hook is not registered", err)
 	}
 	if err := d.Lifecycle.Close(context.Background()); err != nil {

@@ -31,7 +31,7 @@ func TestCloseCancelsARunningSyncAndMarksItInterrupted(t *testing.T) {
 		return nil, req.Context().Err()
 	}))
 
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
 	<-started // the job is inside its HTTP call
@@ -55,7 +55,7 @@ func TestInterruptCancelsTheJobWithoutWaitingForIt(t *testing.T) {
 		<-release
 		return nil, req.Context().Err()
 	}))
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
 	<-started
@@ -67,7 +67,7 @@ func TestInterruptCancelsTheJobWithoutWaitingForIt(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Interrupt waited for the job")
 	}
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); !errors.Is(err, domainlocation.ErrShuttingDown) {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); !errors.Is(err, domainlocation.ErrShuttingDown) {
 		t.Fatalf("StartSync after Interrupt = %v, want ErrShuttingDown", err)
 	}
 
@@ -89,7 +89,7 @@ func TestCloseWaitsForTheJobToRecordItsState(t *testing.T) {
 		<-release // the job is still busy after it noticed the cancellation
 		return nil, req.Context().Err()
 	}))
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
 	<-started
@@ -119,7 +119,7 @@ func TestCloseIsBoundedByItsContext(t *testing.T) {
 		<-release // ignores cancellation, like a stuck call
 		return nil, errors.New("late")
 	}))
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
 	<-started
@@ -141,7 +141,7 @@ func TestStartSyncAfterCloseIsRefused(t *testing.T) {
 	if err := svc.Close(context.Background()); err != nil {
 		t.Fatalf("Close = %v", err)
 	}
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); !errors.Is(err, domainlocation.ErrShuttingDown) {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); !errors.Is(err, domainlocation.ErrShuttingDown) {
 		t.Fatalf("StartSync after Close = %v, want ErrShuttingDown", err)
 	}
 	if repo.createdJob != nil || len(repo.failStale) != 0 {
@@ -207,7 +207,7 @@ func TestSettleWriteUsesWhatRemainsOfTheCloseDeadline(t *testing.T) {
 		<-req.Context().Done()
 		return nil, req.Context().Err()
 	}))
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
 	<-started
@@ -237,7 +237,7 @@ func TestSettleWriteIsSkippedOnceTheCloseDeadlineHasPassed(t *testing.T) {
 		<-release // ignores cancellation until after Close gave up
 		return nil, req.Context().Err()
 	}))
-	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); err != nil {
+	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
 	<-started
