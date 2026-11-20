@@ -45,28 +45,31 @@ func TestRouteTable(t *testing.T) {
 		{"media disabled, redis absent", false},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			d := routertest.NewDeps(t, func(cfg *config.Config) { cfg.Media.Enabled = c.media })
-			if c.media {
-				d.Storage = routertest.FakeStorage{}
-			}
-			all := routertest.RouteSet(newEngine(t, d))
-			want, duplicates := routeOwners(t, d)
+		t.Run(c.name, func(t *testing.T) { checkRouteTable(t, c.media) })
+	}
+}
 
-			for _, dup := range duplicates {
-				t.Errorf("route mounted twice: %s", dup)
-			}
-			for route, owner := range want {
-				if !all[route] {
-					t.Errorf("%s route %s is missing from the engine", owner, route)
-				}
-			}
-			for route := range all {
-				if _, ok := want[route]; !ok {
-					t.Errorf("engine route %s is not mounted by authkit, the probes or any module in modules.go", route)
-				}
-			}
-		})
+func checkRouteTable(t *testing.T, media bool) {
+	t.Helper()
+	d := routertest.NewDeps(t, func(cfg *config.Config) { cfg.Media.Enabled = media })
+	if media {
+		d.Storage = routertest.FakeStorage{}
+	}
+	all := routertest.RouteSet(newEngine(t, d))
+	want, duplicates := routeOwners(t, d)
+
+	for _, dup := range duplicates {
+		t.Errorf("route mounted twice: %s", dup)
+	}
+	for route, owner := range want {
+		if !all[route] {
+			t.Errorf("%s route %s is missing from the engine", owner, route)
+		}
+	}
+	for route := range all {
+		if _, ok := want[route]; !ok {
+			t.Errorf("engine route %s is not mounted by authkit, the probes or any module in modules.go", route)
+		}
 	}
 }
 
