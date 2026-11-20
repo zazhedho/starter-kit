@@ -127,7 +127,12 @@ func expectAuth(mock sqlmock.Sqlmock) {
 
 func uploadRequest(t *testing.T, d module.Deps, fileSize int) *http.Request {
 	t.Helper()
-	token, err := d.Kit.IssueAccessToken(testUserID, "", "viewer")
+	return uploadRequestAs(t, d, testUserID, fileSize)
+}
+
+func uploadRequestAs(t *testing.T, d module.Deps, userID string, fileSize int) *http.Request {
+	t.Helper()
+	token, err := d.Kit.IssueAccessToken(userID, "", "viewer")
 	if err != nil {
 		t.Fatalf("token: %v", err)
 	}
@@ -164,14 +169,40 @@ func TestMediaUploadAtMaxSizeIsAccepted(t *testing.T) {
 
 type deadlineRecorder struct {
 	*httptest.ResponseRecorder
-	deadline time.Time
-	calls    int
+	deadline      time.Time
+	calls         int
+	writeDeadline time.Time
+	writeCalls    int
 }
 
 func (r *deadlineRecorder) SetReadDeadline(t time.Time) error {
 	r.deadline = t
 	r.calls++
 	return nil
+}
+
+func (r *deadlineRecorder) SetWriteDeadline(t time.Time) error {
+	r.writeDeadline = t
+	r.writeCalls++
+	return nil
+}
+
+// The response is written after the upload finishes, so the write deadline must
+// move with the read deadline: HTTP_WRITE_TIMEOUT (30 s) would otherwise cut
+// the response of a slow upload and make the client retry into a duplicate.
+func TestMediaUploadExtendsTheWriteDeadlineToo(t *testing.T) {
+	d, mock := authedDeps(t)
+	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	d.Config.Media.UploadTimeout = 90 * time.Second
+	engine := engineFor(t, d)
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	engine.ServeHTTP(rec, uploadRequest(t, d, 1024))
+	if rec.writeCalls == 0 {
+		t.Fatal("upload handler did not extend the write deadline")
+	}
+	if diff := time.Until(rec.writeDeadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
+		t.Fatalf("write deadline is %s away from now+UploadTimeout", diff)
+	}
 }
 
 func TestMediaUploadExtendsReadDeadline(t *testing.T) {
@@ -243,6 +274,8 @@ func TestMediaWithoutRedisSkipsTheUploadLimiter(t *testing.T) {
 		c.Media.Enabled = true
 		c.Media.UploadRateLimit = 0
 		c.Media.UploadRateWindow = 0
+		c.Media.UserUploadLimit = 0
+		c.Media.UserUploadWindow = 0
 	})
 	d.Storage = routertest.FakeStorage{}
 	d.Redis = nil
@@ -274,5 +307,43 @@ func TestMediaWithRedisBuildsTheUploadLimiter(t *testing.T) {
 	engine.ServeHTTP(second, uploadRequest(t, d, 1024))
 	if second.Code != http.StatusTooManyRequests {
 		t.Fatalf("second upload = %d, want 429: %s", second.Code, second.Body.String())
+	}
+}
+
+// The per-IP limit is generous here, so only the per-user limit can answer 429:
+// one user's second upload is refused while another user, from the same IP, is not.
+func TestMediaUploadIsLimitedPerUser(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	d, mock := authedDeps(t)
+	d.Redis = client
+	d.Config.Media.UploadRateLimit = 100
+	d.Config.Media.UploadRateWindow = time.Minute
+	d.Config.Media.UserUploadLimit = 1
+	d.Config.Media.UserUploadWindow = time.Minute
+	engine := engineFor(t, d)
+	other := "22222222-2222-2222-2222-222222222222"
+
+	upload := func(userID string, wantInsert bool) int {
+		if wantInsert {
+			mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
+		}
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, uploadRequestAs(t, d, userID, 1024))
+		return rec.Code
+	}
+
+	if got := upload(testUserID, true); got != http.StatusCreated {
+		t.Fatalf("first upload of the user = %d", got)
+	}
+	expectAuth(mock)
+	if got := upload(testUserID, false); got != http.StatusTooManyRequests {
+		t.Fatalf("second upload of the same user = %d, want 429", got)
+	}
+	expectAuth(mock)
+	if got := upload(other, true); got != http.StatusCreated {
+		t.Fatalf("first upload of another user = %d, want 201: the limit is per user", got)
 	}
 }

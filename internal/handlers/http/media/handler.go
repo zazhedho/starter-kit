@@ -43,12 +43,11 @@ func New(service Service, auditService authkit.AuditService, uploadTimeout time.
 func (h *Handler) Upload(ctx *gin.Context) {
 	logID := gokit.RequestID(ctx)
 	logPrefix := "[MediaHandler][Upload]"
-	// Uploads may need longer than the server-wide read timeout.
+	// The server-wide timeouts are shorter than an upload may need. The write
+	// deadline moves too, or the response of a slow upload is cut off and the
+	// client retries into a duplicate.
 	if h.uploadTimeout > 0 {
-		rc := http.NewResponseController(ctx.Writer)
-		if err := rc.SetReadDeadline(time.Now().Add(h.uploadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			logus.LogContextf(ctx, logus.LevelWarn, "%s; SetReadDeadline; Error: %v", logPrefix, err)
-		}
+		h.extendDeadlines(ctx, logPrefix)
 	}
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, h.service.MaxFileSize()+multipartOverhead)
 
@@ -100,6 +99,18 @@ func (h *Handler) Upload(ctx *gin.Context) {
 		AfterData:  data,
 	})
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
+}
+
+// extendDeadlines moves the read and write deadlines of this connection to now
+// plus the upload timeout. A writer without deadline support keeps the server's.
+func (h *Handler) extendDeadlines(ctx *gin.Context, logPrefix string) {
+	rc := http.NewResponseController(ctx.Writer)
+	deadline := time.Now().Add(h.uploadTimeout)
+	for name, set := range map[string]func(time.Time) error{"SetReadDeadline": rc.SetReadDeadline, "SetWriteDeadline": rc.SetWriteDeadline} {
+		if err := set(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			logus.LogContextf(ctx, logus.LevelWarn, "%s; %s; Error: %v", logPrefix, name, err)
+		}
+	}
 }
 
 func (h *Handler) List(ctx *gin.Context) {
