@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,24 +279,29 @@ func TestNoPackageLevelConnections(t *testing.T) {
 				continue
 			}
 			for _, spec := range gen.Specs {
-				vs := spec.(*ast.ValueSpec)
-				if vs.Type == nil {
-					continue
-				}
-				expr := vs.Type
-				if star, ok := expr.(*ast.StarExpr); ok {
-					expr = star.X
-				}
-				sel, ok := expr.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				if pkg, ok := sel.X.(*ast.Ident); ok && banned[pkg.Name+"."+sel.Sel.Name] {
-					t.Errorf("%s declares a package-level %s.%s", path, pkg.Name, sel.Sel.Name)
+				if name, bad := bannedConnectionType(spec.(*ast.ValueSpec), banned); bad {
+					t.Errorf("%s declares a package-level %s", path, name)
 				}
 			}
 		}
 	})
+}
+
+func bannedConnectionType(vs *ast.ValueSpec, banned map[string]bool) (string, bool) {
+	expr := vs.Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return "", false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	name := pkg.Name + "." + sel.Sel.Name
+	return name, banned[name]
 }
 
 type rule struct {
@@ -469,27 +475,11 @@ func collectViolations(t *testing.T) map[string]bool {
 		if d.IsDir() || !strings.HasSuffix(p, ".go") {
 			return nil
 		}
-		isTest := strings.HasSuffix(p, "_test.go")
-		dir := path.Dir(p)
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, p), nil, parser.ImportsOnly)
-		if err != nil {
-			return err
+		keys, err := fileViolations(filepath.Join(root, p), p)
+		for _, key := range keys {
+			found[key] = true
 		}
-		for _, imp := range file.Imports {
-			ip, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				return err
-			}
-			for _, r := range rules {
-				if !applies(r, dir) {
-					continue
-				}
-				if bad := violates(r, ip, isTest); bad {
-					found[dir+" -> "+ip] = true
-				}
-			}
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -497,49 +487,50 @@ func collectViolations(t *testing.T) map[string]bool {
 	return found
 }
 
+func fileViolations(fsPath, p string) ([]string, error) {
+	isTest := strings.HasSuffix(p, "_test.go")
+	dir := path.Dir(p)
+	file, err := parser.ParseFile(token.NewFileSet(), fsPath, nil, parser.ImportsOnly)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, imp := range file.Imports {
+		ip, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return keys, err
+		}
+		for _, r := range rules {
+			if applies(r, dir) && violates(r, ip, isTest) {
+				keys = append(keys, dir+" -> "+ip)
+			}
+		}
+	}
+	return keys, nil
+}
+
 func violates(r rule, ip string, isTest bool) bool {
 	if internal, ok := strings.CutPrefix(ip, modulePath+"/"); ok {
-		if isTest {
-			return false
-		}
-		if r.internalAllowed != nil {
-			for _, a := range r.internalAllowed {
-				if matchesPrefix(internal, a) {
-					return false
-				}
-			}
-			return true
-		}
-		for _, f := range r.forbidInternal {
-			if f == "internal/" {
-				return true
-			}
-			if matchesPrefix(internal, f) {
-				return true
-			}
-		}
-		return false
+		return !isTest && violatesInternal(r, internal)
 	}
-	if isTest && !r.testsToo {
-		return false
-	}
-	if isStdlib(ip) {
+	if isStdlib(ip) || (isTest && !r.testsToo) {
 		return false
 	}
 	if r.externalAllowed != nil {
-		for _, a := range r.externalAllowed {
-			if ip == a {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(r.externalAllowed, ip)
 	}
-	for _, f := range r.forbidExternal {
-		if matchesPrefix(ip, f) {
-			return true
-		}
+	return matchesAny(ip, r.forbidExternal)
+}
+
+func violatesInternal(r rule, internal string) bool {
+	if r.internalAllowed != nil {
+		return !matchesAny(internal, r.internalAllowed)
 	}
-	return false
+	return slices.Contains(r.forbidInternal, "internal/") || matchesAny(internal, r.forbidInternal)
+}
+
+func matchesAny(s string, prefixes []string) bool {
+	return slices.ContainsFunc(prefixes, func(prefix string) bool { return matchesPrefix(s, prefix) })
 }
 
 func TestImportRule(t *testing.T) {
@@ -682,18 +673,26 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 			return
 		}
 		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				ts := spec.(*ast.TypeSpec)
-				if _, isIface := ts.Type.(*ast.InterfaceType); isIface && strings.HasSuffix(ts.Name.Name, "Interface") {
-					t.Errorf("%s: interface %s has an Interface suffix; name it for the role (Service, Repository, ...)", p, ts.Name.Name)
-				}
+			for _, name := range interfacesWithSuffix(decl) {
+				t.Errorf("%s: interface %s has an Interface suffix; name it for the role (Service, Repository, ...)", p, name)
 			}
 		}
 	})
+}
+
+func interfacesWithSuffix(decl ast.Decl) []string {
+	gen, ok := decl.(*ast.GenDecl)
+	if !ok || gen.Tok != token.TYPE {
+		return nil
+	}
+	var names []string
+	for _, spec := range gen.Specs {
+		ts := spec.(*ast.TypeSpec)
+		if _, isIface := ts.Type.(*ast.InterfaceType); isIface && strings.HasSuffix(ts.Name.Name, "Interface") {
+			names = append(names, ts.Name.Name)
+		}
+	}
+	return names
 }
 
 var moduleAliasPrefix = map[string]string{
