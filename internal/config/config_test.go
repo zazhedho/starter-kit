@@ -87,6 +87,16 @@ func TestFromEnvDefaults(t *testing.T) {
 	if !reflect.DeepEqual(cfg.HTTP, wantHTTP) {
 		t.Fatalf("HTTP = %+v, want %+v", cfg.HTTP, wantHTTP)
 	}
+	assertDefaultAppAndDatabase(t, cfg)
+	assertDefaultMedia(t, cfg.Media)
+	assertDefaultIntegrations(t, cfg)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("defaults with required env must validate, got %v", err)
+	}
+}
+
+func assertDefaultAppAndDatabase(t *testing.T, cfg Config) {
+	t.Helper()
 	if cfg.App.Timezone != "Asia/Jakarta" {
 		t.Fatalf("Timezone = %q", cfg.App.Timezone)
 	}
@@ -103,7 +113,10 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Migrate != (Migrate{Run: true, Path: "file://migrations"}) {
 		t.Fatalf("Migrate = %+v", cfg.Migrate)
 	}
-	m := cfg.Media
+}
+
+func assertDefaultMedia(t *testing.T, m Media) {
+	t.Helper()
 	if m.UploadTimeout != time.Minute || m.MaxFileSizeBytes != 5<<20 || m.UploadRateLimit != 20 || m.UploadRateWindow != 60*time.Second {
 		t.Fatalf("Media = %+v", m)
 	}
@@ -113,6 +126,10 @@ func TestFromEnvDefaults(t *testing.T) {
 	if got := strings.Join(m.AllowedContentTypes, ","); got != "application/pdf,image/gif,image/jpeg,image/png,image/webp" {
 		t.Fatalf("AllowedContentTypes = %q", got)
 	}
+}
+
+func assertDefaultIntegrations(t *testing.T, cfg Config) {
+	t.Helper()
 	if cfg.Location.ServiceTimeout != 20*time.Second || cfg.Location.CacheTTL != 180*24*time.Hour {
 		t.Fatalf("Location = %+v", cfg.Location)
 	}
@@ -127,9 +144,6 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.SMTP.Configured() {
 		t.Fatal("SMTP must not be configured by default")
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("defaults with required env must validate, got %v", err)
 	}
 }
 
@@ -254,13 +268,7 @@ func TestRedisConfiguredOnlyByURLOrHost(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	t.Run("accepts required only", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		if err := validateFromEnv(t); err != nil {
-			t.Fatalf("expected valid startup config, got %v", err)
-		}
-	})
+	t.Run("accepts required only", validateAcceptsRequiredOnly)
 
 	t.Run("rejects an unknown DB_SSLMODE", func(t *testing.T) {
 		clearEnv(t)
@@ -269,16 +277,7 @@ func TestValidate(t *testing.T) {
 		wantInError(t, validateFromEnv(t), "DB_SSLMODE")
 	})
 
-	t.Run("accepts every PostgreSQL sslmode", func(t *testing.T) {
-		for _, mode := range []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"} {
-			clearEnv(t)
-			setRequiredEnv(t)
-			t.Setenv("DB_SSLMODE", mode)
-			if err := validateFromEnv(t); err != nil {
-				t.Fatalf("DB_SSLMODE=%s rejected: %v", mode, err)
-			}
-		}
-	})
+	t.Run("accepts every PostgreSQL sslmode", validateAcceptsEverySSLMode)
 
 	t.Run("rejects Local as APP_TIMEZONE", func(t *testing.T) {
 		clearEnv(t)
@@ -287,39 +286,11 @@ func TestValidate(t *testing.T) {
 		wantInError(t, validateFromEnv(t), "APP_TIMEZONE")
 	})
 
-	t.Run("rejects blank and Local APP_TIMEZONE on a built config", func(t *testing.T) {
-		for _, tz := range []string{"", " ", "  Local  "} {
-			clearEnv(t)
-			setRequiredEnv(t)
-			cfg := FromEnv()
-			cfg.App.Timezone = tz
-			wantInError(t, cfg.Validate(), "APP_TIMEZONE")
-		}
-	})
+	t.Run("rejects blank and Local APP_TIMEZONE on a built config", validateRejectsBlankTimezone)
 
-	t.Run("allows database url without parts", func(t *testing.T) {
-		clearEnv(t)
-		t.Setenv("PORT", "8080")
-		t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/app?sslmode=disable")
-		if err := validateFromEnv(t); err != nil {
-			t.Fatalf("expected DATABASE_URL to satisfy db config, got %v", err)
-		}
-	})
+	t.Run("allows database url without parts", validateAllowsDatabaseURLWithoutParts)
 
-	t.Run("requires core config", func(t *testing.T) {
-		clearEnv(t)
-		err := validateFromEnv(t)
-		wantInError(t, err,
-			"PORT is required",
-			"DB_HOST is required when DATABASE_URL is empty",
-			"DB_PORT is required when DATABASE_URL is empty",
-			"DB_USERNAME is required when DATABASE_URL is empty",
-			"DB_NAME is required when DATABASE_URL is empty",
-		)
-		if strings.Contains(strings.ToLower(err.Error()), "jwt") {
-			t.Fatalf("JWT key is validated by authkit.New, not startup config: %q", err.Error())
-		}
-	})
+	t.Run("requires core config", validateRequiresCoreConfig)
 
 	t.Run("rejects bad ports", func(t *testing.T) {
 		clearEnv(t)
@@ -347,18 +318,7 @@ func TestValidate(t *testing.T) {
 		)
 	})
 
-	t.Run("ignores optional labels without connection config", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("SMTP_PORT", "587")
-		t.Setenv("SMTP_USER", "apikey")
-		t.Setenv("SMTP_SUBJECT", "Your OTP")
-		t.Setenv("RESET_SUBJECT", "Reset Password")
-		t.Setenv("STORAGE_PROVIDER", "local")
-		if err := validateFromEnv(t); err != nil {
-			t.Fatalf("expected optional labels without connection config to be ignored, got %v", err)
-		}
-	})
+	t.Run("ignores optional labels without connection config", validateIgnoresOptionalLabels)
 
 	t.Run("validates configured redis and storage only", func(t *testing.T) {
 		clearEnv(t)
@@ -400,65 +360,13 @@ func TestValidate(t *testing.T) {
 		)
 	})
 
-	t.Run("unparsable new durations and ints are reported and fall back", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("HTTP_READ_TIMEOUT", "soon")
-		t.Setenv("MEDIA_UPLOAD_TIMEOUT", "later")
-		t.Setenv("DB_CONN_MAX_LIFETIME", "forever")
-		t.Setenv("DB_MAX_OPEN_CONNS", "many")
-		t.Setenv("HTTP_MAX_BODY_MB", "big")
-		cfg := FromEnv()
-		if cfg.HTTP.ReadTimeout != 30*time.Second || cfg.Media.UploadTimeout != time.Minute || cfg.Database.MaxOpenConns != 100 {
-			t.Fatalf("unparsable values must fall back to defaults: %+v %+v %+v", cfg.HTTP, cfg.Media, cfg.Database)
-		}
-		wantInError(t, cfg.Validate(),
-			"HTTP_READ_TIMEOUT", "MEDIA_UPLOAD_TIMEOUT", "DB_CONN_MAX_LIFETIME", "DB_MAX_OPEN_CONNS", "HTTP_MAX_BODY_MB",
-		)
-	})
+	t.Run("unparsable new durations and ints are reported and fall back", validateReportsUnparsableAndFallsBack)
 
-	t.Run("a blank variable uses the default", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("DB_SSLMODE", "")
-		t.Setenv("HTTP_READ_TIMEOUT", "  ")
-		cfg := FromEnv()
-		if cfg.Database.SSLMode != "disable" || cfg.HTTP.ReadTimeout != 30*time.Second {
-			t.Fatalf("blank values must use defaults: %q %v", cfg.Database.SSLMode, cfg.HTTP.ReadTimeout)
-		}
-		if err := cfg.Validate(); err != nil {
-			t.Fatalf("blank values must not be errors, got %v", err)
-		}
-	})
+	t.Run("a blank variable uses the default", validateBlankVariableUsesDefault)
 
-	t.Run("durations accept bare seconds and Go syntax", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("HTTP_READ_TIMEOUT", "60")
-		t.Setenv("HTTP_WRITE_TIMEOUT", "30s")
-		t.Setenv("HTTP_IDLE_TIMEOUT", "1m")
-		t.Setenv("HTTP_SHUTDOWN_TIMEOUT", "1h")
-		cfg := FromEnv()
-		if cfg.HTTP.ReadTimeout != 60*time.Second || cfg.HTTP.WriteTimeout != 30*time.Second ||
-			cfg.HTTP.IdleTimeout != time.Minute || cfg.HTTP.ShutdownTimeout != time.Hour {
-			t.Fatalf("durations not parsed: %+v", cfg.HTTP)
-		}
-		if err := cfg.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
+	t.Run("durations accept bare seconds and Go syntax", validateDurationSyntax)
 
-	t.Run("every invalid variable is reported, named, and never echoed", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("HTTP_READ_TIMEOUT", "3os-SECRET")
-		t.Setenv("REDIS_DB", "x-SECRET")
-		err := validateFromEnv(t)
-		wantInError(t, err, "HTTP_READ_TIMEOUT must be a valid", "REDIS_DB must be a valid")
-		if strings.Contains(err.Error(), "SECRET") {
-			t.Fatalf("error echoes a value: %q", err.Error())
-		}
-	})
+	t.Run("every invalid variable is reported, named, and never echoed", validateNeverEchoesValues)
 
 	t.Run("database pool limits", func(t *testing.T) {
 		clearEnv(t)
@@ -468,7 +376,132 @@ func TestValidate(t *testing.T) {
 		t.Setenv("DB_CONN_MAX_IDLE_TIME", "0s")
 		wantInError(t, validateFromEnv(t), "DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_IDLE_TIME")
 	})
+}
 
+func validateAcceptsRequiredOnly(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	if err := validateFromEnv(t); err != nil {
+		t.Fatalf("expected valid startup config, got %v", err)
+	}
+}
+
+func validateAcceptsEverySSLMode(t *testing.T) {
+	for _, mode := range []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"} {
+		clearEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("DB_SSLMODE", mode)
+		if err := validateFromEnv(t); err != nil {
+			t.Fatalf("DB_SSLMODE=%s rejected: %v", mode, err)
+		}
+	}
+}
+
+func validateRejectsBlankTimezone(t *testing.T) {
+	for _, tz := range []string{"", " ", "  Local  "} {
+		clearEnv(t)
+		setRequiredEnv(t)
+		cfg := FromEnv()
+		cfg.App.Timezone = tz
+		wantInError(t, cfg.Validate(), "APP_TIMEZONE")
+	}
+}
+
+func validateAllowsDatabaseURLWithoutParts(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("PORT", "8080")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/app?sslmode=disable")
+	if err := validateFromEnv(t); err != nil {
+		t.Fatalf("expected DATABASE_URL to satisfy db config, got %v", err)
+	}
+}
+
+func validateRequiresCoreConfig(t *testing.T) {
+	clearEnv(t)
+	err := validateFromEnv(t)
+	wantInError(t, err,
+		"PORT is required",
+		"DB_HOST is required when DATABASE_URL is empty",
+		"DB_PORT is required when DATABASE_URL is empty",
+		"DB_USERNAME is required when DATABASE_URL is empty",
+		"DB_NAME is required when DATABASE_URL is empty",
+	)
+	if strings.Contains(strings.ToLower(err.Error()), "jwt") {
+		t.Fatalf("JWT key is validated by authkit.New, not startup config: %q", err.Error())
+	}
+}
+
+func validateIgnoresOptionalLabels(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("SMTP_PORT", "587")
+	t.Setenv("SMTP_USER", "apikey")
+	t.Setenv("SMTP_SUBJECT", "Your OTP")
+	t.Setenv("RESET_SUBJECT", "Reset Password")
+	t.Setenv("STORAGE_PROVIDER", "local")
+	if err := validateFromEnv(t); err != nil {
+		t.Fatalf("expected optional labels without connection config to be ignored, got %v", err)
+	}
+}
+
+func validateReportsUnparsableAndFallsBack(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("HTTP_READ_TIMEOUT", "soon")
+	t.Setenv("MEDIA_UPLOAD_TIMEOUT", "later")
+	t.Setenv("DB_CONN_MAX_LIFETIME", "forever")
+	t.Setenv("DB_MAX_OPEN_CONNS", "many")
+	t.Setenv("HTTP_MAX_BODY_MB", "big")
+	cfg := FromEnv()
+	if cfg.HTTP.ReadTimeout != 30*time.Second || cfg.Media.UploadTimeout != time.Minute || cfg.Database.MaxOpenConns != 100 {
+		t.Fatalf("unparsable values must fall back to defaults: %+v %+v %+v", cfg.HTTP, cfg.Media, cfg.Database)
+	}
+	wantInError(t, cfg.Validate(),
+		"HTTP_READ_TIMEOUT", "MEDIA_UPLOAD_TIMEOUT", "DB_CONN_MAX_LIFETIME", "DB_MAX_OPEN_CONNS", "HTTP_MAX_BODY_MB",
+	)
+}
+
+func validateBlankVariableUsesDefault(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("DB_SSLMODE", "")
+	t.Setenv("HTTP_READ_TIMEOUT", "  ")
+	cfg := FromEnv()
+	if cfg.Database.SSLMode != "disable" || cfg.HTTP.ReadTimeout != 30*time.Second {
+		t.Fatalf("blank values must use defaults: %q %v", cfg.Database.SSLMode, cfg.HTTP.ReadTimeout)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("blank values must not be errors, got %v", err)
+	}
+}
+
+func validateDurationSyntax(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("HTTP_READ_TIMEOUT", "60")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "30s")
+	t.Setenv("HTTP_IDLE_TIMEOUT", "1m")
+	t.Setenv("HTTP_SHUTDOWN_TIMEOUT", "1h")
+	cfg := FromEnv()
+	if cfg.HTTP.ReadTimeout != 60*time.Second || cfg.HTTP.WriteTimeout != 30*time.Second ||
+		cfg.HTTP.IdleTimeout != time.Minute || cfg.HTTP.ShutdownTimeout != time.Hour {
+		t.Fatalf("durations not parsed: %+v", cfg.HTTP)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateNeverEchoesValues(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("HTTP_READ_TIMEOUT", "3os-SECRET")
+	t.Setenv("REDIS_DB", "x-SECRET")
+	err := validateFromEnv(t)
+	wantInError(t, err, "HTTP_READ_TIMEOUT must be a valid", "REDIS_DB must be a valid")
+	if strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("error echoes a value: %q", err.Error())
+	}
 }
 
 func TestValidateErrorsNeverContainSecrets(t *testing.T) {
