@@ -104,3 +104,23 @@ func TestTheRateLimiterDoesNotCoverTheSyncRoutes(t *testing.T) {
 		}
 	}
 }
+
+// A Redis outage lets the public reads through, unless LIMITER_FAIL_CLOSED asks
+// for the limiter to refuse them.
+func TestPublicReadsFollowTheFailClosedSetting(t *testing.T) {
+	for _, c := range []struct {
+		failClosed bool
+		want       int
+	}{{false, http.StatusBadRequest}, {true, http.StatusServiceUnavailable}} {
+		mr := miniredis.RunT(t)
+		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		t.Cleanup(func() { _ = client.Close() })
+		d := routertest.NewDeps(t, func(cfg *config.Config) { cfg.Auth.FailClosedLimiters = c.failClosed })
+		d.Redis = client
+		engine := engineFor(t, d)
+		mr.Close()
+		if got := routertest.Serve(engine, http.MethodGet, "/api/location/city"); got != c.want {
+			t.Fatalf("fail closed = %v: got %d, want %d", c.failClosed, got, c.want)
+		}
+	}
+}

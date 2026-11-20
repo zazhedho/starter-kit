@@ -34,7 +34,9 @@ misbehaving Location Service, `502`; anything unexpected, `500` with only a log 
 `WARN`, server errors at `ERROR`.
 
 Public reads are limited per client IP to `LOCATION_RATE_LIMIT` requests per `LOCATION_RATE_WINDOW_SECONDS`
-(`429` over it). The limit needs Redis; without Redis it is off.
+(`429` over it). The limit needs Redis; without Redis it is off and a warning is logged at startup. When Redis
+fails while it is configured, the reads are let through unless `LIMITER_FAIL_CLOSED=true`, which answers `503`.
+Behind a load balancer or CDN list it in `TRUSTED_PROXIES`, or every client shares one limit.
 
 The migration seeds the permission `sync_locations` (resource `locations`, action `sync`) and grants it to the
 `admin` and `superadmin` roles. Grant it to other roles through the role-permission API.
@@ -59,7 +61,7 @@ bootstrap.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LOCATION_SERVICE_BASE_URL` | `https://location-service-y7si.onrender.com` | base URL of the Location Service (a trailing `/` is removed); must be an `http` or `https` URL with a host, and `https` unless `APP_ENV` is `development`, `dev`, `local` or `test` |
+| `LOCATION_SERVICE_BASE_URL` | `https://location-service-y7si.onrender.com` (the maintained default service) | base URL of the Location Service (a trailing `/` is removed); must be an `http` or `https` URL with a host, and `https` unless `APP_ENV` is `development`, `dev`, `local` or `test` |
 | `LOCATION_SERVICE_TIMEOUT_SECONDS` | `20` | per-request timeout in whole seconds; zero or less means the default |
 | `LOCATION_SERVICE_MAX_RESPONSE_MB` | `4` | largest accepted Location Service response body, 1 to 64 MB; a larger one fails the call |
 | `LOCATION_RATE_LIMIT` | `60` | public reads per client IP and window; must be above zero |

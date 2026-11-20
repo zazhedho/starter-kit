@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -25,6 +26,15 @@ type Location struct {
 	RateLimit  int
 	RateWindow time.Duration
 }
+
+// String redacts any userinfo of the service URL.
+func (l Location) String() string {
+	return fmt.Sprintf("Location{ServiceBaseURL:%q ServiceTimeout:%s CacheTTL:%s MaxResponseBytes:%d RateLimit:%d RateWindow:%s}",
+		withoutUserinfo(l.ServiceBaseURL), l.ServiceTimeout, l.CacheTTL, l.MaxResponseBytes, l.RateLimit, l.RateWindow)
+}
+
+// GoString keeps %#v from printing the raw fields.
+func (l Location) GoString() string { return l.String() }
 
 func locationFromEnv() Location {
 	return Location{

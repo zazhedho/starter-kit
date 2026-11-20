@@ -71,9 +71,9 @@ capped at 255 characters and replaced by `file` when nothing is left, before it 
 | `STORAGE_SECRET_KEY` | empty | required; never printed in logs |
 | `STORAGE_BUCKET_NAME` | empty | required |
 | `STORAGE_BASE_URL` | empty | public base URL of the bucket, required when media is enabled, must be a valid URL |
-| `STORAGE_USE_SSL` | `false` | use TLS to reach the endpoint; must be `true` for the R2 providers, which would otherwise send the secret key in clear text |
+| `STORAGE_USE_SSL` | `false` | use TLS to reach the endpoint; must be `true` for the R2 providers, which would otherwise send the secret key in clear text; MinIO with `false` outside development logs a startup warning |
 | `STORAGE_REGION` | `auto` for R2, empty for MinIO | region the requests are signed for; leave it empty for MinIO unless you changed the server's region |
-| `STORAGE_PUBLIC_READ` | `false` | MinIO only: give a bucket this service creates an anonymous read policy |
+| `STORAGE_PUBLIC_READ` | `false` | MinIO only: give a bucket this service creates an anonymous read policy; with R2 it has no effect and a startup warning says so |
 | `R2_ACCOUNT_ID` | empty | Cloudflare account id, for the R2 provider |
 
 Storage settings are also validated when any of them is set while media is disabled: the endpoint, both keys
@@ -117,7 +117,9 @@ the list's order, including its `id` tie-breaker.
   other content later: serve uploads from a separate origin or with `Content-Disposition: attachment`. SVG and
   HTML can never be allowed.
 - Rate limiting needs Redis: one limit per client IP and one per user. Without Redis the upload route has no
-  rate limit and a warning is logged at startup.
+  rate limit and a warning is logged at startup. When Redis fails while it is configured, uploads are let through
+  unless `LIMITER_FAIL_CLOSED=true`, which answers `503`. Behind a load balancer or CDN list it in
+  `TRUSTED_PROXIES`, or every client shares one limit.
 
 ### Failure behavior
 

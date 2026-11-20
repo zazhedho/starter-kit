@@ -31,6 +31,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validateSMTP()...)
 	problems = append(problems, c.validateLocation()...)
 	problems = append(problems, c.validateMedia()...)
+	problems = append(problems, c.validatePlaceholders()...)
 
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))

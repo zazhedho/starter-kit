@@ -281,7 +281,7 @@ while the service is still waiting ends the process at once. Set the orchestrato
 
 Copy `.env.example` to `.env`; it lists every variable, grouped by section and by module, with the defaults noted
 in comments. The `.env` file is optional when `APP_ENV` is already set in the environment (this is how containers
-run). Variables that are already set always win over `.env`. A placeholder value (`CHANGE_ME_...`, `minioadmin`, `your_password`) in a secret is logged as a startup warning that names the variable. Module variables (`LOCATION_*`, `MEDIA_*`,
+run). Variables that are already set always win over `.env`. A placeholder value (`CHANGE_ME_...`, `minioadmin`, `your_password`) in a secret stops startup outside `APP_ENV` development, dev, local and test (the storage keys count only when media is enabled); in those it is a startup warning. Both name the variable, never the value. Module variables (`LOCATION_*`, `MEDIA_*`,
 `STORAGE_*`) are documented in [`docs/modules/`](docs/modules/).
 
 Required: `APP_NAME` (unique per application; authkit binds tokens to it), `APP_ENV`, `PORT` (no default),
@@ -371,7 +371,7 @@ Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is n
 - Configured but unreachable (or wrong password): the service refuses to start, exit code 1, with
   `open redis: ping redis: connection refused` (or the matching reason). The URL and password are never logged.
 
-`.env.example` ships with the Redis lines commented out. Media upload limits (per IP and per user) and the public location read limit need Redis; media enabled without Redis logs a startup warning.
+`.env.example` ships with the Redis lines commented out. Media upload limits (per IP and per user) and the public location read limit need Redis; without Redis the service logs a startup warning for the location reads (and for media when it is enabled). When Redis is configured but fails, those limiters let requests through unless `LIMITER_FAIL_CLOSED=true`, which answers `503`.
 
 ### Logging
 

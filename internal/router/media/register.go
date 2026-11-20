@@ -35,17 +35,19 @@ func Register(r gin.IRouter, d module.Deps) error {
 		if d.Redis != nil {
 			uploadHandlers = append(uploadHandlers,
 				gokit.IPRateLimit(gokit.RateLimitOptions{
-					Redis:  d.Redis,
-					Prefix: "media_upload",
-					Limit:  m.UploadRateLimit,
-					Window: m.UploadRateWindow,
+					Redis:      d.Redis,
+					Prefix:     "media_upload",
+					Limit:      m.UploadRateLimit,
+					Window:     m.UploadRateWindow,
+					FailClosed: d.Config.Auth.FailClosedLimiters,
 				}),
 				gokit.IPRateLimit(gokit.RateLimitOptions{
-					Redis:   d.Redis,
-					Prefix:  "media_upload_user",
-					Limit:   m.UserUploadLimit,
-					Window:  m.UserUploadWindow,
-					KeyFunc: func(c *gin.Context) string { return authkit.ScopeFrom(c.Request.Context()).UserID },
+					Redis:      d.Redis,
+					Prefix:     "media_upload_user",
+					Limit:      m.UserUploadLimit,
+					Window:     m.UserUploadWindow,
+					FailClosed: d.Config.Auth.FailClosedLimiters,
+					KeyFunc:    func(c *gin.Context) string { return authkit.ScopeFrom(c.Request.Context()).UserID },
 				}))
 		}
 		uploadHandlers = append(uploadHandlers, h.Upload)

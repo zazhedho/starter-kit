@@ -347,3 +347,30 @@ func TestMediaUploadIsLimitedPerUser(t *testing.T) {
 		t.Fatalf("first upload of another user = %d, want 201: the limit is per user", got)
 	}
 }
+
+func TestMediaUploadFollowsTheFailClosedSetting(t *testing.T) {
+	for _, c := range []struct {
+		failClosed bool
+		want       int
+	}{{false, http.StatusCreated}, {true, http.StatusServiceUnavailable}} {
+		mr := miniredis.RunT(t)
+		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		t.Cleanup(func() { _ = client.Close() })
+
+		d, mock := authedDeps(t)
+		d.Redis = client
+		d.Config.Auth.FailClosedLimiters = c.failClosed
+		d.Config.Media.UploadRateLimit, d.Config.Media.UploadRateWindow = 5, time.Minute
+		d.Config.Media.UserUploadLimit, d.Config.Media.UserUploadWindow = 5, time.Minute
+		engine := engineFor(t, d)
+		mr.Close()
+		if !c.failClosed {
+			mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
+		}
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, uploadRequest(t, d, 1024))
+		if rec.Code != c.want {
+			t.Fatalf("fail closed = %v: got %d, want %d: %s", c.failClosed, rec.Code, c.want, rec.Body.String())
+		}
+	}
+}
