@@ -177,7 +177,8 @@ cmd/api/main.go
     |- 1. load configuration (internal/app.loadConfig), in this order:
     |      a. .env            godotenv, never overrides variables that are already set;
     |                         a missing file is an error only when APP_ENV is not set
-    |      b. CONFIG_ID       config.LoadRemote(): Consul or config file fills the environment
+    |      b. remote config   config.LoadRemote(): Consul or a config file fills the variables
+    |                         that are not set yet (the environment wins)
     |      c. environment     config.FromEnv() builds the typed Config (database, Redis, SMTP, ...)
     |      d. flags           -port, -appname, -migrate, -migrate-only
     |      e. Validate()      every problem reported at once, naming variables, never values
@@ -283,6 +284,25 @@ Configuration is validated once at startup. An invalid value stops the service w
 that names the variable but never prints its value, for example `HTTP_READ_TIMEOUT must be a valid duration such as 60, 30s, 1m or 1h`.
 Config is read only through `gokit.GetEnv` (unset or blank means the default; an unparsable value falls back and is
 reported) and checked once with `gokit.EnvErrors()`, which `Validate` folds into its error.
+
+### Precedence and remote configuration
+
+A variable takes its value from the first of these that sets it (a blank value counts as unset):
+
+1. the process environment;
+2. `.env` (loaded without overriding the environment);
+3. remote configuration: Consul when `CONSUL` is set, otherwise a file;
+4. the default in code.
+
+| Variable | Meaning |
+|---|---|
+| `CONSUL` | Consul agent address, for example `127.0.0.1:8500`; enables the Consul source |
+| `CONSUL_PATH` | key prefix; the key read is `<CONSUL_PATH>/<APP_ENV>` and holds a JSON object of settings |
+| `APP_CONFIG` | directory holding `app.env`; without it the file is `config/<APP_ENV>.env` |
+| `CONFIG_ID` | a source whose `config_id` equals this value was applied before and is skipped |
+
+A missing config file is logged at debug level only; a source that exists but cannot be read is logged as an error and
+ignored. Remote configuration never overrides a variable that is already set.
 
 ### HTTP, time zone and database pool
 

@@ -3,81 +3,98 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	redismock "github.com/go-redis/redismock/v9"
-	"github.com/spf13/viper"
+	"github.com/zazhedho/logus"
+
+	"starter-kit/internal/testutil/logcapture"
 )
 
-func TestGetAppConfReturnsDefaultWhenConfigMissing(t *testing.T) {
-	viper.Reset()
-	t.Setenv("CONSUL", "")
-	t.Setenv("APP_CONFIG", t.TempDir())
-	t.Setenv("APP_ENV", "test")
-
-	if got := getAppConf("MISSING_VALUE", "fallback", nil); got != "fallback" {
-		t.Fatalf("expected fallback value, got %v", got)
-	}
-}
-
-func TestGetAppConfLoadsLocalEnvFileAndExportsValues(t *testing.T) {
-	viper.Reset()
+func writeAppEnv(t *testing.T, content string) {
+	t.Helper()
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "app.env")
-	if err := os.WriteFile(configPath, []byte("CONFIG_ID=file-config\nFEATURE_FLAG=enabled\nFEATURE_INT=42\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "app.env"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("CONSUL", "")
 	t.Setenv("APP_CONFIG", dir)
 	t.Setenv("APP_ENV", "test")
-	t.Setenv("CONFIG_ID", "old-config")
-
-	if got := getAppConf("FEATURE_FLAG", "fallback", nil); got != "enabled" {
-		t.Fatalf("expected value from config file, got %v", got)
-	}
-	if got := os.Getenv("FEATURE_INT"); got != "42" {
-		t.Fatalf("expected config value exported to env, got %q", got)
-	}
-}
-
-func TestGetAppConfUsesCachedConsulConfig(t *testing.T) {
-	viper.Reset()
-	client, mock := redismock.NewClientMock()
-	t.Setenv("CONSUL", "127.0.0.1:8500")
-	t.Setenv("CONSUL_PATH", "starter")
-	t.Setenv("APP_ENV", "test")
-	t.Setenv("CACHE", "on")
-	t.Setenv("CONFIG_ID", "old-config")
-
-	mock.ExpectGet("cache:config:app").SetVal(`{"config_id":"cached-config","feature_flag":"cached"}`)
-	if got := getAppConf("FEATURE_FLAG", "fallback", client); got != "cached" {
-		t.Fatalf("expected cached config value, got %v", got)
-	}
-	if got := os.Getenv("CONFIG_ID"); got != "cached-config" {
-		t.Fatalf("expected cached config exported to env, got %q", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("redis expectations: %v", err)
-	}
 }
 
 func TestLoadRemoteExportsTheConfigFile(t *testing.T) {
-	viper.Reset()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "app.env"), []byte("CONFIG_ID=remote-file\nREMOTE_FLAG=on\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	t.Setenv("CONSUL", "")
-	t.Setenv("APP_CONFIG", dir)
-	t.Setenv("APP_ENV", "test")
-	t.Setenv("CONFIG_ID", "old-config")
+	writeAppEnv(t, "CONFIG_ID=remote-file\nREMOTE_FLAG=on\nREMOTE_INT=42\n")
+	t.Setenv("CONFIG_ID", "")
+	t.Setenv("REMOTE_FLAG", "")
+	t.Setenv("REMOTE_INT", "")
 
 	LoadRemote()
 
-	if got := os.Getenv("REMOTE_FLAG"); got != "on" {
-		t.Fatalf("REMOTE_FLAG = %q, want the config file value exported", got)
+	for key, want := range map[string]string{"REMOTE_FLAG": "on", "REMOTE_INT": "42", "CONFIG_ID": "remote-file"} {
+		if got := os.Getenv(key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
 	}
-	if got := os.Getenv("CONFIG_ID"); got != "remote-file" {
-		t.Fatalf("CONFIG_ID = %q", got)
+}
+
+func TestLoadRemoteDoesNotOverrideTheEnvironment(t *testing.T) {
+	writeAppEnv(t, "KEPT_BY_ENV=from-file\nFILLED_FROM_FILE=from-file\nBLANK_IN_ENV=from-file\n")
+	t.Setenv("KEPT_BY_ENV", "from-env")
+	t.Setenv("BLANK_IN_ENV", "  ")
+	t.Setenv("FILLED_FROM_FILE", "")
+	if err := os.Unsetenv("FILLED_FROM_FILE"); err != nil {
+		t.Fatal(err)
+	}
+
+	LoadRemote()
+
+	if got := os.Getenv("KEPT_BY_ENV"); got != "from-env" {
+		t.Fatalf("KEPT_BY_ENV = %q: the environment must win over remote config", got)
+	}
+	if got := os.Getenv("FILLED_FROM_FILE"); got != "from-file" {
+		t.Fatalf("FILLED_FROM_FILE = %q, want the file value for an unset variable", got)
+	}
+	if got := os.Getenv("BLANK_IN_ENV"); got != "from-file" {
+		t.Fatalf("BLANK_IN_ENV = %q, want the file value for a blank variable", got)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("FILLED_FROM_FILE") })
+}
+
+func TestLoadRemoteSkipsAConfigAlreadyApplied(t *testing.T) {
+	writeAppEnv(t, "CONFIG_ID=same\nSKIPPED_FLAG=on\n")
+	t.Setenv("CONFIG_ID", "same")
+	t.Setenv("SKIPPED_FLAG", "")
+	if err := os.Unsetenv("SKIPPED_FLAG"); err != nil {
+		t.Fatal(err)
+	}
+
+	LoadRemote()
+
+	if _, ok := os.LookupEnv("SKIPPED_FLAG"); ok {
+		t.Fatal("a config whose CONFIG_ID is already applied must not be exported again")
+	}
+}
+
+func TestLoadRemoteLogsAMissingFileAtDebugOnly(t *testing.T) {
+	t.Setenv("CONSUL", "")
+	t.Setenv("APP_CONFIG", "")
+	t.Setenv("APP_ENV", "no-such-env")
+	t.Chdir(t.TempDir())
+
+	capture := logcapture.Start()
+	defer capture.Stop()
+	logus.SetLevel(logus.LevelInfo)
+	t.Cleanup(func() { logus.SetLevel(logus.LevelInfo) })
+
+	LoadRemote()
+	if got := capture.All(); strings.Contains(got, "no-such-env") {
+		t.Fatalf("a missing config file must not be logged above debug: %s", got)
+	}
+
+	logus.SetLevel(logus.LevelDebug)
+	mark := capture.Mark()
+	LoadRemote()
+	if got := capture.Since(mark); !strings.Contains(got, "no-such-env") {
+		t.Fatalf("a missing config file must be logged at debug, got: %q", got)
 	}
 }
