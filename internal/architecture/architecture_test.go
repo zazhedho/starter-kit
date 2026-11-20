@@ -953,7 +953,7 @@ func isConstructorName(name string) bool {
 	return ok && (rest == "" || rest[0] >= 'A' && rest[0] <= 'Z')
 }
 
-func constructorViolations(files []*ast.File) []string {
+func structNames(files []*ast.File) map[string]bool {
 	structs := map[string]bool{}
 	for _, f := range files {
 		for _, decl := range f.Decls {
@@ -962,31 +962,42 @@ func constructorViolations(files []*ast.File) []string {
 				continue
 			}
 			for _, spec := range gen.Specs {
-				if ts := spec.(*ast.TypeSpec); ts != nil {
-					_, isStruct := ts.Type.(*ast.StructType)
-					structs[ts.Name.Name] = isStruct
-				}
+				ts := spec.(*ast.TypeSpec)
+				_, isStruct := ts.Type.(*ast.StructType)
+				structs[ts.Name.Name] = isStruct
 			}
 		}
 	}
+	return structs
+}
 
+func resultTypes(fn *ast.FuncDecl) []ast.Expr {
+	var results []ast.Expr
+	if fn.Type.Results == nil {
+		return results
+	}
+	for _, field := range fn.Type.Results.List {
+		for range max(len(field.Names), 1) {
+			results = append(results, field.Type)
+		}
+	}
+	return results
+}
+
+func exportedConstructor(decl ast.Decl) (*ast.FuncDecl, bool) {
+	fn, ok := decl.(*ast.FuncDecl)
+	if !ok || fn.Recv != nil || !fn.Name.IsExported() || !isConstructorName(fn.Name.Name) {
+		return nil, false
+	}
+	return fn, true
+}
+
+func constructorViolations(files []*ast.File) []string {
+	structs := structNames(files)
 	var out []string
 	for _, f := range files {
 		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !fn.Name.IsExported() || !isConstructorName(fn.Name.Name) {
-				continue
-			}
-			var results []ast.Expr
-			if fn.Type.Results != nil {
-				for _, field := range fn.Type.Results.List {
-					n := max(len(field.Names), 1)
-					for range n {
-						results = append(results, field.Type)
-					}
-				}
-			}
-			if !returnsConcretePointer(results, structs) {
+			if fn, ok := exportedConstructor(decl); ok && !returnsConcretePointer(resultTypes(fn), structs) {
 				out = append(out, fn.Name.Name)
 			}
 		}
@@ -1027,6 +1038,26 @@ func parseSources(t *testing.T, sources ...string) []*ast.File {
 	return files
 }
 
+func parseNonTestFiles(dir string) ([]*ast.File, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, nil
+}
+
 func TestConstructorsReturnConcreteTypes(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, tree := range constructorTrees {
@@ -1034,21 +1065,9 @@ func TestConstructorsReturnConcreteTypes(t *testing.T) {
 			if err != nil || !d.IsDir() {
 				return err
 			}
-			entries, err := os.ReadDir(filepath.Join(root, p))
+			files, err := parseNonTestFiles(filepath.Join(root, p))
 			if err != nil {
 				return err
-			}
-			fset := token.NewFileSet()
-			var files []*ast.File
-			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-					continue
-				}
-				f, err := parser.ParseFile(fset, filepath.Join(root, p, e.Name()), nil, 0)
-				if err != nil {
-					return err
-				}
-				files = append(files, f)
 			}
 			for _, name := range constructorViolations(files) {
 				t.Errorf("%s: %s must return a pointer to a struct (and optionally an error), not an interface", p, name)
