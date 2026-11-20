@@ -11,76 +11,86 @@ func warningsText(t *testing.T) string {
 }
 
 func TestWarnings(t *testing.T) {
-	t.Run("without redis, media and the public location reads are not limited", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		enableMediaEnv(t)
-		got := warningsText(t)
-		for _, want := range []string{"MEDIA_ENABLED", "LOCATION_RATE_LIMIT"} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("warnings = %q, want %s", got, want)
-			}
+	t.Run("without redis, media and the public location reads are not limited", warnsWithoutRedis)
+	t.Run("placeholder secrets in development name the variable only", warnsPlaceholderSecretsByName)
+	t.Run("minio without ssl outside development", warnsMinioWithoutSSL)
+	t.Run("public read has no effect with r2", warnsPublicReadOnR2)
+	t.Run("a clean config has none", isQuietWhenClean)
+}
+
+func warnsWithoutRedis(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	enableMediaEnv(t)
+	got := warningsText(t)
+	for _, want := range []string{"MEDIA_ENABLED", "LOCATION_RATE_LIMIT"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("warnings = %q, want %s", got, want)
 		}
-		t.Setenv("REDIS_HOST", "cache")
-		t.Setenv("STORAGE_USE_SSL", "true")
-		if got := FromEnv().Warnings(); len(got) != 0 {
-			t.Fatalf("warnings = %v, want none with Redis", got)
+	}
+	t.Setenv("REDIS_HOST", "cache")
+	t.Setenv("STORAGE_USE_SSL", "true")
+	if got := FromEnv().Warnings(); len(got) != 0 {
+		t.Fatalf("warnings = %v, want none with Redis", got)
+	}
+}
+
+func warnsPlaceholderSecretsByName(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("REDIS_HOST", "cache")
+	t.Setenv("APP_ENV", "development")
+	enableMediaEnv(t)
+	t.Setenv("DB_PASS", "CHANGE_ME_DB_PASSWORD")
+	t.Setenv("STORAGE_SECRET_KEY", "minioadmin")
+	t.Setenv("JWT_KEY", "a-real-looking-key-that-is-long-enough-1234")
+	got := warningsText(t)
+	for _, want := range []string{"DB_PASS", "STORAGE_SECRET_KEY"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("warnings = %q, want %s", got, want)
 		}
-	})
-	t.Run("placeholder secrets in development name the variable only", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("REDIS_HOST", "cache")
-		t.Setenv("APP_ENV", "development")
-		enableMediaEnv(t)
-		t.Setenv("DB_PASS", "CHANGE_ME_DB_PASSWORD")
-		t.Setenv("STORAGE_SECRET_KEY", "minioadmin")
-		t.Setenv("JWT_KEY", "a-real-looking-key-that-is-long-enough-1234")
-		got := warningsText(t)
-		for _, want := range []string{"DB_PASS", "STORAGE_SECRET_KEY"} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("warnings = %q, want %s", got, want)
-			}
-		}
-		if strings.Contains(got, "JWT_KEY") || strings.Contains(got, "CHANGE_ME") || strings.Contains(got, "minioadmin") {
-			t.Fatalf("warnings = %q: only placeholder variables, never values", got)
-		}
-	})
-	t.Run("minio without ssl outside development", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("REDIS_HOST", "cache")
-		enableMediaEnv(t)
-		t.Setenv("STORAGE_USE_SSL", "false")
-		t.Setenv("APP_ENV", "production")
-		if got := warningsText(t); !strings.Contains(got, "STORAGE_USE_SSL") {
-			t.Fatalf("warnings = %q, want STORAGE_USE_SSL", got)
-		}
-		t.Setenv("APP_ENV", "development")
-		if got := warningsText(t); strings.Contains(got, "STORAGE_USE_SSL") {
-			t.Fatalf("warnings = %q: development may use plain http", got)
-		}
-	})
-	t.Run("public read has no effect with r2", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("REDIS_HOST", "cache")
-		enableMediaEnv(t)
-		t.Setenv("STORAGE_PROVIDER", "r2")
-		t.Setenv("STORAGE_USE_SSL", "true")
-		t.Setenv("STORAGE_PUBLIC_READ", "true")
-		if got := warningsText(t); !strings.Contains(got, "STORAGE_PUBLIC_READ") {
-			t.Fatalf("warnings = %q, want STORAGE_PUBLIC_READ", got)
-		}
-	})
-	t.Run("a clean config has none", func(t *testing.T) {
-		clearEnv(t)
-		setRequiredEnv(t)
-		t.Setenv("REDIS_HOST", "cache")
-		if got := FromEnv().Warnings(); len(got) != 0 {
-			t.Fatalf("warnings = %v", got)
-		}
-	})
+	}
+	if strings.Contains(got, "JWT_KEY") || strings.Contains(got, "CHANGE_ME") || strings.Contains(got, "minioadmin") {
+		t.Fatalf("warnings = %q: only placeholder variables, never values", got)
+	}
+}
+
+func warnsMinioWithoutSSL(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("REDIS_HOST", "cache")
+	enableMediaEnv(t)
+	t.Setenv("STORAGE_USE_SSL", "false")
+	t.Setenv("APP_ENV", "production")
+	if got := warningsText(t); !strings.Contains(got, "STORAGE_USE_SSL") {
+		t.Fatalf("warnings = %q, want STORAGE_USE_SSL", got)
+	}
+	t.Setenv("APP_ENV", "development")
+	if got := warningsText(t); strings.Contains(got, "STORAGE_USE_SSL") {
+		t.Fatalf("warnings = %q: development may use plain http", got)
+	}
+}
+
+func warnsPublicReadOnR2(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("REDIS_HOST", "cache")
+	enableMediaEnv(t)
+	t.Setenv("STORAGE_PROVIDER", "r2")
+	t.Setenv("STORAGE_USE_SSL", "true")
+	t.Setenv("STORAGE_PUBLIC_READ", "true")
+	if got := warningsText(t); !strings.Contains(got, "STORAGE_PUBLIC_READ") {
+		t.Fatalf("warnings = %q, want STORAGE_PUBLIC_READ", got)
+	}
+}
+
+func isQuietWhenClean(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("REDIS_HOST", "cache")
+	if got := FromEnv().Warnings(); len(got) != 0 {
+		t.Fatalf("warnings = %v", got)
+	}
 }
 
 func TestPlaceholderSecretsAreErrorsOutsideDevelopment(t *testing.T) {
