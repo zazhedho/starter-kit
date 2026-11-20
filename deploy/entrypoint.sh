@@ -1,11 +1,5 @@
 #!/bin/sh
 set -e
 
-if [ "${RUN_MIGRATION:-false}" = "true" ] || [ "${RUN_MIGRATION:-0}" = "1" ]; then
-  case " $* " in
-    *" -migrate "*) ;;
-    *) set -- -migrate "$@" ;;
-  esac
-fi
-
+# Migrations are the binary's job: it reads RUN_MIGRATION (default true) itself.
 exec ./main "$@"

@@ -25,6 +25,9 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
+          # Builds golangci-lint with the Go of this job (go.mod's 1.27), instead of
+          # downloading a binary built with an older Go.
+          install-mode: goinstall
           args: --config .golangci.yml --timeout=5m ./...
 
   vet:

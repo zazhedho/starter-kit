@@ -11,7 +11,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o main ./cmd/api
 
 # Stage 2: Create the final image
 FROM alpine:3.24
@@ -38,5 +38,10 @@ USER app
 # Expose port 8080 to the outside world
 EXPOSE 8080
 
-# Optional migration can be toggled via RUN_MIGRATION=true
+# Liveness only: /healthcheck does not touch the database. PORT is the service's
+# port (8080 when unset); alpine's busybox provides wget.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-8080}/healthcheck" || exit 1
+
+# The service migrates at startup unless RUN_MIGRATION=false.
 ENTRYPOINT ["./entrypoint.sh"]
