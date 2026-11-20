@@ -84,9 +84,9 @@ func (d *serviceDouble) Delete(_ context.Context, actor domainmedia.Actor, id st
 	return d.media, d.err
 }
 
-func serve(t *testing.T, svc Service, userID, role, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
+func serve(t *testing.T, svc Service, userID, role string, req request) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveWithPermissions(t, svc, caller{userID, role, nil}, request{method, target, body, contentType})
+	return serveWithPermissions(t, svc, caller{userID, role, nil}, req)
 }
 
 type caller struct {
@@ -176,7 +176,7 @@ func TestUploadHandlerPassesTheAuthenticatedUserToTheService(t *testing.T) {
 	svc := &serviceDouble{maxFileSize: 1024, media: domainmedia.Media{ID: "media-1", OwnerUserID: owner}}
 	body, ct := multipartBody(t, "file", "a.png", []byte("data"))
 
-	rec := serve(t, svc, owner, "viewer", http.MethodPost, "/media", body, ct)
+	rec := serve(t, svc, owner, "viewer", request{http.MethodPost, "/media", body, ct})
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -193,7 +193,7 @@ func TestUploadHandlerRejectsARequestWithoutFile(t *testing.T) {
 	svc := &serviceDouble{maxFileSize: 1024}
 	body, ct := multipartBody(t, "", "", nil)
 
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodPost, "/media", body, ct)
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodPost, "/media", body, ct})
 
 	if rec.Code != http.StatusBadRequest || errorMessage(t, rec) != "file is required" {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
@@ -207,7 +207,7 @@ func TestUploadHandlerAnswers413ForABodyOverTheLimit(t *testing.T) {
 	svc := &serviceDouble{maxFileSize: 10}
 	body, ct := multipartBody(t, "file", "big.png", bytes.Repeat([]byte("x"), int(multipartOverhead)+1024))
 
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodPost, "/media", body, ct)
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodPost, "/media", body, ct})
 
 	if rec.Code != http.StatusRequestEntityTooLarge || errorMessage(t, rec) != domainmedia.ErrFileTooLarge.Error() {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
@@ -232,7 +232,7 @@ func TestUploadHandlerMapsServiceErrors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			svc := &serviceDouble{maxFileSize: 1024, err: c.err}
 			body, ct := multipartBody(t, "file", "a.png", []byte("data"))
-			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodPost, "/media", body, ct)
+			rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodPost, "/media", body, ct})
 			if c.status == http.StatusInternalServerError {
 				if rec.Code != c.status || !strings.HasPrefix(errorMessage(t, rec), c.message) {
 					t.Fatalf("got %d %s, want 500 starting with %q", rec.Code, rec.Body.String(), c.message)
@@ -286,7 +286,7 @@ func TestDeleteHandlerBuildsTheActorFromTheScope(t *testing.T) {
 
 func TestDeleteHandlerRejectsAnInvalidID(t *testing.T) {
 	svc := &serviceDouble{}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodDelete, "/media/not-a-uuid", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodDelete, "/media/not-a-uuid", nil, ""})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -309,7 +309,7 @@ func TestDeleteHandlerMapsServiceErrors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			svc := &serviceDouble{err: c.err}
 			id := uuid.NewString()
-			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodDelete, "/media/"+id, nil, "")
+			rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodDelete, "/media/" + id, nil, ""})
 			if rec.Code != c.status {
 				t.Fatalf("status = %d, want %d, body %s", rec.Code, c.status, rec.Body.String())
 			}
@@ -319,7 +319,7 @@ func TestDeleteHandlerMapsServiceErrors(t *testing.T) {
 
 func TestListHandlerRejectsABadPageNumber(t *testing.T) {
 	svc := &serviceDouble{}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?page=abc", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media?page=abc", nil, ""})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -350,7 +350,7 @@ func TestListHandlerRejectsABadOwnerFilter(t *testing.T) {
 func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 	user, other := uuid.NewString(), uuid.NewString()
 	svc := &serviceDouble{}
-	rec := serve(t, svc, user, "viewer", http.MethodGet, "/media", nil, "")
+	rec := serve(t, svc, user, "viewer", request{http.MethodGet, "/media", nil, ""})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -365,7 +365,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 	target := "/media?search=cat&page=3&limit=5&order_by=size&order_direction=asc" +
 		"&filters[owner_user_id]=" + other + "&filters[content_type]=image/png&filters[object_key]=secret"
 	svc = &serviceDouble{}
-	if rec := serve(t, svc, user, "viewer", http.MethodGet, target, nil, ""); rec.Code != http.StatusOK {
+	if rec := serve(t, svc, user, "viewer", request{http.MethodGet, target, nil, ""}); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
 	want = dtomedia.ListRequest{
@@ -379,7 +379,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 
 func TestListHandlerRespondsWithThePaginationShape(t *testing.T) {
 	svc := &serviceDouble{listItems: []domainmedia.Media{{ID: "m-1", OwnerUserID: "u-1"}}, listTotal: 41, listLimit: 20}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?limit=20&page=2", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media?limit=20&page=2", nil, ""})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -407,7 +407,7 @@ func TestListHandlerRespondsWithThePaginationShape(t *testing.T) {
 
 func TestListHandlerMapsServiceErrors(t *testing.T) {
 	svc := &serviceDouble{err: errors.New("database down")}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media", nil, ""})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -428,7 +428,7 @@ func TestListHandlerPassesTheLimitAndReportsTheAppliedOne(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			svc := &serviceDouble{listLimit: 77}
-			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?"+c.query, nil, "")
+			rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media?" + c.query, nil, ""})
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
@@ -447,7 +447,7 @@ func TestListHandlerPassesTheLimitAndReportsTheAppliedOne(t *testing.T) {
 
 func TestListHandlerIgnoresAMalformedOwnerFilterWithoutListAny(t *testing.T) {
 	svc := &serviceDouble{}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?filters[owner_user_id]=not-a-uuid", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media?filters[owner_user_id]=not-a-uuid", nil, ""})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -458,7 +458,7 @@ func TestListHandlerIgnoresAMalformedOwnerFilterWithoutListAny(t *testing.T) {
 
 func TestListHandlerEmptyResultShape(t *testing.T) {
 	svc := &serviceDouble{listLimit: defaultListLimit}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media", nil, ""})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -486,7 +486,7 @@ func TestListHandlerEmptyResultShape(t *testing.T) {
 
 func TestListHandler500UsesTheStandardBody(t *testing.T) {
 	svc := &serviceDouble{err: errors.New("database down")}
-	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
+	rec := serve(t, svc, uuid.NewString(), "viewer", request{http.MethodGet, "/media", nil, ""})
 	var res struct {
 		LogID   string `json:"log_id"`
 		Message string `json:"message"`
@@ -525,7 +525,7 @@ func TestMediaErrorsUseAFixedEnvelopeMessagePerStatus(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			svc := &serviceDouble{err: c.err}
-			rec := serve(t, svc, uuid.NewString(), "viewer", c.method, c.target, nil, "")
+			rec := serve(t, svc, uuid.NewString(), "viewer", request{c.method, c.target, nil, ""})
 			if rec.Code != c.status || envelopeMessage(t, rec) != c.message || errorMessage(t, rec) != c.detail {
 				t.Fatalf("got %d %s, want %d message %q detail %q", rec.Code, rec.Body.String(), c.status, c.message, c.detail)
 			}

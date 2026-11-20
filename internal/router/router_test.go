@@ -247,7 +247,7 @@ func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
 	if got := routertest.Serve(engine, http.MethodGet, "/api/users"); got != http.StatusUnauthorized {
 		t.Fatalf("GET /api/users without token: expected 401, got %d", got)
 	}
-	if got := routertest.Serve(engine, http.MethodGet, "/api/user/register/status"); got == http.StatusNotFound {
+	if routertest.Serve(engine, http.MethodGet, "/api/user/register/status") == http.StatusNotFound {
 		t.Fatalf("GET /api/user/register/status: route not registered")
 	}
 }
