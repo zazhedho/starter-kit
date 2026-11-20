@@ -166,7 +166,6 @@ package projects
 
 import "errors"
 
-// ErrNameRequired is returned when a project is created without a name.
 var ErrNameRequired = errors.New("project name is required")
 ```
 
@@ -175,14 +174,10 @@ var ErrNameRequired = errors.New("project name is required")
 `internal/dto/projects/projects.go`. Add it only when handler, service and repository share a shape; it must not import gin or gorm. `ListResult.Limit` carries the page size the repository applied, so the handler reports the real one:
 
 ```go
-// Package projects holds the request and result shapes the projects handler,
-// service and repository share. It must not import gin or gorm.
 package projects
 
 import domainprojects "starter-kit/internal/domain/projects"
 
-// ListRequest is a parsed list query: the handler fills it from the URL, the
-// repository applies it.
 type ListRequest struct {
 	Search         string
 	OrderBy        string
@@ -191,9 +186,6 @@ type ListRequest struct {
 	Limit          int
 }
 
-// ListResult is one page of projects. Limit is the page size the repository
-// applied, which can differ from the requested one; use it for the pagination
-// metadata.
 type ListResult struct {
 	Items []domainprojects.Project
 	Total int64
@@ -219,8 +211,6 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-// Repository is the persistence the service needs. The GORM adapter in
-// internal/repositories/projects satisfies it by method set.
 type Repository interface {
 	Store(ctx context.Context, p *domainprojects.Project) error
 	List(ctx context.Context, req dtoprojects.ListRequest) (dtoprojects.ListResult, error)
@@ -241,15 +231,11 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-// Service holds the projects business rules. It imports no framework: ids are
-// injected, and the caller's identity arrives as a plain argument.
 type Service struct {
 	repo  Repository
 	newID func() string
 }
 
-// NewService builds the service. newID returns a new row id; the router passes
-// gokit.CreateUUID.
 func NewService(repo Repository, newID func() string) *Service {
 	return &Service{repo: repo, newID: newID}
 }
@@ -285,7 +271,6 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-// fakeRepository satisfies Repository; services are tested without a database.
 type fakeRepository struct {
 	stored domainprojects.Project
 	err    error
@@ -344,14 +329,10 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-// maxListLimit is the one cap on the page size of a project list.
 const maxListLimit = 100
 
 var listOrderColumns = []string{"name", "created_at"}
 
-// Repository embeds the generic gokit repository for Store, GetByID, Update and
-// Delete, and adds only the list query. Translate gokit.ErrNotFound into a domain
-// ErrNotFound for a lookup the service exposes, as repositories/media does.
 type Repository struct {
 	*gokit.Repository[domainprojects.Project]
 }
@@ -360,18 +341,14 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{Repository: gokit.NewRepository[domainprojects.Project](db)}
 }
 
-// List returns one page of projects and the total. A sort column or direction
-// outside the allow list falls back to created_at DESC instead of failing, and
-// id is the last sort key, so pages never skip or repeat rows.
 func (r *Repository) List(ctx context.Context, req dtoprojects.ListRequest) (dtoprojects.ListResult, error) {
 	orderBy, direction := req.OrderBy, strings.ToUpper(req.OrderDirection)
 	if !slices.Contains(listOrderColumns, orderBy) || (direction != "ASC" && direction != "DESC") {
 		orderBy, direction = "created_at", "DESC"
 	}
 
-	// gokit appends DefaultOrders only when the params carry no explicit
-	// order, so the chosen order goes through DefaultOrders to get the
-	// tie-breaker after it.
+	// gokit appends DefaultOrders only when no explicit order is set, so the chosen order goes through
+	// DefaultOrders to get the tie-breaker.
 	params := gokit.BaseParams{Search: req.Search, Page: req.Page, Limit: req.Limit}
 	opts := gokit.QueryOptions{
 		Search:        gokit.BuildSearchFunc("name"),
@@ -421,8 +398,6 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-// Service is what the handlers call. The concrete service is in
-// internal/services/projects; the router wires it in.
 type Service interface {
 	Create(ctx context.Context, ownerUserID, name string) (domainprojects.Project, error)
 	List(ctx context.Context, req dtoprojects.ListRequest) (dtoprojects.ListResult, error)
@@ -453,11 +428,8 @@ import (
 	httpshared "starter-kit/internal/handlers/http/shared"
 )
 
-// defaultListLimit is the page size when the request names none; the repository
-// owns the maximum.
 const defaultListLimit = 20
 
-// Handler embeds authkit.AuditWriter to record every mutation.
 type Handler struct {
 	service Service
 	authkit.AuditWriter
@@ -492,7 +464,6 @@ func (h *Handler) List(ctx *gin.Context) {
 		fail(ctx, "List", err)
 		return
 	}
-	// The repository caps the limit and reports the one it applied.
 	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, result.Total, params.Page, result.Limit, gokit.RequestID(ctx), result.Items))
 }
 
@@ -503,8 +474,6 @@ func (h *Handler) Create(ctx *gin.Context) {
 		return
 	}
 
-	// The handler turns the authenticated scope into the plain input the
-	// service needs; services never import authkit.
 	scope := authkit.ScopeFrom(ctx.Request.Context())
 	p, err := h.service.Create(ctx.Request.Context(), scope.UserID, req.Name)
 	if err != nil {
@@ -523,17 +492,12 @@ func (h *Handler) Create(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Project created successfully", logID, p))
 }
 
-// fail logs and answers a service error with the status projectsErrorResponse
-// maps it to: WARN for a 4xx, ERROR for a 5xx.
 func fail(ctx *gin.Context, method string, err error) {
 	status, detail := projectsErrorResponse(err)
 	httpshared.Log(ctx, status, "[ProjectsHandler]["+method+"]", "Service."+method, err)
 	httpshared.Write(ctx, status, detail)
 }
 
-// projectsErrorResponse is the one place service errors become HTTP statuses.
-// The detail is written for the caller; an unexpected error gets the standard
-// 500 body instead of its text.
 func projectsErrorResponse(err error) (int, string) {
 	switch {
 	case errors.Is(err, domainprojects.ErrNameRequired):
@@ -565,7 +529,6 @@ import (
 	dtoprojects "starter-kit/internal/dto/projects"
 )
 
-// serviceDouble records what the handler passes to the service.
 type serviceDouble struct {
 	listReq dtoprojects.ListRequest
 	result  dtoprojects.ListResult
@@ -596,8 +559,6 @@ func TestProjectsErrorResponseMapsDomainErrors(t *testing.T) {
 	}
 }
 
-// The handler passes the limit as asked; capping it is the repository's job,
-// and the response reports the limit the repository applied.
 func TestListReportsTheLimitTheRepositoryApplied(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &serviceDouble{result: dtoprojects.ListResult{Total: 3, Limit: 100}}
@@ -656,8 +617,6 @@ func wire(d module.Deps) (*wired, error) {
 `internal/router/projects/register.go`:
 
 ```go
-// Package projects mounts the projects module: wire.go builds it from
-// module.Deps, register.go mounts its routes. Alias routerprojects.
 package projects
 
 import (
@@ -666,7 +625,6 @@ import (
 	"starter-kit/internal/router/module"
 )
 
-// Register wires the module and mounts its routes under r.
 func Register(r gin.IRouter, d module.Deps) error {
 	w, err := wire(d)
 	if err != nil {
@@ -696,8 +654,6 @@ import (
 	"starter-kit/internal/testutil/routertest"
 )
 
-// projectsRoutes is every route the module mounts, pinned on purpose: a new
-// route must be added here and, if it is protected, to TestProjectsRoutesProtection.
 var projectsRoutes = []string{
 	"GET /api/projects",
 	"POST /api/projects",
@@ -766,14 +722,12 @@ package config
 
 import "github.com/zazhedho/gokit"
 
-// Projects is the projects module's setting.
 type Projects struct{ PageSize int }
 
 func projectsFromEnv() Projects {
 	return Projects{PageSize: gokit.GetEnv("PROJECTS_PAGE_SIZE", 20)}
 }
 
-// validateProjects names the variable and never its value.
 func (c Config) validateProjects() []string {
 	if n := c.Projects.PageSize; n < 1 || n > 100 {
 		return []string{"PROJECTS_PAGE_SIZE must be between 1 and 100"}
