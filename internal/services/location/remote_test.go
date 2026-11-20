@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -189,31 +190,37 @@ func scopedUpstream() *upstream {
 	}}
 }
 
-func TestFetchLevelsSendTheRelativeCodesAndStoreFullOnes(t *testing.T) {
-	up := &upstream{handle: func(req *http.Request) *http.Response {
+// relativeCodesUpstream answers each level and fails the test unless the
+// request carries the relative codes of its parents.
+func relativeCodesUpstream(t *testing.T) *upstream {
+	return &upstream{handle: func(req *http.Request) *http.Response {
 		q := req.URL.Query()
-		if q.Get("code_format") != "short" {
-			t.Errorf("%s: code_format = %q, want short", req.URL.Path, q.Get("code_format"))
-		}
+		requireQuery(t, req.URL.Path, q, map[string]string{"code_format": "short"})
 		switch {
 		case strings.Contains(req.URL.Path, "regencies"):
-			if q.Get("province_code") != "31" {
-				t.Errorf("regencies: province_code = %q", q.Get("province_code"))
-			}
+			requireQuery(t, "regencies", q, map[string]string{"province_code": "31"})
 			return okResponse(`[{"code":"71","name":"Jakarta Selatan"}]`)
 		case strings.Contains(req.URL.Path, "districts"):
-			if q.Get("province_code") != "31" || q.Get("regency_code") != "71" {
-				t.Errorf("districts: query = %v, want province 31 and the relative regency 71", q)
-			}
+			requireQuery(t, "districts", q, map[string]string{"province_code": "31", "regency_code": "71"})
 			return okResponse(`[{"code":"01","name":"Tebet"}]`)
 		default:
-			if q.Get("regency_code") != "71" || q.Get("district_code") != "01" {
-				t.Errorf("villages: query = %v, want relative regency 71 and district 01", q)
-			}
+			requireQuery(t, "villages", q, map[string]string{"regency_code": "71", "district_code": "01"})
 			return okResponse(`[{"code":"0001","name":"Tebet Barat"}]`)
 		}
 	}}
-	svc := newTestService(t, &locationRepoTestDouble{}, up)
+}
+
+func requireQuery(t *testing.T, label string, q url.Values, want map[string]string) {
+	t.Helper()
+	for key, value := range want {
+		if got := q.Get(key); got != value {
+			t.Errorf("%s: %s = %q, want %q", label, key, got, value)
+		}
+	}
+}
+
+func TestFetchLevelsSendTheRelativeCodesAndStoreFullOnes(t *testing.T) {
+	svc := newTestService(t, &locationRepoTestDouble{}, relativeCodesUpstream(t))
 	ctx := context.Background()
 
 	cities, err := svc.fetchCities(ctx, "31")
