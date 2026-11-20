@@ -11,10 +11,9 @@ import (
 	"sync"
 )
 
-// Lifecycle collects the shutdown hooks of work that outlives a request.
-// Shutdown has two steps. Drain runs first, when the signal arrives and before the
-// HTTP server drains: it tells background work to stop. Close runs after the
-// server has drained and before the database and Redis close: it waits for that work.
+// Lifecycle collects shutdown hooks of work that outlives a request. Drain runs
+// when the signal arrives, before the HTTP drain, and tells the work to stop;
+// Close runs after the drain, before the database closes, and waits for it.
 type Lifecycle struct {
 	mu       sync.Mutex
 	hooks    []hook

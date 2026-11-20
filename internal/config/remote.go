@@ -11,12 +11,9 @@ import (
 	"github.com/zazhedho/logus"
 )
 
-// LoadRemote exports the settings of Consul (CONSUL, CONSUL_PATH) or of a config
-// file (APP_CONFIG, else config/<APP_ENV>.env) to the environment. A variable
-// that is already set and not blank keeps its value, so the environment always
-// wins over remote configuration. A source with the same CONFIG_ID as the
-// environment was applied before and is skipped. A missing or unreadable source
-// is logged and ignored. Call it once, before FromEnv.
+// LoadRemote exports Consul or config file settings to the environment, but only
+// for variables that are unset or blank: the environment wins. A source whose
+// CONFIG_ID equals the environment's was applied before. Call it before FromEnv.
 func LoadRemote() {
 	var appConf map[string]string
 	if consul := gokit.GetEnv("CONSUL", ""); consul != "" {

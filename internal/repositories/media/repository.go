@@ -55,11 +55,8 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-// List returns one page of media and the total count. This repository is the
-// authority for what may be filtered and sorted: an order column or direction
-// outside the allow list falls back to created_at DESC instead of failing, so a
-// bad order_by never turns into a 500. id is always the last sort key, so rows
-// that share the sort value keep one order and pages never skip or repeat rows.
+// List returns one page of media and the total. An order outside the allow list
+// falls back to created_at DESC, and id is the last sort key so pages are stable.
 func (r *Repository) List(ctx context.Context, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	filters := map[string]any{}
 	if req.OwnerUserID != "" {

@@ -12,10 +12,9 @@ import (
 
 const defaultAllowedContentTypes = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
 
-// SupportedContentTypes is every type MEDIA_ALLOWED_CONTENT_TYPES may list: the
-// ones the upload sniffer recognizes from a file's first bytes and the service
-// has a file extension for. HTML and SVG are not here on purpose: served from a
-// public bucket they would run script in the bucket's origin.
+// SupportedContentTypes is every type MEDIA_ALLOWED_CONTENT_TYPES may list: those
+// the sniffer recognizes and the service has an extension for. HTML and SVG are
+// left out: served from a public bucket they would run script.
 var SupportedContentTypes = []string{"application/pdf", "image/gif", "image/jpeg", "image/png", "image/webp"}
 
 // Media is the media module's setting.

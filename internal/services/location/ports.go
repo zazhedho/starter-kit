@@ -8,12 +8,9 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// Repository is the persistence the service needs; the GORM adapter satisfies it
-// and maps a missing row to domainlocation.ErrNotFound.
-//
-// The sync job methods with an owner act only on a job of that service instance
-// that is still queued or running, and answer ErrNotFound when none matches:
-// the job finished or another instance took it over.
+// Repository is the persistence the service needs; a missing row is ErrNotFound.
+// The sync job methods with an owner touch only that instance's queued or running
+// job, and answer ErrNotFound when it finished or was taken over.
 type Repository interface {
 	ListProvinces(ctx context.Context) ([]domainlocation.Province, error)
 	ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error)

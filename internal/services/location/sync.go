@@ -16,10 +16,8 @@ import (
 // A sync is an upsert: it adds rows and updates names, and removes nothing. A
 // location the Location Service stopped listing stays in the tables.
 
-// runSyncJob runs one job of this instance under a context that Interrupt
-// cancels. While it runs, a heartbeat shows the other instances it is alive; if
-// the job is taken over (its heartbeat went stale) the job stops. A job cut
-// short by shutdown ends failed/interrupted.
+// runSyncJob runs one job of this instance until Interrupt cancels it. A
+// heartbeat shows it is alive; a job taken over by another instance stops.
 func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	ctx, cancelJob := context.WithCancel(s.baseCtx)
 	defer cancelJob()

@@ -215,10 +215,9 @@ func newApp(ctx context.Context, cfg config.Config, d deps) (*App, error) {
 	if a.kit, err = authkit.New(authConfig(cfg, a.db, a.redis)); err != nil {
 		return fail(fmt.Errorf("initialize authkit: %w", err))
 	}
-	// authkit drains its in-flight mail sends here: after the HTTP server has
-	// stopped (the hooks run once Serve has drained it) and before Redis and the
-	// database close (closeBy). Module hooks registered later run before it,
-	// because the hooks run in reverse order of registration.
+	// authkit drains its in-flight mail sends after the HTTP server has stopped
+	// and before Redis and the database close; hooks run in reverse order, so
+	// module hooks registered later run before it.
 	a.lifecycle.OnClose("authkit", a.kit.Close)
 	return a, nil
 }

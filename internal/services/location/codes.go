@@ -33,12 +33,9 @@ func validateCode(field, code string) error {
 	return nil
 }
 
-// childCode turns a code from the Location Service into the stored code of a
-// child of parent (empty for provinces). The service answers with codes relative
-// to the parent (code_format=short); a code that already starts with the
-// parent's is a full code. A code longer than the parent's that does not start
-// with it belongs to another parent and is refused, as is anything that is not a
-// valid code.
+// childCode turns an upstream code into a stored one. Codes are relative to the
+// parent (code_format=short) unless they already start with it; a longer code
+// that does not start with the parent's belongs elsewhere and is refused.
 func childCode(parent, raw string) (string, bool) {
 	if !isCode(raw) {
 		return "", false

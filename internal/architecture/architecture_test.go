@@ -3,6 +3,7 @@
 package architecture
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -47,17 +48,145 @@ func repoFiles(t *testing.T, visit func(path string, data []byte)) {
 	}
 }
 
+// fatalCalls lists the calls to log.Fatal* and os.Exit in src. It reads the
+// syntax tree, so comments and strings that mention them do not count.
+func fatalCalls(t *testing.T, name string, src []byte) []string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	var found []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		switch {
+		case pkg.Name == "log" && strings.HasPrefix(sel.Sel.Name, "Fatal"), pkg.Name == "os" && sel.Sel.Name == "Exit":
+			found = append(found, pkg.Name+"."+sel.Sel.Name)
+		}
+		return true
+	})
+	return found
+}
+
 func TestNoFatalOutsideCmd(t *testing.T) {
 	repoFiles(t, func(path string, data []byte) {
 		if strings.HasPrefix(path, "cmd"+string(filepath.Separator)) {
 			return
 		}
-		for _, banned := range []string{"log.Fatal", "os.Exit("} {
-			if strings.Contains(string(data), banned) {
-				t.Errorf("%s uses %s outside cmd/", path, banned)
-			}
+		for _, call := range fatalCalls(t, path, data) {
+			t.Errorf("%s calls %s outside cmd/", path, call)
 		}
 	})
+}
+
+func TestFatalGuardReadsTheSyntaxTree(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      int
+	}{
+		{"log.Fatal", "package p\nimport \"log\"\nfunc f() { log.Fatal(1) }", 1},
+		{"log.Fatalf", "package p\nimport \"log\"\nfunc f() { log.Fatalf(\"x\") }", 1},
+		{"os.Exit", "package p\nimport \"os\"\nfunc f() { os.Exit(1) }", 1},
+		{"in a comment", "package p\n// log.Fatal and os.Exit( are banned\nfunc f() {}", 0},
+		{"in a string", "package p\nvar s = \"os.Exit(1) log.Fatal(x)\"", 0},
+		{"logus level", "package p\nimport \"x/logus\"\nfunc f() { logus.Log(logus.LevelFatal, 1) }", 0},
+		{"other receiver", "package p\nfunc f(l T) { l.Fatal(1) }", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := fatalCalls(t, "x.go", []byte(c.src)); len(got) != c.want {
+				t.Fatalf("fatalCalls = %v, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+// maxCommentLines is the longest comment block allowed in a non-test file.
+const maxCommentLines = 3
+
+// longComments lists the comment blocks of src longer than maxCommentLines. A
+// block is a run of adjacent // lines, or one /* */ comment.
+func longComments(t *testing.T, name string, src []byte) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, name, src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	var found []string
+	for _, group := range file.Comments {
+		lines := 0
+		for _, c := range group.List {
+			if strings.HasPrefix(c.Text, "//go:") || strings.HasPrefix(c.Text, "//nolint") {
+				continue
+			}
+			lines += strings.Count(c.Text, "\n") + 1
+		}
+		if lines > maxCommentLines {
+			found = append(found, fmt.Sprintf("%s:%d has %d lines", name, fset.Position(group.Pos()).Line, lines))
+		}
+	}
+	return found
+}
+
+// TestCommentsAreShort: a comment explains why in a few lines; longer text
+// belongs in docs/. Test files are exempt.
+func TestCommentsAreShort(t *testing.T) {
+	repoFiles(t, func(path string, data []byte) {
+		for _, problem := range longComments(t, path, data) {
+			t.Errorf("comment longer than %d lines: %s", maxCommentLines, problem)
+		}
+	})
+}
+
+func TestCommentGuardCountsBlocks(t *testing.T) {
+	four := "package p\n// a\n// b\n// c\n// d\nfunc f() {}"
+	three := "package p\n// a\n// b\n// c\nfunc f() {}"
+	split := "package p\n// a\n// b\n// c\n\n// d\n// e\nfunc f() {}"
+	block := "package p\n/* a\nb\nc\nd */\nfunc f() {}"
+	for name, c := range map[string]struct {
+		src  string
+		want int
+	}{"four lines": {four, 1}, "three lines": {three, 0}, "two blocks": {split, 0}, "block comment": {block, 1}} {
+		if got := longComments(t, "x.go", []byte(c.src)); len(got) != c.want {
+			t.Errorf("%s: %v, want %d", name, got, c.want)
+		}
+	}
+}
+
+// TestCmdImportsOnlyApp: main wires nothing itself; it starts internal/app.
+func TestCmdImportsOnlyApp(t *testing.T) {
+	root := filepath.Join("..", "..", "cmd")
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return err
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, imp := range file.Imports {
+			ip, _ := strconv.Unquote(imp.Path.Value)
+			if internal, ok := strings.CutPrefix(ip, modulePath+"/"); ok && internal != "internal/app" {
+				t.Errorf("%s imports %s; cmd may import only internal/app", p, ip)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNoPackageLevelConnections(t *testing.T) {
@@ -169,6 +298,12 @@ var rules = []rule{
 	{
 		tree:           "internal/router",
 		forbidInternal: []string{"internal/app"},
+	},
+	{
+		// app opens the connections and starts the router; the modules are wired
+		// only in router, so app never names a module's layers.
+		tree:           "internal/app",
+		forbidInternal: []string{"internal/domain", "internal/dto", "internal/services", "internal/repositories", "internal/handlers"},
 	},
 	{
 		// The leaf imports no feature module, so a module never reaches another
@@ -423,7 +558,7 @@ func TestSharedRespectsLayerRules(t *testing.T) {
 }
 
 func TestRulesDetectViolations(t *testing.T) {
-	var services, domain, dto, leaf rule
+	var services, domain, dto, leaf, app rule
 	for _, r := range rules {
 		switch r.tree {
 		case "internal/services":
@@ -434,6 +569,8 @@ func TestRulesDetectViolations(t *testing.T) {
 			dto = r
 		case routerLeaf:
 			leaf = r
+		case "internal/app":
+			app = r
 		}
 	}
 	cases := []struct {
@@ -443,6 +580,11 @@ func TestRulesDetectViolations(t *testing.T) {
 		isTest bool
 		want   bool
 	}{
+		{"app imports a service", app, "starter-kit/internal/services/location", false, true},
+		{"app imports a handler", app, "starter-kit/internal/handlers/http/media", false, true},
+		{"app imports a repository", app, "starter-kit/internal/repositories/media", false, true},
+		{"app imports the router", app, "starter-kit/internal/router", false, false},
+		{"app imports config", app, "starter-kit/internal/config", false, false},
 		{"service imports gorm", services, "gorm.io/gorm", false, true},
 		{"service imports redis", services, "github.com/redis/go-redis/v9", false, true},
 		{"service imports infrastructure", services, "starter-kit/internal/infrastructure/storage", false, true},

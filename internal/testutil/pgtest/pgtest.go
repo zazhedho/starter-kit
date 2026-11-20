@@ -1,7 +1,6 @@
-// Package pgtest gives a test a PostgreSQL database of its own: a throwaway
-// schema in the server named by STARTER_KIT_TEST_DATABASE_URL, with authkit's
-// tables and this project's migrations applied. Tests that use it are skipped
-// when the variable is not set.
+// Package pgtest gives a test its own schema in the PostgreSQL named by
+// STARTER_KIT_TEST_DATABASE_URL, with all migrations applied; without the
+// variable the test is skipped.
 package pgtest
 
 import (

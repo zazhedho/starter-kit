@@ -39,9 +39,8 @@ func readLevel[T any](ctx context.Context, s *Service, l level[T]) ([]dtolocatio
 }
 
 // fillLevel fetches and stores a level the table has no rows for. Concurrent
-// reads of the same level share one call, and an empty answer is remembered for
-// a while, so a public read cannot make the service call the Location Service
-// over and over.
+// reads share one call and an empty answer is remembered, so public reads cannot
+// make the service call the Location Service over and over.
 func fillLevel[T any](ctx context.Context, s *Service, l level[T]) ([]T, error) {
 	if s.misses.has(l.key) {
 		return nil, nil
