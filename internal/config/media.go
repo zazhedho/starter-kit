@@ -24,6 +24,8 @@ type Media struct {
 	UploadTimeout    time.Duration
 	// UploadMaxConcurrent caps the uploads in progress; more are answered 503.
 	UploadMaxConcurrent int
+	// UploadMaxConcurrentPerUser caps one user's uploads in progress; more are answered 429.
+	UploadMaxConcurrentPerUser int
 }
 
 type Storage struct {
@@ -45,15 +47,16 @@ func (s Storage) GoString() string { return s.String() }
 
 func mediaFromEnv() (Media, Storage) {
 	media := Media{
-		Enabled:             gokit.GetEnv("MEDIA_ENABLED", false),
-		MaxFileSizeBytes:    megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
-		AllowedContentTypes: splitList(gokit.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", strings.Join(domainmedia.SupportedContentTypes(), ","))),
-		UploadRateLimit:     gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
-		UploadRateWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
-		UserUploadLimit:     gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_LIMIT", 10),
-		UserUploadWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS", 60)) * time.Second,
-		UploadTimeout:       gokit.GetEnv("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
-		UploadMaxConcurrent: gokit.GetEnv("MEDIA_UPLOAD_MAX_CONCURRENT", 8),
+		Enabled:                    gokit.GetEnv("MEDIA_ENABLED", false),
+		MaxFileSizeBytes:           megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
+		AllowedContentTypes:        splitList(gokit.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", strings.Join(domainmedia.SupportedContentTypes(), ","))),
+		UploadRateLimit:            gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
+		UploadRateWindow:           time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
+		UserUploadLimit:            gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_LIMIT", 10),
+		UserUploadWindow:           time.Duration(gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS", 60)) * time.Second,
+		UploadTimeout:              gokit.GetEnv("MEDIA_UPLOAD_TIMEOUT", time.Minute),
+		UploadMaxConcurrent:        gokit.GetEnv("MEDIA_UPLOAD_MAX_CONCURRENT", 8),
+		UploadMaxConcurrentPerUser: gokit.GetEnv("MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER", 2),
 	}
 	provider := normalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio"))
 	storage := Storage{
@@ -176,6 +179,9 @@ func (c Config) validateMediaRate() []string {
 	}
 	if c.Media.UploadMaxConcurrent <= 0 {
 		problems = append(problems, "MEDIA_UPLOAD_MAX_CONCURRENT must be greater than zero")
+	}
+	if c.Media.UploadMaxConcurrentPerUser <= 0 {
+		problems = append(problems, "MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER must be greater than zero")
 	}
 	if c.Media.UserUploadLimit <= 0 {
 		problems = append(problems, "MEDIA_UPLOAD_USER_RATE_LIMIT must be greater than zero")

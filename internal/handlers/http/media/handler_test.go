@@ -96,7 +96,7 @@ func serve(t *testing.T, svc Service, userID, role, method, target string, body 
 // as "resource:action".
 func serveWithPermissions(t *testing.T, svc Service, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveHandler(t, New(svc, nil, 0, 0), userID, role, permissions, method, target, body, contentType)
+	return serveHandler(t, New(svc, nil, 0, 0, 0), userID, role, permissions, method, target, body, contentType)
 }
 
 // serveHandler is serveWithPermissions for a handler built by the test.
@@ -565,7 +565,7 @@ func TestFailedUploadAuditStoresTheSanitizedName(t *testing.T) {
 	svc := &serviceDouble{maxFileSize: 1024, err: domainmedia.ErrUnsupportedContentType}
 	body, ct := multipartBody(t, "file", "../evil\u202Egnp\u200B.exe", []byte("data"))
 
-	rec := serveHandler(t, New(svc, audit, 0, 0), uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
+	rec := serveHandler(t, New(svc, audit, 0, 0, 0), uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -586,17 +586,17 @@ type blockingService struct {
 	release chan struct{}
 }
 
-func (b *blockingService) Upload(ctx context.Context, owner string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error) {
+func (b *blockingService) Upload(_ context.Context, _ string, _ multipart.File, _ *multipart.FileHeader) (domainmedia.Media, error) {
 	b.entered <- struct{}{}
 	<-b.release
-	return b.serviceDouble.Upload(ctx, owner, file, header)
+	return b.media, nil // no shared state: uploads run concurrently
 }
 
 // Uploads beyond MEDIA_UPLOAD_MAX_CONCURRENT are refused with 503 before the body
 // is read, and a freed slot is usable again.
 func TestUploadsBeyondTheConcurrencyCapAnswer503(t *testing.T) {
 	svc := &blockingService{serviceDouble: serviceDouble{maxFileSize: 1024}, entered: make(chan struct{}, 2), release: make(chan struct{})}
-	h := New(svc, nil, 0, 1)
+	h := New(svc, nil, 0, 1, 0)
 	upload := func() *httptest.ResponseRecorder {
 		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
 		return serveHandler(t, h, uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
@@ -651,5 +651,43 @@ func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
 				t.Fatalf("the line lacks the handler prefix:\n%s", out)
 			}
 		})
+	}
+}
+
+// One user holding their per-user slots must not take the global ones: another
+// user can still upload, and the greedy user is answered 429.
+func TestOneUserCannotExhaustTheGlobalUploadSlots(t *testing.T) {
+	svc := &blockingService{serviceDouble: serviceDouble{maxFileSize: 1024}, entered: make(chan struct{}, 8), release: make(chan struct{})}
+	h := New(svc, nil, 0, 3, 2) // 3 global slots, 2 per user
+	greedy, other := uuid.NewString(), uuid.NewString()
+	upload := func(user string) *httptest.ResponseRecorder {
+		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
+		return serveHandler(t, h, user, "viewer", nil, http.MethodPost, "/media", body, ct)
+	}
+
+	held := make(chan *httptest.ResponseRecorder, 3)
+	for range 2 {
+		go func() { held <- upload(greedy) }()
+		<-svc.entered
+	}
+
+	mark := logs.Mark()
+	if rec := upload(greedy); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("a third concurrent upload of one user = %d, want 429: %s", rec.Code, rec.Body.String())
+	}
+	if out := logs.Since(mark); !strings.Contains(out, `"level":"WARN"`) || strings.Contains(out, `"level":"ERROR"`) {
+		t.Fatalf("a refused upload is logged at WARN only; got:\n%s", out)
+	}
+
+	go func() { held <- upload(other) }()
+	<-svc.entered // the global slot the greedy user left is free for another user
+	close(svc.release)
+	for range 3 {
+		if got := <-held; got.Code != http.StatusCreated {
+			t.Fatalf("a held upload = %d: %s", got.Code, got.Body.String())
+		}
+	}
+	if again := upload(greedy); again.Code != http.StatusCreated {
+		t.Fatalf("after the slots were freed the user's upload = %d", again.Code)
 	}
 }

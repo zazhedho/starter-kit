@@ -23,7 +23,7 @@ var managedEnv = []string{
 	"LOCATION_SERVICE_BASE_URL", "LOCATION_SERVICE_TIMEOUT_SECONDS", "LOCATION_CACHE_TTL",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SUBJECT", "RESET_SUBJECT", "AUTH_EMAIL_APP_NAME",
 	"MEDIA_ENABLED", "MEDIA_MAX_FILE_SIZE_MB", "MEDIA_ALLOWED_CONTENT_TYPES", "MEDIA_UPLOAD_RATE_LIMIT",
-	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT", "MEDIA_UPLOAD_MAX_CONCURRENT",
+	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT", "MEDIA_UPLOAD_MAX_CONCURRENT", "MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER",
 	"MEDIA_UPLOAD_USER_RATE_LIMIT", "MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS",
 	"LOCATION_SERVICE_MAX_RESPONSE_MB", "LOCATION_RATE_LIMIT", "LOCATION_RATE_WINDOW_SECONDS", "STORAGE_PUBLIC_READ",
 	"STORAGE_PROVIDER", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME",
@@ -109,7 +109,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Fatalf("Migrate = %+v", cfg.Migrate)
 	}
 	m := cfg.Media
-	if m.UploadTimeout != 2*time.Minute || m.MaxFileSizeBytes != 5<<20 || m.UploadRateLimit != 20 || m.UploadRateWindow != 60*time.Second {
+	if m.UploadTimeout != time.Minute || m.MaxFileSizeBytes != 5<<20 || m.UploadRateLimit != 20 || m.UploadRateWindow != 60*time.Second {
 		t.Fatalf("Media = %+v", m)
 	}
 	if m.Enabled {
@@ -414,7 +414,7 @@ func TestValidate(t *testing.T) {
 		t.Setenv("DB_MAX_OPEN_CONNS", "many")
 		t.Setenv("HTTP_MAX_BODY_MB", "big")
 		cfg := FromEnv()
-		if cfg.HTTP.ReadTimeout != 30*time.Second || cfg.Media.UploadTimeout != 2*time.Minute || cfg.Database.MaxOpenConns != 100 {
+		if cfg.HTTP.ReadTimeout != 30*time.Second || cfg.Media.UploadTimeout != time.Minute || cfg.Database.MaxOpenConns != 100 {
 			t.Fatalf("unparsable values must fall back to defaults: %+v %+v %+v", cfg.HTTP, cfg.Media, cfg.Database)
 		}
 		wantInError(t, cfg.Validate(),

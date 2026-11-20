@@ -40,6 +40,8 @@ func message(status int) string {
 		return "The request conflicts with the current state of the resource"
 	case http.StatusRequestEntityTooLarge:
 		return gokit.MsgRequestTooLarge
+	case http.StatusTooManyRequests:
+		return "Too many requests"
 	case http.StatusBadGateway:
 		return "An upstream service failed to answer"
 	case http.StatusServiceUnavailable:

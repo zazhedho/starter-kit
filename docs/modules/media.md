@@ -18,7 +18,7 @@ the source of truth.
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/api/media` | token; `Auth()` then `LoadPermissions()` | your own files, or everyone's with `media:list_any`; paginated, see below |
-| POST | `/api/media` | token (any authenticated user, no extra permission) | multipart form field `file`; `201` with the stored metadata; `400` for a missing, empty or unsupported file; `413` over the size limit; `429` over the per-IP or per-user upload limit (both need Redis); `503` when `MEDIA_UPLOAD_MAX_CONCURRENT` uploads are already in progress |
+| POST | `/api/media` | token (any authenticated user, no extra permission) | multipart form field `file`; `201` with the stored metadata; `400` for a missing, empty or unsupported file; `413` over the size limit; `429` over the per-IP or per-user upload limit (both need Redis); `429` also when the user already has `MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER` uploads in progress; `503` when `MEDIA_UPLOAD_MAX_CONCURRENT` uploads are already in progress |
 | DELETE | `/api/media/:id` | token; `Auth()` then `LoadPermissions()` | your own file, or anyone's with `media:delete_any`; `:id` must be a UUID; `200`; `404` when the media does not exist or belongs to someone else without `delete_any` (the response does not reveal which, and storage is left untouched; a row removed by a concurrent delete also answers `404`) |
 
 ### Permissions
@@ -60,8 +60,9 @@ capped at 255 characters and replaced by `file` when nothing is left, before it 
 | `MEDIA_ENABLED` | `false` | mount the media routes and open storage |
 | `MEDIA_MAX_FILE_SIZE_MB` | `5` | largest accepted file, 1-1024 MB |
 | `MEDIA_ALLOWED_CONTENT_TYPES` | `application/pdf,image/gif,image/jpeg,image/png,image/webp` | comma-separated accepted types; each must be one of those five (`domainmedia.SupportedContentTypes`: the sniffer can match them and each has an extension), anything else, `text/html` and SVG included, stops the service at startup |
-| `MEDIA_UPLOAD_TIMEOUT` | `2m` | read and write deadline for one upload request, replacing `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` for that route; the write deadline is extended too so the response of a slow upload is delivered instead of cut off |
+| `MEDIA_UPLOAD_TIMEOUT` | `1m` | read and write deadline for one upload request, replacing `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` for that route; the write deadline is extended too so the response of a slow upload is delivered instead of cut off. A slow body holds an upload slot until this deadline, so a shorter value frees slots sooner; 1 minute moves the default 5 MB in about 700 kbit/s, so raise it together with `MEDIA_MAX_FILE_SIZE_MB` for slow clients |
 | `MEDIA_UPLOAD_MAX_CONCURRENT` | `8` | uploads handled at once by this instance; one more answers `503` before its body is read (it protects the process, so it is not a `429`); must be above zero when media is enabled |
+| `MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER` | `2` | uploads in progress per user on this instance; one more answers `429` before it can take a global slot, so one user cannot starve the others (the count is in-process, so with N instances a user can have up to N times this); must be above zero when media is enabled |
 | `MEDIA_UPLOAD_RATE_LIMIT` | `20` | uploads allowed per client IP per window; must be above zero when media is enabled |
 | `MEDIA_UPLOAD_RATE_WINDOW_SECONDS` | `60` | rate-limit window in seconds; must be above zero when media is enabled |
 | `MEDIA_UPLOAD_USER_RATE_LIMIT` | `10` | uploads allowed per authenticated user per window, whatever the IP; must be above zero when media is enabled |

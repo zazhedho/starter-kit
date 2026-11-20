@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +26,10 @@ const (
 // listFilters are the filters[...] keys read into typed fields below. Which
 // columns may be filtered or sorted, and the default order, belong to the
 // repository, the single authority for them.
-var errTooManyUploads = errors.New("too many uploads are in progress, try again shortly")
+var (
+	errTooManyUploads     = errors.New("too many uploads are in progress, try again shortly")
+	errTooManyUserUploads = errors.New("too many of your uploads are in progress, wait for one to finish")
+)
 
 var listFilters = []string{"owner_user_id", "content_type"}
 
@@ -33,16 +37,21 @@ type Handler struct {
 	service       Service
 	uploadTimeout time.Duration
 	uploadSlots   chan struct{} // nil: no cap on concurrent uploads
+	maxPerUser    int           // zero or less: no per-user cap
+	mu            sync.Mutex
+	userUploads   map[string]int // uploads in progress per user
 	authkit.AuditWriter
 }
 
 // New builds the handler. A positive uploadTimeout replaces the server's read and
-// write deadlines for an upload, and a positive maxUploads caps the uploads in
-// progress.
-func New(service Service, auditService authkit.AuditService, uploadTimeout time.Duration, maxUploads int) *Handler {
+// write deadlines for an upload, a positive maxUploads caps the uploads in
+// progress and a positive maxPerUser caps those of one user.
+func New(service Service, auditService authkit.AuditService, uploadTimeout time.Duration, maxUploads, maxPerUser int) *Handler {
 	h := &Handler{
 		service:       service,
 		uploadTimeout: uploadTimeout,
+		maxPerUser:    maxPerUser,
+		userUploads:   make(map[string]int),
 		AuditWriter:   authkit.NewAuditWriter(auditService, "MediaHandler"),
 	}
 	if maxUploads > 0 {
@@ -114,20 +123,51 @@ func (h *Handler) Upload(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
 }
 
-// acquireUploadSlot takes one of the upload slots without waiting, or answers
-// 503: the cap protects the process, not one client, so it is not a 429.
+// acquireUploadSlot takes a per-user slot, then a global one, without waiting.
+// A user over their own cap gets 429 before touching a global slot; a full
+// process answers 503. Both log at WARN: refusing load is expected.
 func (h *Handler) acquireUploadSlot(ctx *gin.Context, logPrefix string) (release func(), ok bool) {
+	user := authkit.ScopeFrom(ctx.Request.Context()).UserID
+	if !h.takeUserSlot(user) {
+		logus.LogContextf(ctx, logus.LevelWarn, "%s; userUploadSlot; Error: %v", logPrefix, errTooManyUserUploads)
+		httpshared.Write(ctx, http.StatusTooManyRequests, errTooManyUserUploads.Error())
+		return nil, false
+	}
 	if h.uploadSlots == nil {
-		return func() {}, true
+		return func() { h.freeUserSlot(user) }, true
 	}
 	select {
 	case h.uploadSlots <- struct{}{}:
-		return func() { <-h.uploadSlots }, true
+		return func() { <-h.uploadSlots; h.freeUserSlot(user) }, true
 	default:
-		// Shedding load is expected under pressure: WARN, not the ERROR a 5xx gets.
+		h.freeUserSlot(user)
 		logus.LogContextf(ctx, logus.LevelWarn, "%s; uploadSlot; Error: %v", logPrefix, errTooManyUploads)
 		httpshared.Write(ctx, http.StatusServiceUnavailable, errTooManyUploads.Error())
 		return nil, false
+	}
+}
+
+func (h *Handler) takeUserSlot(user string) bool {
+	if h.maxPerUser <= 0 {
+		return true
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.userUploads[user] >= h.maxPerUser {
+		return false
+	}
+	h.userUploads[user]++
+	return true
+}
+
+func (h *Handler) freeUserSlot(user string) {
+	if h.maxPerUser <= 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.userUploads[user]--; h.userUploads[user] <= 0 {
+		delete(h.userUploads, user)
 	}
 }
 

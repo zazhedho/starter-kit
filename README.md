@@ -282,7 +282,10 @@ while the service is still waiting ends the process at once. Set the orchestrato
 Copy `.env.example` to `.env`; it lists every variable, grouped by section and by module, with the defaults noted
 in comments. The `.env` file is optional when `APP_ENV` is already set in the environment (this is how containers
 run). Variables that are already set always win over `.env`. A placeholder value (`CHANGE_ME_...`, `minioadmin`, `your_password`) in a secret stops startup outside `APP_ENV` development, dev, local and test (the storage keys count only when media is enabled); in those it is a startup warning. Both name the variable, never the value. Module variables (`LOCATION_*`, `MEDIA_*`,
-`STORAGE_*`) are documented in [`docs/modules/`](docs/modules/).
+`STORAGE_*`) are documented in [`docs/modules/`](docs/modules/). Media uploads are capped in process: at most
+`MEDIA_UPLOAD_MAX_CONCURRENT` (default 8) at once, and `MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER` (default 2) per user, so
+one user with slow bodies cannot hold every slot for `MEDIA_UPLOAD_TIMEOUT` (default 1m); over the per-user cap the
+answer is `429`, over the global cap `503`.
 
 Required: `APP_NAME` (unique per application; authkit binds tokens to it), `APP_ENV`, `PORT` (no default),
 `DATABASE_URL` or the `DB_*` parts (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_NAME`, `DB_PASS`; `DB_SSLMODE`

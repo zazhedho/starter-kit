@@ -1702,7 +1702,7 @@
     },
     {
       "name": "Media",
-      "description": "Available only when MEDIA_ENABLED=true. File type is detected from bytes; the default maximum size is 5 MB (MEDIA_MAX_FILE_SIZE_MB). An upload answers 429 over the per-IP or per-user limit and 503 when MEDIA_UPLOAD_MAX_CONCURRENT uploads are already in progress.",
+      "description": "Available only when MEDIA_ENABLED=true. File type is detected from bytes; the default maximum size is 5 MB (MEDIA_MAX_FILE_SIZE_MB). An upload answers 429 over the per-IP or per-user limit or when the user already has MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER (default 2) uploads in progress, and 503 when MEDIA_UPLOAD_MAX_CONCURRENT uploads are already in progress.",
       "item": [
         {
           "name": "List Media",
