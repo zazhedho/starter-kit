@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,24 +279,29 @@ func TestNoPackageLevelConnections(t *testing.T) {
 				continue
 			}
 			for _, spec := range gen.Specs {
-				vs := spec.(*ast.ValueSpec)
-				if vs.Type == nil {
-					continue
-				}
-				expr := vs.Type
-				if star, ok := expr.(*ast.StarExpr); ok {
-					expr = star.X
-				}
-				sel, ok := expr.(*ast.SelectorExpr)
-				if !ok {
-					continue
-				}
-				if pkg, ok := sel.X.(*ast.Ident); ok && banned[pkg.Name+"."+sel.Sel.Name] {
-					t.Errorf("%s declares a package-level %s.%s", path, pkg.Name, sel.Sel.Name)
+				if name, bad := bannedConnectionType(spec.(*ast.ValueSpec), banned); bad {
+					t.Errorf("%s declares a package-level %s", path, name)
 				}
 			}
 		}
 	})
+}
+
+func bannedConnectionType(vs *ast.ValueSpec, banned map[string]bool) (string, bool) {
+	expr := vs.Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return "", false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	name := pkg.Name + "." + sel.Sel.Name
+	return name, banned[name]
 }
 
 type rule struct {
@@ -469,27 +475,11 @@ func collectViolations(t *testing.T) map[string]bool {
 		if d.IsDir() || !strings.HasSuffix(p, ".go") {
 			return nil
 		}
-		isTest := strings.HasSuffix(p, "_test.go")
-		dir := path.Dir(p)
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, p), nil, parser.ImportsOnly)
-		if err != nil {
-			return err
+		keys, err := fileViolations(filepath.Join(root, p), p)
+		for _, key := range keys {
+			found[key] = true
 		}
-		for _, imp := range file.Imports {
-			ip, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				return err
-			}
-			for _, r := range rules {
-				if !applies(r, dir) {
-					continue
-				}
-				if bad := violates(r, ip, isTest); bad {
-					found[dir+" -> "+ip] = true
-				}
-			}
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -497,49 +487,50 @@ func collectViolations(t *testing.T) map[string]bool {
 	return found
 }
 
+func fileViolations(fsPath, p string) ([]string, error) {
+	isTest := strings.HasSuffix(p, "_test.go")
+	dir := path.Dir(p)
+	file, err := parser.ParseFile(token.NewFileSet(), fsPath, nil, parser.ImportsOnly)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, imp := range file.Imports {
+		ip, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return keys, err
+		}
+		for _, r := range rules {
+			if applies(r, dir) && violates(r, ip, isTest) {
+				keys = append(keys, dir+" -> "+ip)
+			}
+		}
+	}
+	return keys, nil
+}
+
 func violates(r rule, ip string, isTest bool) bool {
 	if internal, ok := strings.CutPrefix(ip, modulePath+"/"); ok {
-		if isTest {
-			return false
-		}
-		if r.internalAllowed != nil {
-			for _, a := range r.internalAllowed {
-				if matchesPrefix(internal, a) {
-					return false
-				}
-			}
-			return true
-		}
-		for _, f := range r.forbidInternal {
-			if f == "internal/" {
-				return true
-			}
-			if matchesPrefix(internal, f) {
-				return true
-			}
-		}
-		return false
+		return !isTest && violatesInternal(r, internal)
 	}
-	if isTest && !r.testsToo {
-		return false
-	}
-	if isStdlib(ip) {
+	if isStdlib(ip) || (isTest && !r.testsToo) {
 		return false
 	}
 	if r.externalAllowed != nil {
-		for _, a := range r.externalAllowed {
-			if ip == a {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(r.externalAllowed, ip)
 	}
-	for _, f := range r.forbidExternal {
-		if matchesPrefix(ip, f) {
-			return true
-		}
+	return matchesAny(ip, r.forbidExternal)
+}
+
+func violatesInternal(r rule, internal string) bool {
+	if r.internalAllowed != nil {
+		return !matchesAny(internal, r.internalAllowed)
 	}
-	return false
+	return slices.Contains(r.forbidInternal, "internal/") || matchesAny(internal, r.forbidInternal)
+}
+
+func matchesAny(s string, prefixes []string) bool {
+	return slices.ContainsFunc(prefixes, func(prefix string) bool { return matchesPrefix(s, prefix) })
 }
 
 func TestImportRule(t *testing.T) {
@@ -682,18 +673,26 @@ func TestInterfacesLiveWithTheirConsumer(t *testing.T) {
 			return
 		}
 		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				ts := spec.(*ast.TypeSpec)
-				if _, isIface := ts.Type.(*ast.InterfaceType); isIface && strings.HasSuffix(ts.Name.Name, "Interface") {
-					t.Errorf("%s: interface %s has an Interface suffix; name it for the role (Service, Repository, ...)", p, ts.Name.Name)
-				}
+			for _, name := range interfacesWithSuffix(decl) {
+				t.Errorf("%s: interface %s has an Interface suffix; name it for the role (Service, Repository, ...)", p, name)
 			}
 		}
 	})
+}
+
+func interfacesWithSuffix(decl ast.Decl) []string {
+	gen, ok := decl.(*ast.GenDecl)
+	if !ok || gen.Tok != token.TYPE {
+		return nil
+	}
+	var names []string
+	for _, spec := range gen.Specs {
+		ts := spec.(*ast.TypeSpec)
+		if _, isIface := ts.Type.(*ast.InterfaceType); isIface && strings.HasSuffix(ts.Name.Name, "Interface") {
+			names = append(names, ts.Name.Name)
+		}
+	}
+	return names
 }
 
 var moduleAliasPrefix = map[string]string{
@@ -954,7 +953,7 @@ func isConstructorName(name string) bool {
 	return ok && (rest == "" || rest[0] >= 'A' && rest[0] <= 'Z')
 }
 
-func constructorViolations(files []*ast.File) []string {
+func structNames(files []*ast.File) map[string]bool {
 	structs := map[string]bool{}
 	for _, f := range files {
 		for _, decl := range f.Decls {
@@ -963,31 +962,42 @@ func constructorViolations(files []*ast.File) []string {
 				continue
 			}
 			for _, spec := range gen.Specs {
-				if ts := spec.(*ast.TypeSpec); ts != nil {
-					_, isStruct := ts.Type.(*ast.StructType)
-					structs[ts.Name.Name] = isStruct
-				}
+				ts := spec.(*ast.TypeSpec)
+				_, isStruct := ts.Type.(*ast.StructType)
+				structs[ts.Name.Name] = isStruct
 			}
 		}
 	}
+	return structs
+}
 
+func resultTypes(fn *ast.FuncDecl) []ast.Expr {
+	var results []ast.Expr
+	if fn.Type.Results == nil {
+		return results
+	}
+	for _, field := range fn.Type.Results.List {
+		for range max(len(field.Names), 1) {
+			results = append(results, field.Type)
+		}
+	}
+	return results
+}
+
+func exportedConstructor(decl ast.Decl) (*ast.FuncDecl, bool) {
+	fn, ok := decl.(*ast.FuncDecl)
+	if !ok || fn.Recv != nil || !fn.Name.IsExported() || !isConstructorName(fn.Name.Name) {
+		return nil, false
+	}
+	return fn, true
+}
+
+func constructorViolations(files []*ast.File) []string {
+	structs := structNames(files)
 	var out []string
 	for _, f := range files {
 		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !fn.Name.IsExported() || !isConstructorName(fn.Name.Name) {
-				continue
-			}
-			var results []ast.Expr
-			if fn.Type.Results != nil {
-				for _, field := range fn.Type.Results.List {
-					n := max(len(field.Names), 1)
-					for range n {
-						results = append(results, field.Type)
-					}
-				}
-			}
-			if !returnsConcretePointer(results, structs) {
+			if fn, ok := exportedConstructor(decl); ok && !returnsConcretePointer(resultTypes(fn), structs) {
 				out = append(out, fn.Name.Name)
 			}
 		}
@@ -1028,6 +1038,26 @@ func parseSources(t *testing.T, sources ...string) []*ast.File {
 	return files
 }
 
+func parseNonTestFiles(dir string) ([]*ast.File, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, nil
+}
+
 func TestConstructorsReturnConcreteTypes(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, tree := range constructorTrees {
@@ -1035,21 +1065,9 @@ func TestConstructorsReturnConcreteTypes(t *testing.T) {
 			if err != nil || !d.IsDir() {
 				return err
 			}
-			entries, err := os.ReadDir(filepath.Join(root, p))
+			files, err := parseNonTestFiles(filepath.Join(root, p))
 			if err != nil {
 				return err
-			}
-			fset := token.NewFileSet()
-			var files []*ast.File
-			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-					continue
-				}
-				f, err := parser.ParseFile(fset, filepath.Join(root, p, e.Name()), nil, 0)
-				if err != nil {
-					return err
-				}
-				files = append(files, f)
 			}
 			for _, name := range constructorViolations(files) {
 				t.Errorf("%s: %s must return a pointer to a struct (and optionally an error), not an interface", p, name)

@@ -33,8 +33,8 @@ type Service struct {
 	misses  *missCache
 	flights singleflight.Group
 
-	baseCtx  context.Context
 	cancel   context.CancelFunc
+	stopped  <-chan struct{}
 	mu       sync.Mutex
 	closed   bool
 	jobs     sync.WaitGroup
@@ -73,8 +73,8 @@ func NewService(repo Repository, opts Options) *Service {
 		staleAfter:        orDefault(opts.StaleAfter, defaultStaleAfter),
 		progressInterval:  orDefault(opts.ProgressInterval, defaultProgressInterval),
 		misses:            newMissCache(orDefault(opts.MissTTL, defaultMissTTL), orDefault(opts.FailureTTL, defaultFailureTTL)),
-		baseCtx:           baseCtx,
 		cancel:            cancel,
+		stopped:           baseCtx.Done(),
 	}
 }
 

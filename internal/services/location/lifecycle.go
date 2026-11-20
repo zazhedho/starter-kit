@@ -29,6 +29,15 @@ func (s *Service) Interrupt() {
 	s.cancel()
 }
 
+func (s *Service) interrupted() bool {
+	select {
+	case <-s.stopped:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	if dl, ok := ctx.Deadline(); ok && (s.settleBy.IsZero() || dl.Before(s.settleBy)) {
@@ -73,7 +82,7 @@ func (s *Service) settleContext() (context.Context, context.CancelFunc, bool) {
 	if !deadline.After(time.Now()) {
 		return nil, nil, false
 	}
-	ctx, cancel := context.WithDeadline(context.WithoutCancel(s.baseCtx), deadline)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	return ctx, cancel, true
 }
 
