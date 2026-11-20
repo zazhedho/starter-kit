@@ -13,8 +13,9 @@ Provinces, cities, districts and villages, stored in PostgreSQL and filled by an
   must already be in the tables (the city fallback reads the province, the district fallback the city, the
   village fallback the district and its city); an unknown parent answers `404` without any outbound call, so
   bootstrap with a sync before relying on the fallback. An error from the Location Service is answered with `502`.
-- Concurrent reads of the same empty level share one outbound call, and an empty answer is remembered in the
-  process for one minute, so a public read cannot make the service call the Location Service on every request.
+- Concurrent reads of the same empty level share one outbound call. An empty answer is remembered in the
+  process for one minute and a failed call for 8 seconds (the same level answers `502` during that time), so a
+  public read cannot make the service call the Location Service on every request, even while it is down.
 
 ## Routes
 

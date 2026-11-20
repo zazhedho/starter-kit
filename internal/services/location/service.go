@@ -82,7 +82,7 @@ func NewService(repo Repository, opts Options) *Service {
 		heartbeatInterval: orDefault(opts.HeartbeatInterval, defaultHeartbeat),
 		staleAfter:        orDefault(opts.StaleAfter, defaultStaleAfter),
 		progressInterval:  orDefault(opts.ProgressInterval, defaultProgressInterval),
-		misses:            newMissCache(orDefault(opts.MissTTL, defaultMissTTL)),
+		misses:            newMissCache(orDefault(opts.MissTTL, defaultMissTTL), orDefault(opts.FailureTTL, defaultFailureTTL)),
 		baseCtx:           baseCtx,
 		cancel:            cancel,
 	}

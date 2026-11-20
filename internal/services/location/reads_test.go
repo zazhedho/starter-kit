@@ -151,8 +151,9 @@ func TestOnlyItemsOfTheRequestedParentAreStored(t *testing.T) {
 	}
 }
 
-// An upstream failure is not remembered as "nothing there": the next request retries.
-func TestAnUpstreamFailureIsReportedAndNotRemembered(t *testing.T) {
+// An upstream failure is remembered briefly, so a down Location Service is not
+// called again by every public read; it is asked again once the memory expires.
+func TestAnUpstreamFailureIsReportedAndRememberedBriefly(t *testing.T) {
 	repo := fallbackRepo()
 	failing := true
 	up := &upstream{handle: func(*http.Request) *http.Response {
@@ -161,13 +162,23 @@ func TestAnUpstreamFailureIsReportedAndNotRemembered(t *testing.T) {
 		}
 		return okResponse(`[{"code":"71","name":"Kota Palembang"}]`)
 	}}
-	svc := newTestService(t, repo, up)
-	if _, err := svc.GetCity(context.Background(), "16"); !errors.Is(err, domainlocation.ErrUpstream) {
-		t.Fatalf("GetCity = %v, want ErrUpstream", err)
+	svc := NewService(repo, Options{FailureTTL: 40 * time.Millisecond, HeartbeatInterval: time.Hour})
+	svc.httpClient = &http.Client{Transport: up}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+
+	for i := range 4 {
+		if _, err := svc.GetCity(context.Background(), "16"); !errors.Is(err, domainlocation.ErrUpstream) {
+			t.Fatalf("read %d = %v, want ErrUpstream", i, err)
+		}
 	}
+	if up.calls() != 1 {
+		t.Fatalf("upstream called %d times for 4 reads during an outage, want 1", up.calls())
+	}
+
 	failing = false
+	time.Sleep(60 * time.Millisecond)
 	if got, err := svc.GetCity(context.Background(), "16"); err != nil || len(got) != 1 {
-		t.Fatalf("after recovery: %+v, %v", got, err)
+		t.Fatalf("after the memory expired: %+v, %v", got, err)
 	}
 }
 

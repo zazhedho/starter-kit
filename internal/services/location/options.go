@@ -21,6 +21,7 @@ type Options struct {
 	StaleAfter        time.Duration // heartbeat age after which a job is taken over
 	ProgressInterval  time.Duration // at most one progress write per interval
 	MissTTL           time.Duration // how long an empty upstream answer is remembered
+	FailureTTL        time.Duration // how long an upstream failure is remembered
 }
 
 const (
@@ -31,6 +32,7 @@ const (
 	defaultStaleAfter       = 2 * time.Minute
 	defaultProgressInterval = 2 * time.Second
 	defaultMissTTL          = time.Minute
+	defaultFailureTTL       = 8 * time.Second
 )
 
 // orDefault returns v, or def when v is not positive.

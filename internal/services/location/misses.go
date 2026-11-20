@@ -9,35 +9,48 @@ import (
 const maxMisses = 10000
 
 // missCache remembers, per cache key, that the Location Service had nothing to
-// offer, so the same empty lookup is not repeated on every request.
+// offer or failed, so the same lookup is not repeated on every request.
 type missCache struct {
-	mu    sync.Mutex
-	until map[string]time.Time
-	ttl   time.Duration
+	mu         sync.Mutex
+	until      map[string]miss
+	ttl        time.Duration
+	failureTTL time.Duration
 }
 
-func newMissCache(ttl time.Duration) *missCache {
-	return &missCache{until: make(map[string]time.Time), ttl: ttl}
+type miss struct {
+	until  time.Time
+	failed bool // the Location Service failed, as opposed to answering with nothing
 }
 
-func (m *missCache) has(key string) bool {
+func newMissCache(ttl, failureTTL time.Duration) *missCache {
+	return &missCache{until: make(map[string]miss), ttl: ttl, failureTTL: failureTTL}
+}
+
+// lookup reports whether key is remembered and, if so, whether as a failure.
+func (m *missCache) lookup(key string) (failed, found bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	until, ok := m.until[key]
-	if ok && time.Now().After(until) {
+	entry, ok := m.until[key]
+	if ok && time.Now().After(entry.until) {
 		delete(m.until, key)
-		return false
+		return false, false
 	}
-	return ok
+	return entry.failed, ok
 }
 
-func (m *missCache) add(key string) {
+func (m *missCache) addEmpty(key string) { m.add(key, miss{until: time.Now().Add(m.ttl)}) }
+
+func (m *missCache) addFailure(key string) {
+	m.add(key, miss{until: time.Now().Add(m.failureTTL), failed: true})
+}
+
+func (m *missCache) add(key string, entry miss) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.until) >= maxMisses {
 		now := time.Now()
-		for k, until := range m.until {
-			if now.After(until) {
+		for k, e := range m.until {
+			if now.After(e.until) {
 				delete(m.until, k)
 			}
 		}
@@ -45,5 +58,5 @@ func (m *missCache) add(key string) {
 			return
 		}
 	}
-	m.until[key] = time.Now().Add(m.ttl)
+	m.until[key] = entry
 }

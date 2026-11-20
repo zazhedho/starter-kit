@@ -2,9 +2,15 @@ package location
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	domainlocation "starter-kit/internal/domain/location"
 	dtolocation "starter-kit/internal/dto/location"
 )
+
+// errRecentFailure answers a read while a failed Location Service call is remembered.
+var errRecentFailure = fmt.Errorf("%w: the call failed a moment ago", domainlocation.ErrUpstream)
 
 // level describes how one level of the hierarchy is read: from the cache, then
 // the table, then, when the table has nothing, from the Location Service.
@@ -39,21 +45,27 @@ func readLevel[T any](ctx context.Context, s *Service, l level[T]) ([]dtolocatio
 }
 
 // fillLevel fetches and stores a level the table has no rows for. Concurrent
-// reads share one call and an empty answer is remembered, so public reads cannot
-// make the service call the Location Service over and over.
+// reads share one call, and an empty answer or a brief failure is remembered, so
+// public reads cannot hammer the Location Service.
 func fillLevel[T any](ctx context.Context, s *Service, l level[T]) ([]T, error) {
-	if s.misses.has(l.key) {
+	if failed, found := s.misses.lookup(l.key); found {
+		if failed {
+			return nil, errRecentFailure
+		}
 		return nil, nil
 	}
 	// The call is shared, so it must not end with the first caller's request.
 	shared := context.WithoutCancel(ctx)
 	rows, err, _ := s.flights.Do(l.key, func() (any, error) {
 		fetched, err := l.fetch(shared)
+		if errors.Is(err, domainlocation.ErrUpstream) {
+			s.misses.addFailure(l.key)
+		}
 		if err != nil {
 			return nil, err
 		}
 		if len(fetched) == 0 {
-			s.misses.add(l.key)
+			s.misses.addEmpty(l.key)
 			return fetched, nil
 		}
 		return fetched, l.upsert(shared, fetched)
