@@ -65,11 +65,10 @@ type SyncJob struct {
 	ID            string     `json:"id" gorm:"column:id;primaryKey"`
 	Status        string     `json:"status" gorm:"column:status"`
 	Level         string     `json:"level" gorm:"column:level"`
-	Year          string     `json:"year" gorm:"column:year"`
 	ProvinceCode  string     `json:"province_code,omitempty" gorm:"column:province_code"`
 	CityCode      string     `json:"city_code,omitempty" gorm:"column:city_code"`
 	DistrictCode  string     `json:"district_code,omitempty" gorm:"column:district_code"`
-	RequestedBy   string     `json:"requested_by" gorm:"column:requested_by_user_id"`
+	RequestedBy   string     `json:"requested_by_user_id" gorm:"column:requested_by_user_id"`
 	Message       string     `json:"message,omitempty" gorm:"column:message"`
 	ErrorMessage  string     `json:"error_message,omitempty" gorm:"column:error_message"`
 	ProvinceCount int        `json:"province_count" gorm:"column:province_count"`
@@ -80,8 +79,26 @@ type SyncJob struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty" gorm:"column:finished_at"`
 	CreatedAt     time.Time  `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty" gorm:"column:updated_at"`
+
+	// A stale heartbeat (by the database clock) means a dead instance whose job may be taken over.
+	OwnerInstanceID string    `json:"-" gorm:"column:owner_instance_id"`
+	HeartbeatAt     time.Time `json:"-" gorm:"column:heartbeat_at"`
 }
 
 func (SyncJob) TableName() string {
 	return "location_sync_jobs"
+}
+
+type SyncProgress struct {
+	Message       string
+	ProvinceCount int
+	CityCount     int
+	DistrictCount int
+	VillageCount  int
+}
+
+type SyncFinish struct {
+	Status       string
+	Message      string
+	ErrorMessage string
 }

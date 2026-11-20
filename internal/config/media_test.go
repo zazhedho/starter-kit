@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestValidateMedia(t *testing.T) {
 	t.Run("requires storage when media enabled", func(t *testing.T) {
@@ -99,4 +102,37 @@ func enableMediaEnv(t *testing.T) {
 	t.Setenv("STORAGE_SECRET_KEY", "secret")
 	t.Setenv("STORAGE_BUCKET_NAME", "bucket")
 	t.Setenv("STORAGE_BASE_URL", "https://files.example.com")
+}
+
+func TestUploadMaxConcurrentDefaultsToEightAndMustBePositive(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	if got := FromEnv().Media.UploadMaxConcurrent; got != 8 {
+		t.Fatalf("UploadMaxConcurrent = %d, want 8", got)
+	}
+	for _, bad := range []string{"0", "-1"} {
+		clearEnv(t)
+		setRequiredEnv(t)
+		enableMediaEnv(t)
+		t.Setenv("MEDIA_UPLOAD_MAX_CONCURRENT", bad)
+		wantInError(t, validateFromEnv(t), "MEDIA_UPLOAD_MAX_CONCURRENT")
+	}
+}
+
+func TestUploadMaxConcurrentPerUserDefaultsToTwoAndMustBePositive(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	if got := FromEnv().Media.UploadMaxConcurrentPerUser; got != 2 {
+		t.Fatalf("UploadMaxConcurrentPerUser = %d, want 2", got)
+	}
+	if got := FromEnv().Media.UploadTimeout; got != time.Minute {
+		t.Fatalf("UploadTimeout = %v, want 1m", got)
+	}
+	for _, bad := range []string{"0", "-1"} {
+		clearEnv(t)
+		setRequiredEnv(t)
+		enableMediaEnv(t)
+		t.Setenv("MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER", bad)
+		wantInError(t, validateFromEnv(t), "MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER")
+	}
 }

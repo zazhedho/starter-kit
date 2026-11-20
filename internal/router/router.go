@@ -1,5 +1,3 @@
-// Package router builds the HTTP engine: middleware, health checks and module
-// routes. It opens nothing; callers pass in every connection.
 package router
 
 import (
@@ -32,27 +30,30 @@ func validate(d module.Deps) error {
 	return nil
 }
 
-// New returns the engine, or an error when Deps is incomplete or a module
-// fails to register. Probes live on the engine; modules (modules.go) mount under /api.
 func New(d module.Deps) (*gin.Engine, error) {
 	if err := validate(d); err != nil {
 		return nil, err
 	}
 
 	engine := gin.New()
+	// Nil trusts no proxy, so X-Forwarded-For cannot pick the client IP the limiters key on.
+	if err := engine.SetTrustedProxies(d.Config.HTTP.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("set trusted proxies: %w", err)
+	}
 
-	engine.Use(gokit.CORS())
-	engine.Use(gin.CustomRecovery(gokit.ErrorHandler))
-	engine.Use(gokit.SetContextId())
+	// The request id comes first so recovery, the limiters and handlers share one log_id per request.
+	engine.Use(gokit.RequestIDMiddleware())
+	engine.Use(gokit.Recovery())
+	engine.Use(gokit.CORS(gokit.CORSOptions{})) // open by default: any origin, no credentials
 	engine.Use(authkit.RequestLogger())
 	engine.Use(bodyLimit(d.Config.HTTP.MaxBodyBytes))
 
-	if err := registerHealth(engine, d); err != nil {
-		return nil, fmt.Errorf("register health routes: %w", err)
-	}
+	registerHealth(engine, d)
 
 	api := engine.Group("/api")
-	d.Kit.Mount(api)
+	if err := d.Kit.Mount(api); err != nil {
+		return nil, fmt.Errorf("mount authkit routes: %w", err)
+	}
 	for _, m := range modules {
 		if err := m.Register(api, d); err != nil {
 			return nil, fmt.Errorf("register %s routes: %w", m.Name, err)

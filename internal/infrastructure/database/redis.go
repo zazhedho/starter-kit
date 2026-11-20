@@ -14,8 +14,6 @@ import (
 	"starter-kit/internal/config"
 )
 
-// OpenRedis connects to Redis and checks it with PING (5 second limit). On
-// failure nothing is left open. The caller owns, and must close, the client.
 func OpenRedis(ctx context.Context, cfg config.Redis) (*redis.Client, error) {
 	var opt *redis.Options
 	if cfg.URL != "" {
@@ -46,12 +44,10 @@ func OpenRedis(ctx context.Context, cfg config.Redis) (*redis.Client, error) {
 		return nil, failed("ping redis: "+classifyRedis(err), "OpenRedis; ")
 	}
 
-	logus.WriteLog(logus.LogLevelInfo, "OpenRedis; connected to Redis at "+client.Options().Addr)
+	logus.Log(logus.LevelInfo, "OpenRedis; connected to Redis at", client.Options().Addr)
 	return client, nil
 }
 
-// classifyRedis names the kind of failure without using the client's text,
-// which can quote addresses and credentials.
 func classifyRedis(err error) string {
 	var netErr net.Error
 	msg := err.Error()

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"net/mail"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -11,13 +12,13 @@ import (
 	"github.com/zazhedho/gokit"
 )
 
-// Validate returns one error joining every problem with "; ". Problems name
-// their variable and never include a value.
 func (c Config) Validate() error {
 	var problems []string
-	// Read after FromEnv has finished reading everything, authkit included.
 	if err := gokit.EnvErrors(); err != nil {
 		problems = append(problems, strings.ReplaceAll(err.Error(), "\n", "; "))
+	}
+	if c.authErr != nil {
+		problems = append(problems, strings.ReplaceAll(c.authErr.Error(), "\n", "; "))
 	}
 	problems = append(problems, c.validatePort()...)
 	problems = append(problems, c.validateApp()...)
@@ -27,6 +28,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validateSMTP()...)
 	problems = append(problems, c.validateLocation()...)
 	problems = append(problems, c.validateMedia()...)
+	problems = append(problems, c.validatePlaceholders()...)
 
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
@@ -73,8 +75,17 @@ func (c Config) validateHTTP() []string {
 			problems = append(problems, t.key+" must be greater than zero")
 		}
 	}
+	if c.HTTP.ShutdownDelay < 0 || c.HTTP.ShutdownDelay >= c.HTTP.ShutdownTimeout {
+		problems = append(problems, "HTTP_SHUTDOWN_DELAY must be zero or more and less than HTTP_SHUTDOWN_TIMEOUT")
+	}
 	if c.HTTP.MaxBodyBytes <= 0 {
 		problems = append(problems, "HTTP_MAX_BODY_MB must be between 1 and 1024")
+	}
+	for _, proxy := range c.HTTP.TrustedProxies {
+		if !validProxy(proxy) {
+			problems = append(problems, "TRUSTED_PROXIES must be a comma-separated list of IP addresses or CIDRs")
+			break
+		}
 	}
 	return problems
 }
@@ -166,7 +177,23 @@ func (c Config) validateSMTP() []string {
 	return problems
 }
 
+func validProxy(entry string) bool {
+	if _, err := netip.ParseAddr(entry); err == nil {
+		return true
+	}
+	_, err := netip.ParsePrefix(entry)
+	return err == nil
+}
+
 func validPort(value string) bool {
 	port, err := strconv.Atoi(value)
 	return err == nil && port >= 1 && port <= 65535
+}
+
+func (c Config) isDevelopment() bool {
+	switch normalizeKey(c.App.Env) {
+	case "development", "dev", "local", "test":
+		return true
+	}
+	return false
 }

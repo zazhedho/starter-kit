@@ -9,9 +9,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// The full 122-bit UUID keeps a public object's URL unguessable.
 func buildObjectName(filename, folder string) string {
 	ext := filepath.Ext(filename)
-	uniqueFilename := fmt.Sprintf("%s_%s%s", time.Now().Format("20060102_150405"), uuid.New().String()[:8], ext)
+	uniqueFilename := fmt.Sprintf("%s_%s%s", time.Now().UTC().Format("20060102_150405"), uuid.NewString(), ext)
 	if folder == "" {
 		return uniqueFilename
 	}

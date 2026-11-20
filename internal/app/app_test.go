@@ -25,6 +25,7 @@ import (
 
 	"starter-kit/internal/config"
 	"starter-kit/internal/infrastructure/storage"
+	"starter-kit/internal/testutil/logcapture"
 )
 
 const testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"
@@ -44,8 +45,6 @@ func testConfig() config.Config {
 	}
 }
 
-// mockDB returns a sqlmock-backed gorm database and an opener that hands it
-// out and counts how often it was asked for it.
 func mockDB(t *testing.T) (sqlmock.Sqlmock, *atomic.Int32, func(config.Database, string) (*gorm.DB, *sql.DB, error)) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
@@ -68,8 +67,6 @@ func mockDB(t *testing.T) (sqlmock.Sqlmock, *atomic.Int32, func(config.Database,
 	return mock, &calls, open
 }
 
-// newTestApp builds an App over a mock database and a listener on a random
-// port. The mock expects exactly one Close.
 func newTestApp(t *testing.T, cfg config.Config, routes func(*gin.Engine)) (*App, net.Listener) {
 	t.Helper()
 	mock, _, open := mockDB(t)
@@ -240,8 +237,7 @@ func TestServeReturnsListenError(t *testing.T) {
 	if err := a.buildRoutes(); err != nil {
 		t.Fatal(err)
 	}
-	// Bind to the exact busy address: ":port" may coexist with a loopback
-	// listener on some platforms.
+	// Bind to the exact busy address: ":port" may coexist with a loopback listener on some platforms.
 	a.server.Addr = busy.Addr().String()
 
 	if err := a.Serve(context.Background()); err == nil {
@@ -277,7 +273,6 @@ func TestServerTimeoutsComeFromConfig(t *testing.T) {
 	}
 }
 
-// Closing a go-redis client twice errors; Close must guard against that.
 func TestCloseIsIdempotent(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectClose()
@@ -301,7 +296,6 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-// Pins shutdown order: module hooks run while the database is still open.
 func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	mock, _, open := mockDB(t)
 	mock.ExpectPing()
@@ -313,7 +307,7 @@ func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	hookRan := false
 	a.lifecycle.OnClose("test job", func(ctx context.Context) error {
 		hookRan = true
-		return a.sqlDB.PingContext(ctx) // fails if the database were closed already
+		return a.sqlDB.PingContext(ctx)
 	})
 
 	if err := a.Close(); err != nil {
@@ -327,7 +321,30 @@ func TestCloseStopsBackgroundWorkBeforeReleasingConnections(t *testing.T) {
 	}
 }
 
-// A hook that never finishes must not block Close forever; connections are still released.
+func TestNewRegistersAuthkitCloseOnTheLifecycle(t *testing.T) {
+	mock, _, open := mockDB(t)
+	mock.ExpectClose()
+	a, err := newApp(context.Background(), testConfig(), deps{openDB: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close() }()
+	var order []string
+	a.lifecycle.OnClose("module", func(context.Context) error {
+		order = append(order, "module")
+		return nil
+	})
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if len(order) != 1 || order[0] != "module" {
+		t.Fatalf("module hook order = %v", order)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCloseWaitsForBackgroundWorkOnlyUntilTheShutdownTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 20 * time.Millisecond
@@ -405,8 +422,6 @@ func TestNewWithoutRedisDoesNotDial(t *testing.T) {
 	}
 }
 
-// TestBrevoConfigMapsEverySMTPField checks that brevoConfig copies each SMTP
-// setting into the matching field of authkit's public BrevoConfig, unchanged.
 func TestBrevoConfigMapsEverySMTPField(t *testing.T) {
 	tests := []struct {
 		name string
@@ -603,7 +618,6 @@ func TestNewRejectsUnknownTimezone(t *testing.T) {
 	}
 }
 
-// countingListener records Accept calls.
 type countingListener struct {
 	net.Listener
 	accepts atomic.Int32
@@ -651,8 +665,6 @@ func TestRunMigrateOnlyDoesNotListen(t *testing.T) {
 	}
 }
 
-// TestStartupOrder: open dependencies, migrate, build routes (some query migrated
-// tables), then serve.
 func TestStartupOrder(t *testing.T) {
 	cfg := testConfig()
 	cfg.Migrate.Run = true
@@ -790,7 +802,6 @@ func TestMigrateProjectBadSourceDoesNotLeak(t *testing.T) {
 	if err == nil {
 		t.Fatal("migrateProject accepted a missing source directory")
 	}
-	// The application's pool is still usable, and the caller closes it.
 	if err := sqlDB.Close(); err != nil {
 		t.Fatalf("pool close: %v", err)
 	}
@@ -800,18 +811,26 @@ func TestMigrateProjectBadSourceDoesNotLeak(t *testing.T) {
 }
 
 func TestSetServerIPEnv(t *testing.T) {
-	t.Setenv("ServerIP", "")
+	t.Setenv("SERVER_IP", "")
 	if err := setServerIPEnv(); err != nil {
 		t.Fatal(err)
 	}
-	if os.Getenv("ServerIP") == "" {
-		t.Fatal("ServerIP was not set")
+	if os.Getenv("SERVER_IP") == "" {
+		t.Fatal("SERVER_IP was not set")
 	}
 }
 
+var logs *logcapture.Capture
+
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
-	os.Exit(m.Run())
+	logs = logcapture.Start()
+	code := m.Run()
+	if code != 0 {
+		_, _ = os.Stderr.WriteString(logs.All())
+	}
+	logs.Stop()
+	os.Exit(code)
 }
 
 func TestCloseWithoutLifecycleDoesNotPanic(t *testing.T) {
@@ -821,8 +840,6 @@ func TestCloseWithoutLifecycleDoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestShutdownSharesOneDeadline: the drain and the lifecycle hooks spend the
-// same HTTP_SHUTDOWN_TIMEOUT, counted from the moment shutdown starts.
 func TestShutdownSharesOneDeadline(t *testing.T) {
 	cfg := testConfig()
 	cfg.HTTP.ShutdownTimeout = 300 * time.Millisecond
@@ -873,8 +890,6 @@ func TestShutdownSharesOneDeadline(t *testing.T) {
 	}
 }
 
-// ModuleDeps is what the routes (and a later worker or second transport) are
-// wired from: the App's own connections, config and shutdown hooks.
 func TestModuleDepsExposesTheAppsDependencies(t *testing.T) {
 	cfg := testConfig()
 	cfg.Media.Enabled = true
@@ -900,4 +915,117 @@ func TestModuleDepsExposesTheAppsDependencies(t *testing.T) {
 	if d.Lifecycle != a.lifecycle {
 		t.Fatal("ModuleDeps must share the App's Lifecycle so hooks run at Close")
 	}
+}
+
+func TestRunWarnsAboutUnsafeSettings(t *testing.T) {
+	t.Setenv("APP_NAME", "svc")
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("APP_TIMEZONE", "UTC")
+	t.Setenv("PORT", "8080")
+	t.Setenv("DB_HOST", "127.0.0.1")
+	t.Setenv("DB_PORT", "1")
+	t.Setenv("DB_USERNAME", "u")
+	t.Setenv("DB_PASS", "CHANGE_ME_DB_PASSWORD")
+	t.Setenv("DB_NAME", "n")
+	t.Setenv("JWT_KEY", testJWTKey)
+	t.Setenv("MEDIA_ENABLED", "true")
+	t.Setenv("STORAGE_ENDPOINT", "files.example.test")
+	t.Setenv("STORAGE_ACCESS_KEY", "access")
+	t.Setenv("STORAGE_SECRET_KEY", "secret")
+	t.Setenv("STORAGE_BUCKET_NAME", "bucket")
+	t.Setenv("STORAGE_BASE_URL", "https://files.example.test")
+	for _, key := range []string{"REDIS_URL", "REDIS_HOST", "CONSUL"} {
+		t.Setenv(key, "")
+	}
+	t.Chdir(t.TempDir())
+
+	mark := logs.Mark()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = Run(ctx, []string{"-migrate=false"})
+
+	out := logs.Since(mark)
+	for _, want := range []string{"MEDIA_ENABLED is true without Redis", "DB_PASS holds a placeholder"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("startup log lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "CHANGE_ME_DB_PASSWORD") {
+		t.Fatalf("a warning printed a secret value:\n%s", out)
+	}
+}
+
+func TestServeDrainsBackgroundWorkAndReadinessBeforeTheHTTPDrain(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 5 * time.Second
+	started, release := make(chan struct{}), make(chan struct{})
+	a, ln := newTestApp(t, cfg, func(e *gin.Engine) {
+		e.GET("/slow", func(c *gin.Context) {
+			close(started)
+			<-release
+			c.String(http.StatusOK, "finished")
+		})
+	})
+	drained := make(chan struct{})
+	a.lifecycle.OnDrain(func() { close(drained) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := serveAsync(ctx, a)
+	reply := make(chan int, 1)
+	go func() { status, _ := get(t, "http://"+ln.Addr().String()+"/slow"); reply <- status }()
+	<-started
+	cancel()
+
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the drain hook did not run while the request was still in flight")
+	}
+	if !a.lifecycle.Draining() {
+		t.Fatal("the lifecycle is not marked as draining")
+	}
+	close(release)
+	if status := <-reply; status != http.StatusOK {
+		t.Fatalf("in-flight request = %d", status)
+	}
+	if err := waitServe(t, done, 2*time.Second); err != nil {
+		t.Fatalf("Serve = %v", err)
+	}
+}
+
+func TestReadyzAnswers503DuringTheShutdownDelay(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownDelay = 400 * time.Millisecond
+	a, ln := newTestApp(t, cfg, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := serveAsync(ctx, a)
+	if status, _ := get(t, "http://"+ln.Addr().String()+"/healthcheck"); status != http.StatusOK {
+		t.Fatalf("healthcheck = %d", status)
+	}
+
+	begin := time.Now()
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	if status, _ := get(t, "http://"+ln.Addr().String()+"/readyz"); status != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz during the delay = %d, want 503 from a listener that is still open", status)
+	}
+	if err := waitServe(t, done, 3*time.Second); err != nil {
+		t.Fatalf("Serve = %v", err)
+	}
+	if elapsed := time.Since(begin); elapsed < cfg.HTTP.ShutdownDelay {
+		t.Fatalf("Serve returned after %s, before the %s delay", elapsed, cfg.HTTP.ShutdownDelay)
+	}
+}
+
+func TestShutdownDelayIsBoundedByTheShutdownDeadline(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 200 * time.Millisecond
+	cfg.HTTP.ShutdownDelay = time.Hour
+	a, _ := newTestApp(t, cfg, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := serveAsync(ctx, a)
+	cancel()
+	_ = waitServe(t, done, 3*time.Second)
 }

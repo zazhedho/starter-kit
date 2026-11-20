@@ -10,10 +10,10 @@
 
 # Output of the go coverage tool
 *.out
+coverage.out
 
 # Dependency directories
 vendor/
-docs/superpowers/
 
 # IDE
 .idea/
@@ -23,6 +23,8 @@ docs/superpowers/
 
 # Environment files
 .env
+.env.*
+!.env.example
 *.env.local
 
 # OS generated files
@@ -42,3 +44,8 @@ tmp/
 temp/
 
 .gocache
+
+
+# Local agent working files
+.superpowers/
+docs/superpowers/

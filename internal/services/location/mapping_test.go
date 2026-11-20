@@ -2,34 +2,36 @@ package location
 
 import (
 	"testing"
+	"time"
 
 	domainlocation "starter-kit/internal/domain/location"
 )
 
-func TestLocationMapAndSortHelpers(t *testing.T) {
-	provinces := sortProvinces([]domainlocation.Province{{Code: "12", Name: "Zulu"}, {Code: "11", Name: "Aceh"}})
-	if provinces[0].Name != "Aceh" {
-		t.Fatalf("expected province sort by name, got %+v", provinces)
+func TestViewsMapEveryLevelToLocations(t *testing.T) {
+	if got := views([]domainlocation.Province{{Code: "11", Name: "Aceh"}}, viewProvince); len(got) != 1 || got[0].Code != "11" || got[0].Name != "Aceh" {
+		t.Fatalf("province view: %+v", got)
 	}
-	cities := sortCities([]domainlocation.City{{Code: "2", Name: "Zulu"}, {Code: "1", Name: "Aceh"}})
-	if cities[0].Name != "Aceh" {
-		t.Fatalf("expected city sort by name, got %+v", cities)
+	if got := views([]domainlocation.City{{Code: "1101", Name: "Banda Aceh"}}, viewCity); len(got) != 1 || got[0].Code != "1101" {
+		t.Fatalf("city view: %+v", got)
 	}
-	districts := sortDistricts([]domainlocation.District{{Code: "2", Name: "Zulu"}, {Code: "1", Name: "Aceh"}})
-	if districts[0].Name != "Aceh" {
-		t.Fatalf("expected district sort by name, got %+v", districts)
+	if got := views([]domainlocation.District{{Code: "110101", Name: "Kuta Alam"}}, viewDistrict); len(got) != 1 || got[0].Name != "Kuta Alam" {
+		t.Fatalf("district view: %+v", got)
 	}
-	villages := sortVillages([]domainlocation.Village{{Code: "2", Name: "Zulu"}, {Code: "1", Name: "Aceh"}})
-	if villages[0].Name != "Aceh" {
-		t.Fatalf("expected village sort by name, got %+v", villages)
+	if got := views([]domainlocation.Village{{Code: "11010101", Name: "Village"}}, viewVillage); len(got) != 1 || got[0].Code != "11010101" {
+		t.Fatalf("village view: %+v", got)
 	}
-	if got := mapCities([]domainlocation.City{{Code: "1101", Name: "Banda Aceh"}}); len(got) != 1 || got[0].Code != "1101" {
-		t.Fatalf("unexpected city mapping: %+v", got)
+	if got := views[domainlocation.City](nil, viewCity); got == nil || len(got) != 0 {
+		t.Fatalf("no rows must map to an empty, non-nil list (it is sent as []), got %#v", got)
 	}
-	if got := mapDistricts([]domainlocation.District{{Code: "110101", Name: "Kuta Alam"}}); len(got) != 1 || got[0].Name != "Kuta Alam" {
-		t.Fatalf("unexpected district mapping: %+v", got)
-	}
-	if got := mapVillages([]domainlocation.Village{{Code: "11010101", Name: "Village"}}); len(got) != 1 || got[0].Code != "11010101" {
-		t.Fatalf("unexpected village mapping: %+v", got)
+}
+
+func TestMapSyncJobFormatsTimesAndOmitsInternalFields(t *testing.T) {
+	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	got := mapSyncJob(domainlocation.SyncJob{
+		ID: "job-1", Status: "running", RequestedBy: "user-1", CreatedAt: created, StartedAt: &created,
+		OwnerInstanceID: "instance-a", HeartbeatAt: created,
+	})
+	if got.CreatedAt != "2026-01-02T03:04:05Z" || got.StartedAt != "2026-01-02T03:04:05Z" || got.FinishedAt != "" || got.RequestedBy != "user-1" {
+		t.Fatalf("mapSyncJob = %+v", got)
 	}
 }

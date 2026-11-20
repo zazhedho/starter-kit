@@ -14,8 +14,6 @@ import (
 
 const boundSecret = "SECRET-VALUE"
 
-// attachedMock returns a gorm handle built the way Open builds it, on top of a
-// sqlmock pool.
 func attachedMock(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))

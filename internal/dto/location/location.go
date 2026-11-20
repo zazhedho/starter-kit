@@ -6,18 +6,16 @@ type Location struct {
 }
 
 type SyncRequest struct {
-	Year         string `json:"year" binding:"omitempty"`
-	Level        string `json:"level" binding:"omitempty,oneof=all province city district village"`
-	ProvinceCode string `json:"province_code" binding:"omitempty"`
-	CityCode     string `json:"city_code" binding:"omitempty"`
-	DistrictCode string `json:"district_code" binding:"omitempty"`
+	Level        string `json:"level"`
+	ProvinceCode string `json:"province_code"`
+	CityCode     string `json:"city_code"`
+	DistrictCode string `json:"district_code"`
 }
 
 type SyncJob struct {
 	ID            string `json:"id"`
 	Status        string `json:"status"`
 	Level         string `json:"level"`
-	Year          string `json:"year"`
 	ProvinceCode  string `json:"province_code,omitempty"`
 	CityCode      string `json:"city_code,omitempty"`
 	DistrictCode  string `json:"district_code,omitempty"`

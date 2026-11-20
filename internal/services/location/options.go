@@ -2,17 +2,34 @@ package location
 
 import "time"
 
-// Options is what the service needs besides its repository. The zero value is
-// valid; the constructor fills in defaults.
 type Options struct {
-	// Cache is the read-through cache; nil installs a cache that always misses.
-	Cache Cache
-	// NewID returns the identifier of a new sync job; nil means UUIDv7.
+	Cache             Cache
 	NewID             func() string
+	InstanceID        string
 	BaseURL           string
-	SourceYear        string
+	MaxResponseBytes  int64
 	Timeout, CacheTTL time.Duration
+
+	HeartbeatInterval time.Duration
+	StaleAfter        time.Duration
+	ProgressInterval  time.Duration
+	MissTTL           time.Duration
+	FailureTTL        time.Duration
 }
 
-// defaultHTTPTimeout bounds outbound calls when Options.Timeout is not positive.
-const defaultHTTPTimeout = 20 * time.Second
+const (
+	defaultHTTPTimeout      = 20 * time.Second
+	defaultMaxResponseBytes = int64(4 << 20)
+	defaultHeartbeat        = 15 * time.Second
+	defaultStaleAfter       = 2 * time.Minute
+	defaultProgressInterval = 2 * time.Second
+	defaultMissTTL          = time.Minute
+	defaultFailureTTL       = 8 * time.Second
+)
+
+func orDefault[T int64 | time.Duration](v, def T) T {
+	if v <= 0 {
+		return def
+	}
+	return v
+}

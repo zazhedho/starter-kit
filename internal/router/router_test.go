@@ -1,12 +1,15 @@
 package router
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
@@ -45,8 +48,6 @@ func accessLogLines(output string) []string {
 	return lines
 }
 
-// TestMiddlewareOrderAndSingleAccessLog checks that the request id precedes the
-// logger, CORS precedes the body limit, and each request is logged once.
 func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
@@ -59,6 +60,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 
 	big := httptest.NewRecorder()
 	bigReq := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(strings.Repeat("a", 4096)))
+	bigReq.Header.Set("Origin", "https://app.example.com")
 	engine.ServeHTTP(big, bigReq)
 	lines := accessLogLines(logs.Since(mark))
 
@@ -79,6 +81,37 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "status=413") {
 		t.Errorf("the rejected request was not logged with its status: %s", lines[1])
+	}
+}
+
+func TestRequestIDPrecedesRecovery(t *testing.T) {
+	engine := newEngine(t, routertest.NewDeps(t, nil))
+	engine.GET("/boom", func(*gin.Context) { panic("boom") })
+	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
+
+	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	req.Header.Set("X-Request-ID", requestID)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		LogID string `json:"log_id"`
+		Error []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, rec.Body.String())
+	}
+	if body.LogID != requestID || rec.Header().Get("X-Request-ID") != requestID {
+		t.Fatalf("log_id %q / header %q, want the caller's id %q (request id must precede recovery)", body.LogID, rec.Header().Get("X-Request-ID"), requestID)
+	}
+	if len(body.Error) != 1 || strings.Contains(rec.Body.String(), "boom") {
+		t.Fatalf("error must be one entry without the panic value: %s", rec.Body.String())
 	}
 }
 
@@ -176,25 +209,37 @@ func TestReadyz(t *testing.T) {
 		}
 	})
 
-	t.Run("redis checked when present", func(t *testing.T) {
-		mr := miniredis.RunT(t)
-		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-		t.Cleanup(func() { _ = client.Close() })
-		d, mock := routertest.NewDepsWithMock(t, nil)
-		d.Redis = client
+	t.Run("draining answers 503 without touching the database", func(t *testing.T) {
+		d := routertest.NewDeps(t, nil)
 		engine := newEngine(t, d)
-
-		mock.ExpectPing()
-		if rec := get(engine); rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 with live redis, got %d", rec.Code)
-		}
-		mr.Close()
-		mock.ExpectPing()
+		d.Lifecycle.Drain()
 		rec := get(engine)
 		if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
-			t.Fatalf("expected 503 after redis stops, got %d %s", rec.Code, rec.Body.String())
+			t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 		}
 	})
+
+	t.Run("redis checked when present", func(t *testing.T) { requireReadyzFollowsRedis(t, get, compact) })
+}
+
+func requireReadyzFollowsRedis(t *testing.T, get func(http.Handler) *httptest.ResponseRecorder, compact func(*httptest.ResponseRecorder) string) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	d, mock := routertest.NewDepsWithMock(t, nil)
+	d.Redis = client
+	engine := newEngine(t, d)
+
+	mock.ExpectPing()
+	if rec := get(engine); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with live redis, got %d", rec.Code)
+	}
+	mr.Close()
+	mock.ExpectPing()
+	rec := get(engine)
+	if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
+		t.Fatalf("expected 503 after redis stops, got %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
@@ -210,9 +255,7 @@ func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
 func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
 	engine := newEngine(t, routertest.NewDeps(t, nil))
 
-	// GET /api/user/sessions itself answers 401 without Redis because the
-	// authenticated GET /api/user/:id route matches "sessions", so assert on the
-	// registered route table instead of the status code.
+	// GET /api/user/:id matches "sessions" and answers 401, so assert on the route table, not the status.
 	registered := map[string]bool{}
 	for _, route := range engine.Routes() {
 		registered[route.Method+" "+route.Path] = true
@@ -240,5 +283,66 @@ func TestNewNamesTheModuleThatFailsToRegister(t *testing.T) {
 	engine, err := New(routertest.NewDeps(t, nil))
 	if engine != nil || !errors.Is(err, boom) || !strings.Contains(err.Error(), "register broken routes") {
 		t.Fatalf("New = %v, %v; want no engine and an error naming the module", engine, err)
+	}
+}
+
+func serveFrom(engine *gin.Engine, path, remote, forwarded string) (int, string) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.RemoteAddr = remote + ":4000"
+	if forwarded != "" {
+		req.Header.Set("X-Forwarded-For", forwarded)
+	}
+	engine.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String()
+}
+
+func newLimitedEngine(t *testing.T, proxies []string) *gin.Engine {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	d := routertest.NewDeps(t, func(c *config.Config) {
+		c.HTTP.TrustedProxies = proxies
+		c.Location.RateLimit = 2
+		c.Location.RateWindow = time.Minute
+	})
+	d.Redis = client
+	engine := newEngine(t, d)
+	engine.GET("/test/ip", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
+	return engine
+}
+
+func TestNoProxyIsTrustedByDefault(t *testing.T) {
+	engine := newLimitedEngine(t, nil)
+	if _, ip := serveFrom(engine, "/test/ip", "192.0.2.10", "203.0.113.9"); ip != "192.0.2.10" {
+		t.Fatalf("ClientIP = %q, want the remote address: a spoofed X-Forwarded-For must be ignored", ip)
+	}
+}
+
+func TestRotatingForwardedForDoesNotEscapeTheLocationLimit(t *testing.T) {
+	engine := newLimitedEngine(t, nil)
+	want := []int{http.StatusBadRequest, http.StatusBadRequest, http.StatusTooManyRequests, http.StatusTooManyRequests}
+	for i, status := range want {
+		got, _ := serveFrom(engine, "/api/location/city", "192.0.2.10", fmt.Sprintf("203.0.113.%d", i+1))
+		if got != status {
+			t.Fatalf("request %d = %d, want %d", i+1, got, status)
+		}
+	}
+}
+
+func TestAConfiguredProxyIsHonoured(t *testing.T) {
+	engine := newLimitedEngine(t, []string{"192.0.2.0/24"})
+	if _, ip := serveFrom(engine, "/test/ip", "192.0.2.10", "203.0.113.9"); ip != "203.0.113.9" {
+		t.Fatalf("ClientIP = %q, want the forwarded client of a trusted proxy", ip)
+	}
+	for i := range 4 {
+		got, _ := serveFrom(engine, "/api/location/city", "192.0.2.10", fmt.Sprintf("203.0.113.%d", i+1))
+		if got != http.StatusBadRequest {
+			t.Fatalf("client %d = %d, want 400", i+1, got)
+		}
+	}
+	if _, ip := serveFrom(engine, "/test/ip", "198.51.100.7", "203.0.113.9"); ip != "198.51.100.7" {
+		t.Fatalf("ClientIP = %q, want the remote address of an untrusted peer", ip)
 	}
 }

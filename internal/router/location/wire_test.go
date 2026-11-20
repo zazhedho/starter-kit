@@ -3,12 +3,16 @@ package location
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 
+	"starter-kit/internal/config"
 	"starter-kit/internal/testutil/routertest"
 )
 
@@ -60,15 +64,43 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 	}
 }
 
-func TestRegisterLocationRegistersAShutdownHook(t *testing.T) {
-	d := routertest.NewDeps(t, nil)
-	if err := Register(gin.New(), d); err != nil {
-		t.Fatalf("Register: %v", err)
+func TestRegisterLocationRegistersShutdownHooks(t *testing.T) {
+	d, _ := signedInDeps(t, "superadmin")
+	engine := engineFor(t, d)
+	d.Lifecycle.Drain()
+
+	token, err := d.Kit.IssueAccessToken(viewerID, "", "superadmin")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := d.Lifecycle.Len(); got != 1 {
-		t.Fatalf("Register registered %d shutdown hooks, want 1", got)
+	req := httptest.NewRequest(http.MethodPost, "/api/location/sync", strings.NewReader(`{"level":"province"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a sync after Drain = %d, want 503: the drain hook is not registered: %s", rec.Code, rec.Body.String())
 	}
 	if err := d.Lifecycle.Close(context.Background()); err != nil {
 		t.Fatalf("Lifecycle.Close = %v", err)
+	}
+}
+
+func TestRegisterLocationPassesTheResponseCap(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"code":"11","name":"` + strings.Repeat("A", 300) + `"}]`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	d := routertest.NewDeps(t, func(c *config.Config) {
+		c.Location.ServiceBaseURL = upstream.URL
+		c.Location.MaxResponseBytes = 100
+	})
+	db, mock := routertest.NewExecDB(t)
+	d.DB = db
+	mock.ExpectExec(`UPDATE .location_sync_jobs. SET`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`FROM "provinces"`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if got := routertest.Serve(engineFor(t, d), http.MethodGet, "/api/location/province"); got != http.StatusBadGateway {
+		t.Fatalf("GET province with an oversized upstream body = %d, want 502", got)
 	}
 }

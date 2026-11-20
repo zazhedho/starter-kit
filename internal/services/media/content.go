@@ -5,19 +5,9 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"path"
-	"strings"
 
 	domainmedia "starter-kit/internal/domain/media"
 )
-
-var defaultContentTypes = []string{
-	"application/pdf",
-	"image/gif",
-	"image/jpeg",
-	"image/png",
-	"image/webp",
-}
 
 func detectContentType(file multipart.File) (string, error) {
 	buffer := make([]byte, 512)
@@ -32,31 +22,5 @@ func detectContentType(file multipart.File) (string, error) {
 		return "", err
 	}
 
-	return normalizeContentType(http.DetectContentType(buffer[:n])), nil
-}
-
-func normalizeContentType(contentType string) string {
-	contentType, _, _ = strings.Cut(strings.ToLower(strings.TrimSpace(contentType)), ";")
-	return strings.TrimSpace(contentType)
-}
-
-func extensionForContentType(contentType string) string {
-	switch contentType {
-	case "application/pdf":
-		return ".pdf"
-	case "image/gif":
-		return ".gif"
-	case "image/jpeg":
-		return ".jpg"
-	case "image/png":
-		return ".png"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ""
-	}
-}
-
-func safeFilename(filename string) string {
-	return path.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
+	return domainmedia.NormalizeContentType(http.DetectContentType(buffer[:n])), nil
 }

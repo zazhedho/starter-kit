@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,23 +15,23 @@ import (
 var managedEnv = []string{
 	"APP_NAME", "APP_ENV", "PORT", "APP_TIMEZONE", "JWT_KEY", "OTP_SECRET", "RESET_SECRET",
 	"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT",
-	"HTTP_SHUTDOWN_TIMEOUT", "HTTP_MAX_BODY_MB",
+	"HTTP_SHUTDOWN_TIMEOUT", "HTTP_SHUTDOWN_DELAY", "HTTP_MAX_BODY_MB", "TRUSTED_PROXIES",
 	"DATABASE_URL", "DB_HOST", "DB_PORT", "DB_USERNAME", "DB_PASS", "DB_NAME", "DB_SSLMODE",
 	"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 	"REDIS_URL", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
 	"RUN_MIGRATION", "PATH_MIGRATE",
-	"LOCATION_SERVICE_BASE_URL", "LOCATION_SOURCE_YEAR", "LOCATION_SERVICE_TIMEOUT_SECONDS", "LOCATION_CACHE_TTL",
+	"LOCATION_SERVICE_BASE_URL", "LOCATION_SERVICE_TIMEOUT_SECONDS", "LOCATION_CACHE_TTL",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SUBJECT", "RESET_SUBJECT", "AUTH_EMAIL_APP_NAME",
 	"MEDIA_ENABLED", "MEDIA_MAX_FILE_SIZE_MB", "MEDIA_ALLOWED_CONTENT_TYPES", "MEDIA_UPLOAD_RATE_LIMIT",
-	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT",
+	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT", "MEDIA_UPLOAD_MAX_CONCURRENT", "MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER",
+	"MEDIA_UPLOAD_USER_RATE_LIMIT", "MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS",
+	"LOCATION_SERVICE_MAX_RESPONSE_MB", "LOCATION_RATE_LIMIT", "LOCATION_RATE_WINDOW_SECONDS", "STORAGE_PUBLIC_READ",
 	"STORAGE_PROVIDER", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME",
 	"STORAGE_BASE_URL", "STORAGE_REGION", "STORAGE_USE_SSL", "R2_ACCOUNT_ID",
+	"JWT_EXP", "JWT_EXP_MINUTES", "SESSION_MAX_LIFETIME_HOURS", "AUTH_RATE_LIMIT", "AUTH_RATE_WINDOW_SECONDS",
+	"LIMITER_FAIL_CLOSED", "LOGIN_WITH_PHONE",
 }
 
-// clearEnv unsets every variable the config reads; t.Setenv registers the
-// restore of the original value before it is removed.
-// It also clears gokit's recorded parse errors, before and after the test, so
-// invalid values never leak between tests.
 func clearEnv(t *testing.T) {
 	t.Helper()
 	gokit.ResetEnvErrors()
@@ -80,9 +81,10 @@ func TestFromEnvDefaults(t *testing.T) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		ShutdownTimeout:   15 * time.Second,
+		ShutdownDelay:     5 * time.Second,
 		MaxBodyBytes:      10 << 20,
 	}
-	if cfg.HTTP != wantHTTP {
+	if !reflect.DeepEqual(cfg.HTTP, wantHTTP) {
 		t.Fatalf("HTTP = %+v, want %+v", cfg.HTTP, wantHTTP)
 	}
 	if cfg.App.Timezone != "Asia/Jakarta" {
@@ -102,19 +104,19 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Fatalf("Migrate = %+v", cfg.Migrate)
 	}
 	m := cfg.Media
-	if m.UploadTimeout != 2*time.Minute || m.MaxFileSizeBytes != 5<<20 || m.UploadRateLimit != 20 || m.UploadRateWindow != 60*time.Second {
+	if m.UploadTimeout != time.Minute || m.MaxFileSizeBytes != 5<<20 || m.UploadRateLimit != 20 || m.UploadRateWindow != 60*time.Second {
 		t.Fatalf("Media = %+v", m)
 	}
 	if m.Enabled {
 		t.Fatal("media must be disabled by default")
 	}
-	if got := strings.Join(m.AllowedContentTypes, ","); got != "image/jpeg,image/png,image/webp,image/gif,application/pdf" {
+	if got := strings.Join(m.AllowedContentTypes, ","); got != "application/pdf,image/gif,image/jpeg,image/png,image/webp" {
 		t.Fatalf("AllowedContentTypes = %q", got)
 	}
 	if cfg.Location.ServiceTimeout != 20*time.Second || cfg.Location.CacheTTL != 180*24*time.Hour {
 		t.Fatalf("Location = %+v", cfg.Location)
 	}
-	if cfg.Storage.Provider != "minio" || cfg.Storage.Region != "auto" || cfg.Storage.UseSSL {
+	if cfg.Storage.Provider != "minio" || cfg.Storage.Region != "" || cfg.Storage.UseSSL {
 		t.Fatalf("Storage = %+v", cfg.Storage)
 	}
 	if cfg.Redis.Configured() {
@@ -137,13 +139,13 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	for k, v := range map[string]string{
 		"APP_NAME": "svc", "APP_ENV": "production", "APP_TIMEZONE": "UTC",
 		"HTTP_READ_HEADER_TIMEOUT": "1s", "HTTP_READ_TIMEOUT": "2s", "HTTP_WRITE_TIMEOUT": "3s",
-		"HTTP_IDLE_TIMEOUT": "4s", "HTTP_SHUTDOWN_TIMEOUT": "5s", "HTTP_MAX_BODY_MB": "20",
+		"HTTP_IDLE_TIMEOUT": "4s", "HTTP_SHUTDOWN_TIMEOUT": "5s", "HTTP_SHUTDOWN_DELAY": "1s", "HTTP_MAX_BODY_MB": "20",
 		"MEDIA_UPLOAD_TIMEOUT": "3m",
 		"DB_MAX_OPEN_CONNS":    "50", "DB_MAX_IDLE_CONNS": "5", "DB_CONN_MAX_LIFETIME": "30m", "DB_CONN_MAX_IDLE_TIME": "2m",
 		"RUN_MIGRATION": "false", "REDIS_HOST": "cache",
 		"LOCATION_SERVICE_TIMEOUT_SECONDS": "7", "MEDIA_UPLOAD_RATE_WINDOW_SECONDS": "90",
-		"LOCATION_CACHE_TTL": "24h", "LOCATION_SOURCE_YEAR": "2024",
-		"SMTP_HOST": "smtp.example.com", "SMTP_PASS": "x", "SMTP_FROM": "a@example.com",
+		"LOCATION_CACHE_TTL": "24h",
+		"SMTP_HOST":          "smtp.example.com", "SMTP_PASS": "x", "SMTP_FROM": "a@example.com",
 	} {
 		t.Setenv(k, v)
 	}
@@ -152,8 +154,8 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if cfg.App.Name != "svc" || cfg.App.Env != "production" || cfg.App.Timezone != "UTC" {
 		t.Fatalf("App = %+v", cfg.App)
 	}
-	want := HTTP{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second, 20 << 20}
-	if cfg.HTTP != want {
+	want := HTTP{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second, time.Second, 20 << 20, nil}
+	if !reflect.DeepEqual(cfg.HTTP, want) {
 		t.Fatalf("HTTP = %+v, want %+v", cfg.HTTP, want)
 	}
 	if cfg.Media.UploadTimeout != 3*time.Minute || cfg.Media.UploadRateWindow != 90*time.Second {
@@ -169,7 +171,7 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if cfg.Redis.Host != "cache" || !cfg.Redis.Configured() {
 		t.Fatalf("Redis = %+v", cfg.Redis)
 	}
-	if cfg.Location.ServiceTimeout != 7*time.Second || cfg.Location.CacheTTL != 24*time.Hour || cfg.Location.SourceYear != "2024" {
+	if cfg.Location.ServiceTimeout != 7*time.Second || cfg.Location.CacheTTL != 24*time.Hour {
 		t.Fatalf("Location = %+v", cfg.Location)
 	}
 	if !cfg.SMTP.Configured() {
@@ -407,7 +409,7 @@ func TestValidate(t *testing.T) {
 		t.Setenv("DB_MAX_OPEN_CONNS", "many")
 		t.Setenv("HTTP_MAX_BODY_MB", "big")
 		cfg := FromEnv()
-		if cfg.HTTP.ReadTimeout != 30*time.Second || cfg.Media.UploadTimeout != 2*time.Minute || cfg.Database.MaxOpenConns != 100 {
+		if cfg.HTTP.ReadTimeout != 30*time.Second || cfg.Media.UploadTimeout != time.Minute || cfg.Database.MaxOpenConns != 100 {
 			t.Fatalf("unparsable values must fall back to defaults: %+v %+v %+v", cfg.HTTP, cfg.Media, cfg.Database)
 		}
 		wantInError(t, cfg.Validate(),
@@ -494,7 +496,6 @@ func TestStringRedactsSecrets(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("JWT_KEY", "jwt-SECRET-0123456789-0123456789-0123")
 	cfg := FromEnv()
-	// Fake credentials: the test checks that none of them is ever printed.
 	//nolint:gosec // G101: fixture values, not real credentials
 	cfg.Database = Database{
 		URL: "postgres://u:db-URL-SECRET@h/db", Host: "h", Password: "db-PASS-SECRET",
@@ -542,5 +543,48 @@ func TestDatabaseDSNRoundTripsAwkwardValues(t *testing.T) {
 			cfg.Port != 5433 || cfg.Database != "my db" || cfg.RuntimeParams["TimeZone"] != "Asia/Jakarta" {
 			t.Errorf("password %q: parsed back as %+v", password, cfg)
 		}
+	}
+}
+
+func TestValidateReportsAuthkitEnvironmentErrors(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("AUTH_RATE_LIMIT", "lots")
+	t.Setenv("LOGIN_WITH_PHONE", "maybe")
+
+	err := validateFromEnv(t)
+	wantInError(t, err, "AUTH_RATE_LIMIT must be a valid integer", "LOGIN_WITH_PHONE must be a valid boolean")
+	if strings.Contains(err.Error(), "lots") || strings.Contains(err.Error(), "maybe") {
+		t.Fatalf("error echoes a value: %v", err)
+	}
+}
+
+func TestFromEnvReadsTheNewAuthkitVariables(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("JWT_EXP_MINUTES", "20")
+	t.Setenv("SESSION_MAX_LIFETIME_HOURS", "48")
+	t.Setenv("AUTH_RATE_LIMIT", "7")
+	t.Setenv("AUTH_RATE_WINDOW_SECONDS", "90")
+	t.Setenv("LIMITER_FAIL_CLOSED", "true")
+	t.Setenv("LOGIN_WITH_PHONE", "true")
+
+	cfg := FromEnv()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate = %v", err)
+	}
+	a := cfg.Auth
+	if a.AccessTokenTTL != 20*time.Minute || a.SessionMaxLifetime != 48*time.Hour ||
+		a.AuthRate.Limit != 7 || a.AuthRate.Window != 90*time.Second || !a.FailClosedLimiters || !a.PhoneLogin {
+		t.Fatalf("authkit config not read from the environment: %+v", a)
+	}
+}
+
+func TestNormalizeKey(t *testing.T) {
+	if got := normalizeKey("  R2 "); got != "r2" {
+		t.Fatalf("normalizeKey = %q", got)
+	}
+	if got := normalizeUpperKey(" db_host\t"); got != "DB_HOST" {
+		t.Fatalf("normalizeUpperKey = %q", got)
 	}
 }

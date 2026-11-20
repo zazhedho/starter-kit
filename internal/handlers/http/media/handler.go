@@ -3,8 +3,8 @@ package media
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,42 +15,57 @@ import (
 
 	domainmedia "starter-kit/internal/domain/media"
 	dtomedia "starter-kit/internal/dto/media"
+	httpshared "starter-kit/internal/handlers/http/shared"
 )
 
 const (
 	multipartOverhead = int64(1 << 20)
 	defaultListLimit  = 20
-	maxListLimit      = 100
 )
 
-// listFilters are the filters[...] keys read into typed fields below. Which
-// columns may be filtered or sorted, and the default order, belong to the
-// repository, the single authority for them.
+var (
+	errTooManyUploads     = errors.New("too many uploads are in progress, try again shortly")
+	errTooManyUserUploads = errors.New("too many of your uploads are in progress, wait for one to finish")
+)
+
 var listFilters = []string{"owner_user_id", "content_type"}
 
 type Handler struct {
 	service       Service
 	uploadTimeout time.Duration
+	uploadSlots   chan struct{}
+	maxPerUser    int
+	mu            sync.Mutex
+	userUploads   map[string]int
 	authkit.AuditWriter
 }
 
-func New(service Service, auditService authkit.AuditService, uploadTimeout time.Duration) *Handler {
-	return &Handler{
+func New(service Service, auditService authkit.AuditService, uploadTimeout time.Duration, maxUploads, maxPerUser int) *Handler {
+	h := &Handler{
 		service:       service,
 		uploadTimeout: uploadTimeout,
+		maxPerUser:    maxPerUser,
+		userUploads:   make(map[string]int),
 		AuditWriter:   authkit.NewAuditWriter(auditService, "MediaHandler"),
 	}
+	if maxUploads > 0 {
+		h.uploadSlots = make(chan struct{}, maxUploads)
+	}
+	return h
 }
 
 func (h *Handler) Upload(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[MediaHandler][Upload]"
-	// Uploads may need longer than the server-wide read timeout.
+	release, ok := h.acquireUploadSlot(ctx, logPrefix)
+	if !ok {
+		return
+	}
+	defer release()
+	// The write deadline moves too, or the response of a slow upload is cut off and the client retries
+	// into a duplicate.
 	if h.uploadTimeout > 0 {
-		rc := http.NewResponseController(ctx.Writer)
-		if err := rc.SetReadDeadline(time.Now().Add(h.uploadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; SetReadDeadline; Error: %v", logPrefix, err))
-		}
+		h.extendDeadlines(ctx, logPrefix)
 	}
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, h.service.MaxFileSize()+multipartOverhead)
 
@@ -62,13 +77,13 @@ func (h *Handler) Upload(ctx *gin.Context) {
 			statusCode = http.StatusRequestEntityTooLarge
 			message = domainmedia.ErrFileTooLarge.Error()
 		}
-		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; FormFile; Error: %v", logPrefix, err))
-		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, gokit.MsgInvalidRequest, logID, message))
+		httpshared.Log(ctx, statusCode, logPrefix, "FormFile", err)
+		httpshared.Write(ctx, statusCode, message)
 		return
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; CloseFile; Error: %v", logPrefix, closeErr))
+			logus.LogContextf(ctx, logus.LevelWarn, "%s; CloseFile; Error: %v", logPrefix, closeErr)
 		}
 	}()
 
@@ -82,14 +97,11 @@ func (h *Handler) Upload(ctx *gin.Context) {
 			Message:      "Failed to upload media",
 			ErrorMessage: err.Error(),
 			AfterData: map[string]any{
-				"original_name": header.Filename,
+				"original_name": domainmedia.SafeFilename(header.Filename),
 				"size":          header.Size,
 			},
 		})
-
-		statusCode, publicError := mediaErrorResponse(err)
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Upload; Error: %v", logPrefix, err))
-		writeMediaError(ctx, logID, statusCode, gokit.MsgInvalidRequest, publicError)
+		fail(ctx, "Upload", err)
 		return
 	}
 
@@ -104,34 +116,86 @@ func (h *Handler) Upload(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, gokit.Response(http.StatusCreated, "Media uploaded successfully", logID, data))
 }
 
+func (h *Handler) acquireUploadSlot(ctx *gin.Context, logPrefix string) (release func(), ok bool) {
+	user := authkit.ScopeFrom(ctx.Request.Context()).UserID
+	if !h.takeUserSlot(user) {
+		logus.LogContextf(ctx, logus.LevelWarn, "%s; userUploadSlot; Error: %v", logPrefix, errTooManyUserUploads)
+		httpshared.Write(ctx, http.StatusTooManyRequests, errTooManyUserUploads.Error())
+		return nil, false
+	}
+	if h.uploadSlots == nil {
+		return func() { h.freeUserSlot(user) }, true
+	}
+	select {
+	case h.uploadSlots <- struct{}{}:
+		return func() { <-h.uploadSlots; h.freeUserSlot(user) }, true
+	default:
+		h.freeUserSlot(user)
+		logus.LogContextf(ctx, logus.LevelWarn, "%s; uploadSlot; Error: %v", logPrefix, errTooManyUploads)
+		httpshared.Write(ctx, http.StatusServiceUnavailable, errTooManyUploads.Error())
+		return nil, false
+	}
+}
+
+func (h *Handler) takeUserSlot(user string) bool {
+	if h.maxPerUser <= 0 {
+		return true
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.userUploads[user] >= h.maxPerUser {
+		return false
+	}
+	h.userUploads[user]++
+	return true
+}
+
+func (h *Handler) freeUserSlot(user string) {
+	if h.maxPerUser <= 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.userUploads[user]--; h.userUploads[user] <= 0 {
+		delete(h.userUploads, user)
+	}
+}
+
+func (h *Handler) extendDeadlines(ctx *gin.Context, logPrefix string) {
+	rc := http.NewResponseController(ctx.Writer)
+	deadline := time.Now().Add(h.uploadTimeout)
+	for name, set := range map[string]func(time.Time) error{"SetReadDeadline": rc.SetReadDeadline, "SetWriteDeadline": rc.SetWriteDeadline} {
+		if err := set(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			logus.LogContextf(ctx, logus.LevelWarn, "%s; %s; Error: %v", logPrefix, name, err)
+		}
+	}
+}
+
 func (h *Handler) List(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
+	logID := gokit.RequestID(ctx)
 	logPrefix := "[MediaHandler][List]"
 
 	params, err := gokit.GetBaseParams(ctx.Request.URL.Query(), "", "", defaultListLimit)
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelWarn, fmt.Sprintf("%s; GetBaseParams; Error: %v", logPrefix, err))
-		ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "invalid query parameters"))
+		httpshared.Log(ctx, http.StatusBadRequest, logPrefix, "GetBaseParams", err)
+		httpshared.Write(ctx, http.StatusBadRequest, "invalid query parameters")
 		return
 	}
-
-	params.Limit = clampLimit(params.Limit)
-	params.Offset = (params.Page - 1) * params.Limit
 
 	filters := gokit.WhitelistStringFilter(params.Filters, listFilters)
 	ownerID, _ := filters["owner_user_id"].(string)
 	contentType, _ := filters["content_type"].(string)
 	actor := actorFrom(ctx.Request.Context())
-	// Only list_any callers may filter by owner; for everyone else the value
-	// is ignored, so it is not validated.
+	// Only list_any callers may filter by owner; for everyone else the value is ignored, not validated.
 	if actor.CanListAny && ownerID != "" {
 		if _, err := uuid.Parse(ownerID); err != nil {
-			ctx.JSON(http.StatusBadRequest, gokit.ErrorResponse(http.StatusBadRequest, gokit.MsgInvalidRequest, logID, "owner_user_id must be a UUID"))
+			httpshared.Log(ctx, http.StatusBadRequest, logPrefix, "owner_user_id", err)
+			httpshared.Write(ctx, http.StatusBadRequest, "owner_user_id must be a UUID")
 			return
 		}
 	}
 
-	data, total, err := h.service.List(ctx.Request.Context(), actor, dtomedia.ListRequest{
+	result, err := h.service.List(ctx.Request.Context(), actor, dtomedia.ListRequest{
 		Search:         params.Search,
 		OwnerUserID:    ownerID,
 		ContentType:    contentType,
@@ -139,33 +203,17 @@ func (h *Handler) List(ctx *gin.Context) {
 		OrderDirection: params.OrderDirection,
 		Page:           params.Page,
 		Limit:          params.Limit,
-		Offset:         params.Offset,
 	})
 	if err != nil {
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.List; Error: %v", logPrefix, err))
-		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
+		fail(ctx, "List", err)
 		return
 	}
-	if data == nil {
-		data = []domainmedia.Media{} // data is [] for an empty page, never null
-	}
 
-	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, int(total), params.Page, params.Limit, logID, data))
-}
-
-// clampLimit bounds a user-facing list: gokit passes -1 (no limit) through
-// and accepts up to 10000, so anything below 1 becomes the default and
-// anything above maxListLimit becomes the maximum.
-func clampLimit(limit int) int {
-	if limit < 1 {
-		return defaultListLimit
-	}
-	return min(limit, maxListLimit)
+	ctx.JSON(http.StatusOK, gokit.PaginationResponse(http.StatusOK, result.Total, params.Page, result.Limit, logID, result.Items))
 }
 
 func (h *Handler) Delete(ctx *gin.Context) {
-	logID := gokit.GenerateLogId(ctx)
-	logPrefix := "[MediaHandler][Delete]"
+	logID := gokit.RequestID(ctx)
 	id, err := gokit.ValidateUUIDParam(ctx, logID)
 	if err != nil {
 		return
@@ -181,10 +229,7 @@ func (h *Handler) Delete(ctx *gin.Context) {
 			Message:      "Failed to delete media",
 			ErrorMessage: err.Error(),
 		})
-
-		statusCode, publicError := mediaErrorResponse(err)
-		logus.WriteLogWithContext(ctx, logus.LogLevelError, fmt.Sprintf("%s; Service.Delete; Error: %v", logPrefix, err))
-		writeMediaError(ctx, logID, statusCode, gokit.MsgSomethingWrong, publicError)
+		fail(ctx, "Delete", err)
 		return
 	}
 
@@ -199,8 +244,7 @@ func (h *Handler) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, "Media deleted successfully", logID, nil))
 }
 
-// actorFrom reduces the scope to what the media rules need. It is only right
-// after Auth and LoadPermissions: Has is false without the loaded permissions.
+// Only right after Auth and LoadPermissions: Has is false without the loaded permissions.
 func actorFrom(ctx context.Context) domainmedia.Actor {
 	scope := authkit.ScopeFrom(ctx)
 	return domainmedia.Actor{
@@ -210,14 +254,10 @@ func actorFrom(ctx context.Context) domainmedia.Actor {
 	}
 }
 
-// writeMediaError answers with the standard 500 body for a plain server error
-// and with the mapped status and message otherwise.
-func writeMediaError(ctx *gin.Context, logID uuid.UUID, statusCode int, msg, publicError string) {
-	if statusCode == http.StatusInternalServerError {
-		ctx.JSON(statusCode, gokit.InternalServerError(logID))
-		return
-	}
-	ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, msg, logID, publicError))
+func fail(ctx *gin.Context, method string, err error) {
+	status, detail := mediaErrorResponse(err)
+	httpshared.Log(ctx, status, "[MediaHandler]["+method+"]", "Service."+method, err)
+	httpshared.Write(ctx, status, detail)
 }
 
 func mediaErrorResponse(err error) (int, string) {
@@ -226,10 +266,8 @@ func mediaErrorResponse(err error) (int, string) {
 		return http.StatusBadRequest, err.Error()
 	case errors.Is(err, domainmedia.ErrFileTooLarge):
 		return http.StatusRequestEntityTooLarge, err.Error()
-	case errors.Is(err, domainmedia.ErrMediaForbidden):
-		// Avoid disclosing whether another user's media ID exists.
-		return http.StatusNotFound, "media not found"
-	case errors.Is(err, domainmedia.ErrNotFound):
+	case errors.Is(err, domainmedia.ErrMediaForbidden), errors.Is(err, domainmedia.ErrNotFound):
+		// A forbidden row answers like a missing one, so ids cannot be probed.
 		return http.StatusNotFound, "media not found"
 	default:
 		return http.StatusInternalServerError, gokit.MsgSomethingWrong

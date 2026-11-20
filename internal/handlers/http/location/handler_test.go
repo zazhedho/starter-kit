@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/zazhedho/authkit"
 	"github.com/zazhedho/gokit"
-	"github.com/zazhedho/logus"
 
 	domainlocation "starter-kit/internal/domain/location"
 	dtolocation "starter-kit/internal/dto/location"
@@ -28,6 +27,7 @@ type locationServiceTestDouble struct {
 	err       error
 	startReq  dtolocation.SyncRequest
 	requested string
+	lookups   int
 }
 
 func (m *locationServiceTestDouble) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
@@ -48,6 +48,7 @@ func (m *locationServiceTestDouble) StartSync(ctx context.Context, req dtolocati
 	return m.job, m.err
 }
 func (m *locationServiceTestDouble) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJob, error) {
+	m.lookups++
 	return m.job, m.err
 }
 
@@ -102,6 +103,30 @@ func TestLocationListHandlersValidateRequiredQueries(t *testing.T) {
 	}
 	if rec := performLocationRequest(http.MethodGet, "/village", "/village?district_code=110101", nil, handler.GetVillage, nil); rec.Code != http.StatusOK {
 		t.Fatalf("expected village 200, got %d", rec.Code)
+	}
+}
+
+func TestLocationReadsMapDomainErrors(t *testing.T) {
+	cases := []struct {
+		err    error
+		status int
+	}{
+		{domainlocation.NewInvalidCode("province_code"), http.StatusBadRequest},
+		{fmt.Errorf("wrapped: %w", domainlocation.ErrNotFound), http.StatusNotFound},
+		{fmt.Errorf("%w: boom", domainlocation.ErrUpstream), http.StatusBadGateway},
+		{errors.New("database down"), http.StatusInternalServerError},
+	}
+	for _, c := range cases {
+		for name, target := range map[string]string{
+			"city": "/city?province_code=11", "district": "/district?city_code=1101", "village": "/village?district_code=110101",
+		} {
+			handler := New(&locationServiceTestDouble{err: c.err})
+			call := map[string]gin.HandlerFunc{"city": handler.GetCity, "district": handler.GetDistrict, "village": handler.GetVillage}[name]
+			rec := performLocationRequest(http.MethodGet, "/"+name, target, nil, call, nil)
+			if rec.Code != c.status {
+				t.Fatalf("%s with %v = %d, want %d: %s", name, c.err, rec.Code, c.status, rec.Body.String())
+			}
+		}
 	}
 }
 
@@ -162,21 +187,23 @@ func TestLocationSyncMapsAcceptedConflictAndBadRequest(t *testing.T) {
 	}
 }
 
+const jobID = "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a10"
+
 func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
-	handler := New(&locationServiceTestDouble{err: domainlocation.ErrNotFound})
-	rec := performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
+	handler := New(&locationServiceTestDouble{err: domainlocation.ErrSyncJobNotFound})
+	rec := performLocationRequest(http.MethodGet, "/sync/:id", "/sync/"+jobID, nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	handler = New(&locationServiceTestDouble{job: dtolocation.SyncJob{ID: "job-1", Status: "done"}})
-	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
+	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/"+jobID, nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	handler = New(&locationServiceTestDouble{err: errors.New("database down")})
-	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/job-1", nil, handler.GetSyncJob, nil)
+	rec = performLocationRequest(http.MethodGet, "/sync/:id", "/sync/"+jobID, nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -184,6 +211,20 @@ func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
 	rec = performLocationRequest(http.MethodGet, "/sync", "/sync", nil, handler.GetSyncJob, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected missing id 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLocationGetSyncJobRejectsAnIdThatIsNotAUUID(t *testing.T) {
+	service := &locationServiceTestDouble{err: errors.New("must not be called")}
+	handler := New(service)
+	for _, id := range []string{"job-1", "123", "2d5ea3a8", "x'OR'1'='1"} {
+		rec := performLocationRequest(http.MethodGet, "/sync/:id", "/sync/"+id, nil, handler.GetSyncJob, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("id %q: status = %d, want 400: %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	if service.lookups != 0 {
+		t.Fatal("the service was called with a malformed id")
 	}
 }
 
@@ -254,16 +295,134 @@ func jsonEqual(t *testing.T, a, b []byte) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-func TestLocationSyncValidationErrorIsLoggedAtDebug(t *testing.T) {
-	prev := logus.GetLevel()
-	logus.SetLevel(logus.LogLevelDebug)
-	t.Cleanup(func() { logus.SetLevel(prev) })
-	handler := New(&locationServiceTestDouble{err: domainlocation.NewInvalidSync("province_code is required for city sync")})
-	mark := logs.Mark()
-	performLocationRequest(http.MethodPost, "/sync", "/sync", dtolocation.SyncRequest{Level: "city"}, handler.Sync, nil)
+func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		wantLevel string
+	}{
+		{"validation", domainlocation.NewInvalidSync("province_code is required for city sync"), "WARN"},
+		{"invalid code", domainlocation.NewInvalidCode("province_code"), "WARN"},
+		{"unknown parent", domainlocation.ErrNotFound, "WARN"},
+		{"upstream", domainlocation.ErrUpstream, "ERROR"},
+		{"unexpected", errors.New("database down"), "ERROR"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handler := New(&locationServiceTestDouble{err: c.err})
+			mark := logs.Mark()
+			performLocationRequest(http.MethodGet, "/city", "/city?province_code=31", nil, handler.GetCity, nil)
 
-	out := logs.Since(mark)
-	if !strings.Contains(out, "province_code is required for city sync") || !strings.Contains(out, `"level":"DEBUG"`) {
-		t.Fatalf("expected a debug log line with the validation error, got:\n%s", out)
+			out := logs.Since(mark)
+			if !strings.Contains(out, `"level":"`+c.wantLevel+`"`) {
+				t.Fatalf("want a %s log line, got:\n%s", c.wantLevel, out)
+			}
+			if c.wantLevel == "WARN" && strings.Contains(out, `"level":"ERROR"`) {
+				t.Fatalf("a client error was logged at ERROR:\n%s", out)
+			}
+		})
+	}
+}
+
+type envelope struct {
+	LogID   uuid.UUID       `json:"log_id"`
+	Code    int             `json:"code"`
+	Status  bool            `json:"status"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
+	Error   []struct {
+		Field   string `json:"field"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) envelope {
+	t.Helper()
+	var res envelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("not an envelope: %v: %s", err, rec.Body.String())
+	}
+	if res.LogID == uuid.Nil || res.Code != rec.Code {
+		t.Fatalf("log_id %v code %d, want a log id and code %d: %s", res.LogID, res.Code, rec.Code, rec.Body.String())
+	}
+	return res
+}
+
+func TestLocationErrorsUseTheErrorListEnvelope(t *testing.T) {
+	cases := []struct {
+		name        string
+		service     *locationServiceTestDouble
+		method      string
+		route, path string
+		call        func(*Handler) gin.HandlerFunc
+		body        any
+		status      int
+		message     string
+		detail      string
+		wantData    bool
+	}{
+		{"missing parent code", &locationServiceTestDouble{}, http.MethodGet, "/city", "/city",
+			func(h *Handler) gin.HandlerFunc { return h.GetCity }, nil,
+			http.StatusBadRequest, gokit.MsgInvalidRequest, "province_code is required", false},
+		{"sync already running", &locationServiceTestDouble{err: domainlocation.ErrSyncRunning, job: dtolocation.SyncJob{ID: "job-1"}}, http.MethodPost, "/sync", "/sync",
+			func(h *Handler) gin.HandlerFunc { return h.Sync }, dtolocation.SyncRequest{Level: "province"},
+			http.StatusConflict, msgSyncRunning, msgSyncRunning, true},
+		{"invalid sync", &locationServiceTestDouble{err: domainlocation.NewInvalidSync("invalid sync level")}, http.MethodPost, "/sync", "/sync",
+			func(h *Handler) gin.HandlerFunc { return h.Sync }, dtolocation.SyncRequest{Level: "province"},
+			http.StatusBadRequest, gokit.MsgInvalidRequest, "invalid sync level", false},
+		{"unknown job", &locationServiceTestDouble{err: domainlocation.ErrSyncJobNotFound}, http.MethodGet, "/sync/:id", "/sync/" + jobID,
+			func(h *Handler) gin.HandlerFunc { return h.GetSyncJob }, nil,
+			http.StatusNotFound, gokit.MsgResourceNotFound, "location sync job not found", false},
+		{"unknown parent", &locationServiceTestDouble{err: domainlocation.ErrNotFound}, http.MethodGet, "/district", "/district?city_code=9999",
+			func(h *Handler) gin.HandlerFunc { return h.GetDistrict }, nil,
+			http.StatusNotFound, gokit.MsgResourceNotFound, "location not found", false},
+		{"invalid code", &locationServiceTestDouble{err: domainlocation.NewInvalidCode("city_code")}, http.MethodGet, "/district", "/district?city_code=31*",
+			func(h *Handler) gin.HandlerFunc { return h.GetDistrict }, nil,
+			http.StatusBadRequest, gokit.MsgInvalidRequest, "city_code must be 1 to 20 digits", false},
+		{"upstream down", &locationServiceTestDouble{err: fmt.Errorf("%w: status 500", domainlocation.ErrUpstream)}, http.MethodGet, "/city", "/city?province_code=31",
+			func(h *Handler) gin.HandlerFunc { return h.GetCity }, nil,
+			http.StatusBadGateway, "An upstream service failed to answer", "the location service is not available", false},
+		{"shutting down", &locationServiceTestDouble{err: domainlocation.ErrShuttingDown}, http.MethodPost, "/sync", "/sync",
+			func(h *Handler) gin.HandlerFunc { return h.Sync }, dtolocation.SyncRequest{Level: "province"},
+			http.StatusServiceUnavailable, "The service is unavailable", "the service is shutting down", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := performLocationRequest(c.method, c.route, c.path, c.body, c.call(New(c.service)), nil)
+			if rec.Code != c.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.status, rec.Body.String())
+			}
+			requireErrorEnvelope(t, rec, c.message, c.detail, c.wantData)
+		})
+	}
+}
+
+func requireErrorEnvelope(t *testing.T, rec *httptest.ResponseRecorder, message, detail string, wantData bool) {
+	t.Helper()
+	res := decodeEnvelope(t, rec)
+	if res.Status || res.Message != message {
+		t.Fatalf("status %v message %q, want false and %q", res.Status, res.Message, message)
+	}
+	if len(res.Error) != 1 || res.Error[0].Message != detail || res.Error[0].Code == "" {
+		t.Fatalf("error = %+v, want one entry %q with a code", res.Error, detail)
+	}
+	if carriesData(res.Data) != wantData {
+		t.Fatalf("data = %s, want present=%v", res.Data, wantData)
+	}
+}
+
+func carriesData(data json.RawMessage) bool {
+	return len(data) > 0 && string(data) != "null"
+}
+
+func TestLocationEmptyListIsAnEmptyArray(t *testing.T) {
+	handler := New(&locationServiceTestDouble{})
+	rec := performLocationRequest(http.MethodGet, "/province", "/province", nil, handler.GetProvince, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if res := decodeEnvelope(t, rec); !res.Status || strings.TrimSpace(string(res.Data)) != "[]" || len(res.Error) != 0 {
+		t.Fatalf("got %s, want status true, data [] and no error", rec.Body.String())
 	}
 }

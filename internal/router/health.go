@@ -15,26 +15,30 @@ import (
 
 const readyTimeout = 2 * time.Second
 
-func registerHealth(r gin.IRouter, d module.Deps) error {
+func registerHealth(r gin.IRouter, d module.Deps) {
 	r.GET("/healthcheck", func(ctx *gin.Context) {
-		logus.WriteLogWithContext(ctx, logus.LogLevelDebug, "ClientIP: "+ctx.ClientIP())
+		logus.LogContext(ctx, logus.LevelDebug, "ClientIP:", ctx.ClientIP())
 		ctx.JSON(http.StatusOK, gin.H{
 			"message": "OK!!",
 		})
 	})
 
 	r.GET("/readyz", func(ctx *gin.Context) {
+		if d.Lifecycle.Draining() {
+			logus.LogContext(ctx, logus.LevelDebug, "readyz; shutting down")
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+			return
+		}
 		pingCtx, cancel := context.WithTimeout(ctx.Request.Context(), readyTimeout)
 		defer cancel()
 
 		if err := ping(pingCtx, d); err != nil {
-			logus.WriteLogWithContext(ctx, logus.LogLevelWarn, "readyz; "+err.Error())
+			logus.LogContext(ctx, logus.LevelWarn, "readyz; "+err.Error())
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
 			return
 		}
 		ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	return nil
 }
 
 func ping(ctx context.Context, d module.Deps) error {

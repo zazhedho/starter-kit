@@ -1,80 +1,57 @@
 package location
 
-import "strings"
+import (
+	"strings"
 
-func normalizeChildCode(parentCode, code string) string {
-	trimmedCode := normalizeCodeSegment(code)
-	if trimmedCode == "" {
-		return ""
+	domainlocation "starter-kit/internal/domain/location"
+)
+
+const maxCodeLength = 20
+
+// Codes reach SQL, cache keys, delete patterns and the Location Service query: nothing else is let through.
+func isCode(s string) bool {
+	if s == "" || len(s) > maxCodeLength {
+		return false
 	}
-
-	trimmedParent := normalizeCodeSegment(parentCode)
-	if trimmedParent == "" {
-		return trimmedCode
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
 	}
-
-	if strings.HasPrefix(trimmedCode, trimmedParent) && len(trimmedCode) > len(trimmedParent) {
-		return trimmedCode
-	}
-
-	return trimmedParent + trimmedCode
+	return true
 }
 
-func childCodeParam(parentCode, code string) string {
-	candidates := childCodeCandidates(parentCode, code)
-	if len(candidates) == 0 {
-		return normalizeCodeSegment(code)
+func validateCode(field, code string) error {
+	if !isCode(code) {
+		return domainlocation.NewInvalidCode(field)
 	}
-	return candidates[0]
+	return nil
 }
 
-func childCodeCandidates(parentCode, code string) []string {
-	trimmedCode := normalizeCodeSegment(code)
-	if trimmedCode == "" {
-		return nil
+// Codes are relative to the parent (code_format=short) unless they already start with it; any other is refused.
+func childCode(parent, raw string) (string, bool) {
+	if !isCode(raw) {
+		return "", false
 	}
-
-	candidates := make([]string, 0, 2)
-	trimmedParent := normalizeCodeSegment(parentCode)
-	if trimmedParent != "" && strings.HasPrefix(trimmedCode, trimmedParent) {
-		suffix := strings.TrimPrefix(trimmedCode, trimmedParent)
-		if suffix != "" {
-			candidates = append(candidates, suffix)
-		}
+	if parent == "" {
+		return raw, true
 	}
-
-	candidates = append(candidates, trimmedCode)
-
-	unique := make([]string, 0, len(candidates))
-	seen := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		if _, ok := seen[candidate]; ok {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		unique = append(unique, candidate)
+	if strings.HasPrefix(raw, parent) && len(raw) > len(parent) {
+		return raw, true
 	}
-
-	return unique
+	if len(raw) > len(parent) {
+		return "", false
+	}
+	full := parent + raw
+	if !isCode(full) {
+		return "", false
+	}
+	return full, true
 }
 
-func normalizeCodeSegment(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
+func childCodeParam(parent, code string) string {
+	if parent != "" && strings.HasPrefix(code, parent) && len(code) > len(parent) {
+		return code[len(parent):]
 	}
-
-	var b strings.Builder
-	for _, r := range value {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return value
-	}
-	return b.String()
+	return code
 }

@@ -2,8 +2,7 @@ package location
 
 import "testing"
 
-// The expected strings are literals on purpose: they must not be derived from
-// the code under test, because deployed Redis data uses them.
+// The expected strings are literals on purpose: deployed Redis data uses them.
 func TestCacheKeysAreByteIdentical(t *testing.T) {
 	cases := []struct{ name, got, want string }{
 		{"province", provinceKey(), "location:province"},

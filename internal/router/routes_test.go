@@ -12,9 +12,6 @@ import (
 	"starter-kit/internal/testutil/routertest"
 )
 
-// routeOwners returns every route the full engine is expected to have, mapped to
-// who mounts it: authkit, the probes, or the module registered alone. Nothing is
-// listed by hand; each module's own routes_test.go pins its exact routes.
 func routeOwners(t *testing.T, d module.Deps) (owners map[string]string, duplicates []string) {
 	t.Helper()
 	owners = map[string]string{}
@@ -30,9 +27,7 @@ func routeOwners(t *testing.T, d module.Deps) (owners map[string]string, duplica
 
 	add("authkit", routertest.AuthkitRoutes(t, d))
 	probes := gin.New()
-	if err := registerHealth(probes, d); err != nil {
-		t.Fatalf("registerHealth: %v", err)
-	}
+	registerHealth(probes, d)
 	add("health", routertest.RouteSet(probes))
 	for _, m := range modules {
 		add(m.Name, routertest.RouteSet(routertest.Mount(t, m.Register, d)))
@@ -41,8 +36,6 @@ func routeOwners(t *testing.T, d module.Deps) (owners map[string]string, duplica
 	return owners, duplicates
 }
 
-// TestRouteTable derives the expected routes from authkit, the probes and each
-// mounted module registered alone, so adding a module to modules.go needs no edit here.
 func TestRouteTable(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -91,9 +84,6 @@ func TestModulesAreAlphabeticalAndUnique(t *testing.T) {
 	}
 }
 
-// orphanProblems compares the router subdirectories with the mounted entries:
-// every directory except module (the leaf) and shared must be mounted under its
-// own name, and no entry may be called shared.
 func orphanProblems(dirs []string, entries []module.Entry) []string {
 	mounted := map[string]bool{}
 	var problems []string
@@ -148,8 +138,6 @@ func TestOrphanProblemsDetectsViolations(t *testing.T) {
 	}
 }
 
-// TestEveryRouterDirectoryIsMounted: a router/<module> package that is not in
-// modules would silently serve no routes.
 func TestEveryRouterDirectoryIsMounted(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

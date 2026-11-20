@@ -1,6 +1,3 @@
-// Package module holds what every router/<module> package shares: the Deps a
-// module is wired from, the Lifecycle it registers shutdown hooks with, and the
-// Entry that mounts it. It imports no feature module.
 package module
 
 import (
@@ -11,11 +8,13 @@ import (
 	"sync"
 )
 
-// Lifecycle collects shutdown hooks for work that outlives a request. Close
-// runs once, after the HTTP server drains and before the database and Redis close.
+// Lifecycle runs Drain hooks before the HTTP drain, and they only signal; Close hooks run after the
+// drain, before the database closes, and wait.
 type Lifecycle struct {
-	mu    sync.Mutex
-	hooks []hook
+	mu       sync.Mutex
+	hooks    []hook
+	drains   []func()
+	draining bool
 }
 
 type hook struct {
@@ -23,22 +22,41 @@ type hook struct {
 	fn   func(context.Context) error
 }
 
-// OnClose registers fn to run at shutdown. fn must return when ctx ends.
+// OnClose registers fn, which must return when ctx ends.
 func (l *Lifecycle) OnClose(name string, fn func(context.Context) error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.hooks = append(l.hooks, hook{name: name, fn: fn})
 }
 
-// Len reports how many hooks are registered; modules use it in tests.
-func (l *Lifecycle) Len() int {
+// OnDrain registers fn, which must not block: it only signals the work to stop, and OnClose waits for it.
+func (l *Lifecycle) OnDrain(fn func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return len(l.hooks)
+	l.drains = append(l.drains, fn)
 }
 
-// Close runs the hooks in reverse order of registration with ctx, and returns
-// every error joined. Hooks run once: a second Close does nothing.
+func (l *Lifecycle) Drain() {
+	l.mu.Lock()
+	if l.draining {
+		l.mu.Unlock()
+		return
+	}
+	l.draining = true
+	drains := l.drains
+	l.mu.Unlock()
+
+	for _, fn := range slices.Backward(drains) {
+		fn()
+	}
+}
+
+func (l *Lifecycle) Draining() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.draining
+}
+
 func (l *Lifecycle) Close(ctx context.Context) error {
 	l.mu.Lock()
 	hooks := l.hooks

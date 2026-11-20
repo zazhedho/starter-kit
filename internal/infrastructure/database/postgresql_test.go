@@ -13,8 +13,6 @@ import (
 	"starter-kit/internal/config"
 )
 
-// TestOpenErrorDoesNotLeakCredentials uses inputs that make the driver echo
-// part of the DSN in its own error text (a refused connection never does).
 func TestOpenErrorDoesNotLeakCredentials(t *testing.T) {
 	parts := func(password string) config.Database {
 		return config.Database{
@@ -95,8 +93,6 @@ func TestClassifyDistinguishesRejectionFromUnreachable(t *testing.T) {
 	}
 }
 
-// TestAttachClosesThePoolWhenTheConnectionCheckFails: the pool exists before
-// the first connection is tried, so a failure must not leave it open.
 func TestAttachClosesThePoolWhenTheConnectionCheckFails(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	if err != nil {

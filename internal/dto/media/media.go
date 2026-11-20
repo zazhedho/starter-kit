@@ -1,9 +1,7 @@
-// Package media holds the media module's request shapes. It keeps the list
-// parameters free of any transport or query-library type.
 package media
 
-// ListRequest is a media list query. OwnerUserID and ContentType are exact-match
-// filters; Search matches the original file name.
+import domainmedia "starter-kit/internal/domain/media"
+
 type ListRequest struct {
 	Search         string
 	OwnerUserID    string
@@ -12,5 +10,10 @@ type ListRequest struct {
 	OrderDirection string
 	Page           int
 	Limit          int
-	Offset         int
+}
+
+type ListResult struct {
+	Items []domainmedia.Media
+	Total int64
+	Limit int
 }

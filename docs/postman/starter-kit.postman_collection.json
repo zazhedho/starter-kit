@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8a22c5f4-87f9-4c31-a3b5-8f7c6d1cf7f1",
     "name": "Starter Kit API",
-    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables. Auth responses return access_token and refresh_token.",
+    "description": "Full Postman collection for the starter-kit service. Login first to populate access_token and refresh_token collection variables. Auth responses return access_token (15 minutes by default) and refresh_token; Change Password also returns a fresh pair (plus the user), which its test script stores. Every error response has error as a list of {field, code, message}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -118,6 +118,27 @@
                 "healthcheck"
               ]
             }
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/readyz",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "readyz"
+              ]
+            },
+            "description": "Readiness: 200 {\"status\":\"ok\"} when PostgreSQL (and Redis, when configured) answer; 503 {\"status\":\"unavailable\"} when one does not, and from the moment shutdown starts."
           },
           "response": []
         }
@@ -540,7 +561,12 @@
           "name": "Logout",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/user/logout",
               "host": [
@@ -551,7 +577,12 @@
                 "user",
                 "logout"
               ]
-            }
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "description": "Blacklists the access token and ends its session. The JSON body is optional: refresh_token also revokes that refresh token (only when it belongs to the caller). Send no body to revoke the access token alone."
           },
           "response": []
         }
@@ -701,7 +732,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Current User\",\n  \"email\": \"current@example.com\",\n  \"phone\": \"08123456780\"\n}"
+              "raw": "{\n  \"name\": \"Updated Current User\",\n  \"email\": \"current@example.com\",\n  \"phone\": \"08123456780\",\n  \"current_password\": \"Password1!\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/user",
@@ -712,7 +743,8 @@
                 "api",
                 "user"
               ]
-            }
+            },
+            "description": "Changing your own email or phone needs current_password (omit it when only the name changes). A change of email or phone ends your other tokens and sessions."
           },
           "response": []
         },
@@ -740,7 +772,8 @@
                 "user",
                 "{{user_id}}"
               ]
-            }
+            },
+            "description": "Needs users:update. The actor must hold every permission of the target's role (permission-subset rule), and nobody changes their own role. A superadmin target answers 404 for anyone else. Changing your own email or phone through your own id also needs current_password (add it to the body)."
           },
           "response": []
         },
@@ -769,9 +802,25 @@
                 "change",
                 "password"
               ]
-            }
+            },
+            "description": "Needs current_password and new_password. Every older token of the user ends, and the response returns a fresh token pair plus the user (data.access_token, data.refresh_token, data.user); the test script stores both tokens in access_token and refresh_token, so keep using the collection afterwards."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.access_token) pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "  if (json.data.refresh_token) pm.collectionVariables.set('refresh_token', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Impersonate User",
@@ -789,7 +838,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/user/{{user_id}}/impersonate",
               "host": [
@@ -801,7 +855,12 @@
                 "{{user_id}}",
                 "impersonate"
               ]
-            }
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Investigating support ticket #123\"\n}"
+            },
+            "description": "Needs users:impersonate. reason (3-500 characters) is required and audited. The token lives at most 15 minutes and carries no refresh token; the permission-subset rule applies."
           },
           "response": []
         },
@@ -851,7 +910,12 @@
           "name": "Delete Auth User",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/user",
               "host": [
@@ -862,7 +926,11 @@
                 "user"
               ]
             },
-            "description": "Destructive. Usually use only on a disposable account."
+            "description": "Destructive. Usually use only on a disposable account. Needs current_password in the body; ends all of the user's tokens and sessions.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"Password1!\"\n}"
+            }
           },
           "response": []
         },
@@ -882,7 +950,7 @@
                 "{{user_id}}"
               ]
             },
-            "description": "Destructive. Use with care."
+            "description": "Destructive. Use with care. Deleting your own id needs current_password in the body and is refused while impersonating. A non-UUID id answers 400."
           },
           "response": []
         }
@@ -1634,7 +1702,7 @@
     },
     {
       "name": "Media",
-      "description": "Available only when MEDIA_ENABLED=true. File type is detected from bytes; default maximum size is 10 MB.",
+      "description": "Available only when MEDIA_ENABLED=true. File type is detected from bytes; the default maximum size is 5 MB (MEDIA_MAX_FILE_SIZE_MB). An upload answers 429 over the per-IP or per-user limit or when the user already has MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER (default 2) uploads in progress, and 503 when MEDIA_UPLOAD_MAX_CONCURRENT uploads are already in progress.",
       "item": [
         {
           "name": "List Media",
@@ -1918,9 +1986,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"province\"\n}"
+              "raw": "{\n  \"level\": \"province\"\n}"
             },
-            "description": "Start an asynchronous province-only sync job. Payload requires only `year` and `level=province`. The returned job ID is automatically saved into `location_sync_job_id`.",
+            "description": "Start an asynchronous province-only sync job. Payload requires only `level=province`. The returned job ID is automatically saved into `location_sync_job_id`.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1972,7 +2040,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"city\",\n  \"province_code\": \"11\"\n}"
+              "raw": "{\n  \"level\": \"city\",\n  \"province_code\": \"11\"\n}"
             },
             "description": "Start an asynchronous city sync job for one province. Required payload: `level=city` and `province_code`.",
             "auth": {
@@ -2026,7 +2094,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"district\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\"\n}"
+              "raw": "{\n  \"level\": \"district\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\"\n}"
             },
             "description": "Start an asynchronous district sync job for one city. Required payload: `level=district`, `province_code`, and `city_code`.",
             "auth": {
@@ -2080,7 +2148,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"village\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\",\n  \"district_code\": \"1101010\"\n}"
+              "raw": "{\n  \"level\": \"village\",\n  \"province_code\": \"11\",\n  \"city_code\": \"1101\",\n  \"district_code\": \"1101010\"\n}"
             },
             "description": "Start an asynchronous village sync job for one district. Required payload: `level=village`, `province_code`, `city_code`, and `district_code`.",
             "auth": {
@@ -2134,7 +2202,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"year\": \"2025\",\n  \"level\": \"all\"\n}"
+              "raw": "{\n  \"level\": \"all\"\n}"
             },
             "description": "Start a full asynchronous hierarchical import. Use this for initial bootstrap only because it is much heavier than scoped sync requests.",
             "auth": {

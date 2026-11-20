@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS idx_media_owner_created_at ON media(owner_user_id, cr
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     (gen_random_uuid(), 'list_any_media', 'List Any Media', 'media', 'list_any'),
     (gen_random_uuid(), 'delete_any_media', 'Delete Any Media', 'media', 'delete_any')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (name) WHERE deleted_at IS NULL DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id

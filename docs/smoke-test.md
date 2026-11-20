@@ -21,7 +21,7 @@ docker exec starter-kit-smoke psql -U postgres -c 'CREATE DATABASE smoke'
 # 2. Build outside the repository and set a fake environment
 go build -o "$SCRATCH/starter-kit-smoke" ./cmd/api
 export APP_NAME=starter-kit-smoke APP_ENV=development GIN_MODE=release PORT=18080
-export JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef JWT_EXP=24
+export JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef JWT_EXP_MINUTES=15
 export PATH_MIGRATE=file://migrations MEDIA_ENABLED=false
 export DB_HOST=127.0.0.1 DB_PORT=55439 DB_USERNAME=postgres DB_PASS=test DB_NAME=smoke DB_SSLMODE=disable
 # no REDIS_*, SMTP_* or DATABASE_URL unless a check says so
@@ -49,7 +49,8 @@ curl -i localhost:18080/api/users -H "Authorization: Bearer $TOKEN"        # 403
 curl -i localhost:18080/api/location/province                              # see the note under the table
 
 # 5. Graceful shutdown (check 12)
-kill -TERM $APP; wait $APP; echo "exit $?"                                 # 0
+kill -TERM $APP; sleep 1; curl -i localhost:18080/readyz                   # 503 during HTTP_SHUTDOWN_DELAY
+wait $APP; echo "exit $?"                                                  # 0
 
 # 6. A second signal ends a held shutdown at once (check 13)
 HTTP_SHUTDOWN_TIMEOUT=30s HTTP_READ_TIMEOUT=60s HTTP_READ_HEADER_TIMEOUT=60s \
@@ -68,7 +69,7 @@ REDIS_HOST=127.0.0.1 REDIS_PORT=1 REDIS_PASSWORD=fake-redis-password-xyz \
 docker build -t starter-kit-smoke-image .
 docker run --rm -d --name starter-kit-smoke-app -p 127.0.0.1:18081:8080 \
   -e APP_NAME=starter-kit-smoke -e APP_ENV=development -e GIN_MODE=release \
-  -e JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef -e JWT_EXP=24 -e PORT=8080 -e RUN_MIGRATION=true \
+  -e JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef -e JWT_EXP_MINUTES=15 -e PORT=8080 -e RUN_MIGRATION=true \
   -e DB_HOST=host.docker.internal -e DB_PORT=55439 -e DB_USERNAME=postgres -e DB_PASS=test \
   -e DB_NAME=smoke -e DB_SSLMODE=disable -e MEDIA_ENABLED=false starter-kit-smoke-image
 curl -i localhost:18081/healthcheck
@@ -94,7 +95,7 @@ rm -rf "$SCRATCH"
 | 9 | `GET /api/users` without a token | 401 |
 | 10 | `GET /api/users` as viewer | 403 |
 | 11 | `GET /api/location/province` | reported |
-| 12 | SIGTERM | exit 0, `Shutdown started` and `Shutdown complete` logged |
+| 12 | SIGTERM, then `GET /readyz` one second later | `/readyz` answers 503 (the listener stays open for `HTTP_SHUTDOWN_DELAY`, default 5 s); exit 0, `Shutdown started` and `Shutdown complete` logged |
 | 13 | second SIGTERM during a held shutdown | process ends at once |
 | 14 | Redis configured but unreachable | exit 1, no credentials in the log |
 | 15 | `docker build .` and run the image | build succeeds, the binary starts |
@@ -102,7 +103,7 @@ rm -rf "$SCRATCH"
 Notes:
 - Check 11 depends on an external service. With empty location tables the first `GET /api/location/province`
   fetches the list from the Location Service (`LOCATION_SERVICE_BASE_URL`) and stores it (the read fallback in
-  `internal/services/location`), so a `5xx` there means the service was unreachable, not that the project is
+  `internal/services/location`), so a `502` there means the service was unreachable, not that the project is
   broken. Later calls read PostgreSQL.
 - Check 13 holds the shutdown with an open, unfinished request because the drain waits for running requests; the
   first signal restores default signal handling, which is why the second one ends the process.

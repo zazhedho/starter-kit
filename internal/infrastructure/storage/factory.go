@@ -2,14 +2,11 @@ package storage
 
 import (
 	"fmt"
-
-	"github.com/zazhedho/gokit"
+	"strings"
 )
 
-// NewStorageProvider returns the adapter named by config.Provider (minio, or
-// r2 / cloudflare / cloudflare-r2) and an error for any other name.
 func NewStorageProvider(config Config) (Provider, error) {
-	provider := gokit.NormalizeKey(config.Provider)
+	provider := strings.ToLower(strings.TrimSpace(config.Provider))
 
 	switch provider {
 	case "minio":

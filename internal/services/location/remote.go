@@ -7,36 +7,38 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/zazhedho/logus"
 
 	domainlocation "starter-kit/internal/domain/location"
 )
+
+const maxNameLength = 255
+
+const maxEnvelopeDepth = 3
 
 type locationServiceEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
 type locationServiceItem struct {
-	Code     string `json:"code"`
-	FullCode string `json:"full_code"`
-	Name     string `json:"name"`
+	Code string `json:"code"`
+	Name string `json:"name"`
 }
 
-func (s *Service) locationServiceURL(path string, query map[string]string) string {
-	baseURL := strings.TrimRight(s.baseURL, "/")
-	endpoint := strings.TrimLeft(path, "/")
-	rawURL := baseURL + "/" + endpoint
-	if len(query) == 0 {
-		return rawURL
-	}
+type entry struct{ Code, Name string }
 
+func (s *Service) locationServiceURL(path string, query map[string]string) string {
+	rawURL := strings.TrimRight(s.baseURL, "/") + "/" + strings.TrimLeft(path, "/")
 	values := url.Values{}
 	for key, value := range query {
-		if strings.TrimSpace(value) == "" {
-			continue
+		if strings.TrimSpace(value) != "" {
+			values.Set(key, value)
 		}
-		values.Set(key, value)
 	}
 	if encoded := values.Encode(); encoded != "" {
 		rawURL += "?" + encoded
@@ -44,161 +46,140 @@ func (s *Service) locationServiceURL(path string, query map[string]string) strin
 	return rawURL
 }
 
-func (s *Service) fetchLocationMap(ctx context.Context, url, entity string) (map[string]string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (s *Service) fetchEntries(ctx context.Context, entity, path string, query map[string]string, parent string) ([]entry, error) {
+	body, err := s.getBody(ctx, s.locationServiceURL(path, query), entity)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare %s request: %w", entity, err)
+		return nil, err
+	}
+	pairs, err := decodePairs(body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to decode %s response: %w", domainlocation.ErrUpstream, entity, err)
+	}
+
+	byCode := make(map[string]string, len(pairs))
+	dropped := 0
+	for _, p := range pairs {
+		code, ok := childCode(parent, strings.TrimSpace(p.Code))
+		name := strings.TrimSpace(p.Name)
+		if !ok || name == "" || utf8.RuneCountInString(name) > maxNameLength {
+			dropped++
+			continue
+		}
+		byCode[code] = name
+	}
+	if dropped > 0 {
+		logus.Logf(logus.LevelWarn, "location: dropped %d invalid or foreign %s items from the location service", dropped, entity)
+	}
+
+	entries := make([]entry, 0, len(byCode))
+	for code, name := range byCode {
+		entries = append(entries, entry{Code: code, Name: name})
+	}
+	slices.SortFunc(entries, func(a, b entry) int {
+		if c := strings.Compare(normalizeKey(a.Name), normalizeKey(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Code, b.Code)
+	})
+	return entries, nil
+}
+
+func (s *Service) getBody(ctx context.Context, target, entity string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to prepare %s request: %w", domainlocation.ErrUpstream, entity, err)
 	}
 
 	resp, err := s.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", entity, err)
+		return nil, fmt.Errorf("%w: failed to fetch %s: %w", domainlocation.ErrUpstream, entity, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code for %s: %d", entity, resp.StatusCode)
+		return nil, fmt.Errorf("%w: unexpected status code for %s: %d", domainlocation.ErrUpstream, entity, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, s.maxResponse+1))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s response body: %w", entity, err)
+		return nil, fmt.Errorf("%w: failed to read %s response body: %w", domainlocation.ErrUpstream, entity, err)
 	}
-
-	dataMap, err := decodeLocationMap(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode %s response: %w", entity, err)
+	if int64(len(body)) > s.maxResponse {
+		return nil, fmt.Errorf("%w: %s response is larger than %d bytes", domainlocation.ErrUpstream, entity, s.maxResponse)
 	}
-
-	return dataMap, nil
+	return body, nil
 }
 
-func decodeLocationMap(body []byte) (map[string]string, error) {
+func decodePairs(body []byte, depth int) ([]locationServiceItem, error) {
 	var envelope locationServiceEnvelope
-	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Data) > 0 {
-		return decodeLocationMap(envelope.Data)
+	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Data) > 0 && depth < maxEnvelopeDepth {
+		return decodePairs(envelope.Data, depth+1)
 	}
 
-	var dataMap map[string]string
-	if err := json.Unmarshal(body, &dataMap); err == nil {
-		return dataMap, nil
+	var byCode map[string]string
+	if err := json.Unmarshal(body, &byCode); err == nil {
+		pairs := make([]locationServiceItem, 0, len(byCode))
+		for code, name := range byCode {
+			pairs = append(pairs, locationServiceItem{Code: code, Name: name})
+		}
+		return pairs, nil
 	}
 
 	var items []locationServiceItem
 	if err := json.Unmarshal(body, &items); err != nil {
 		return nil, err
 	}
-
-	dataMap = make(map[string]string, len(items))
-	for _, item := range items {
-		code := normalizeCodeSegment(item.Code)
-		name := strings.TrimSpace(item.Name)
-		if code == "" || name == "" {
-			continue
-		}
-		dataMap[code] = name
-	}
-	return dataMap, nil
+	return items, nil
 }
 
-func (s *Service) fetchProvinces(ctx context.Context, year string) ([]domainlocation.Province, error) {
-	_ = year
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/provinces", nil), "province")
+func fetchRows[T any](ctx context.Context, s *Service, entity, path string, query map[string]string, parent string, build func(entry, time.Time) T) ([]T, error) {
+	entries, err := s.fetchEntries(ctx, entity, path, query, parent)
 	if err != nil {
 		return nil, err
 	}
-
-	items := make([]domainlocation.Province, 0, len(dataMap))
 	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.Province{
-			Code:      code,
-			Name:      name,
-			CreatedAt: now,
-		})
+	rows := make([]T, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, build(e, now))
 	}
-
-	return sortProvinces(items), nil
+	return rows, nil
 }
 
-func (s *Service) fetchCities(ctx context.Context, year, provinceCode string) ([]domainlocation.City, error) {
-	_ = year
-	cleanProvinceCode := normalizeCodeSegment(provinceCode)
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/regencies", map[string]string{
-		"province_code": cleanProvinceCode,
+func (s *Service) fetchProvinces(ctx context.Context) ([]domainlocation.Province, error) {
+	return fetchRows(ctx, s, "province", "/api/locations/provinces", nil, "",
+		func(e entry, now time.Time) domainlocation.Province {
+			return domainlocation.Province{Code: e.Code, Name: e.Name, CreatedAt: now}
+		})
+}
+
+func (s *Service) fetchCities(ctx context.Context, provinceCode string) ([]domainlocation.City, error) {
+	return fetchRows(ctx, s, "city", "/api/locations/regencies", map[string]string{
+		"province_code": provinceCode,
 		"code_format":   "short",
-	}), "city")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.City, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.City{
-			Code:         normalizeChildCode(cleanProvinceCode, code),
-			ProvinceCode: cleanProvinceCode,
-			Name:         name,
-			CreatedAt:    now,
-		})
-	}
-
-	return sortCities(items), nil
+	}, provinceCode, func(e entry, now time.Time) domainlocation.City {
+		return domainlocation.City{Code: e.Code, ProvinceCode: provinceCode, Name: e.Name, CreatedAt: now}
+	})
 }
 
-func (s *Service) fetchDistricts(ctx context.Context, year, provinceCode, cityCode string) ([]domainlocation.District, error) {
-	_ = year
-	cleanProvinceCode := normalizeCodeSegment(provinceCode)
-	cleanCityCode := normalizeCodeSegment(cityCode)
-	cityParam := childCodeParam(cleanProvinceCode, cleanCityCode)
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/districts", map[string]string{
-		"province_code": cleanProvinceCode,
-		"regency_code":  cityParam,
+func (s *Service) fetchDistricts(ctx context.Context, provinceCode, cityCode string) ([]domainlocation.District, error) {
+	return fetchRows(ctx, s, "district", "/api/locations/districts", map[string]string{
+		"province_code": provinceCode,
+		"regency_code":  childCodeParam(provinceCode, cityCode),
 		"code_format":   "short",
-	}), "district")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.District, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.District{
-			Code:      normalizeChildCode(cleanCityCode, code),
-			CityCode:  cleanCityCode,
-			Name:      name,
-			CreatedAt: now,
-		})
-	}
-
-	return sortDistricts(items), nil
+	}, cityCode, func(e entry, now time.Time) domainlocation.District {
+		return domainlocation.District{Code: e.Code, CityCode: cityCode, Name: e.Name, CreatedAt: now}
+	})
 }
 
-func (s *Service) fetchVillages(ctx context.Context, year, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
-	_ = year
-	cleanProvinceCode := normalizeCodeSegment(provinceCode)
-	cleanCityCode := normalizeCodeSegment(cityCode)
-	cleanDistrictCode := normalizeCodeSegment(districtCode)
-	dataMap, err := s.fetchLocationMap(ctx, s.locationServiceURL("/api/locations/villages", map[string]string{
-		"province_code": cleanProvinceCode,
-		"regency_code":  childCodeParam(cleanProvinceCode, cleanCityCode),
-		"district_code": childCodeParam(cleanCityCode, cleanDistrictCode),
+func (s *Service) fetchVillages(ctx context.Context, provinceCode, cityCode, districtCode string) ([]domainlocation.Village, error) {
+	return fetchRows(ctx, s, "village", "/api/locations/villages", map[string]string{
+		"province_code": provinceCode,
+		"regency_code":  childCodeParam(provinceCode, cityCode),
+		"district_code": childCodeParam(cityCode, districtCode),
 		"code_format":   "short",
-	}), "village")
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]domainlocation.Village, 0, len(dataMap))
-	now := time.Now()
-	for code, name := range dataMap {
-		items = append(items, domainlocation.Village{
-			Code:         normalizeChildCode(cleanDistrictCode, code),
-			DistrictCode: cleanDistrictCode,
-			Name:         name,
-			CreatedAt:    now,
-		})
-	}
-
-	return sortVillages(items), nil
+	}, districtCode, func(e entry, now time.Time) domainlocation.Village {
+		return domainlocation.Village{Code: e.Code, DistrictCode: districtCode, Name: e.Name, CreatedAt: now}
+	})
 }
+
+func normalizeKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }

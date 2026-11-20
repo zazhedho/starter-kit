@@ -5,165 +5,228 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	domainlocation "starter-kit/internal/domain/location"
 )
 
-func newLocationFallbackService(t *testing.T) *Service {
-	t.Helper()
-	repo := &locationRepoTestDouble{
-		city:     domainlocation.City{Code: "1671", ProvinceCode: "16", Name: "Palembang"},
-		district: domainlocation.District{Code: "167101", CityCode: "1671", Name: "Ilir Timur I"},
+func TestFetchEntriesReadsBothResponseShapesTheSameWay(t *testing.T) {
+	bodies := map[string]string{
+		"array":         `[{"code":"32","name":" Jawa Barat "},{"code":"31","name":"DKI Jakarta"},{"code":"3x","name":"Broken"},{"code":"11","name":"Aceh"}]`,
+		"wrapped array": `{"log_id":"t","data":[{"code":"32","name":" Jawa Barat "},{"code":"31","name":"DKI Jakarta"},{"code":"3x","name":"Broken"},{"code":"11","name":"Aceh"}]}`,
+		"map":           `{"32":" Jawa Barat ","31":"DKI Jakarta","3x":"Broken","11":"Aceh"}`,
+		"wrapped map":   `{"data":{"32":" Jawa Barat ","31":"DKI Jakarta","3x":"Broken","11":"Aceh"}}`,
 	}
-	svc := newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		body := `{}`
-		switch {
-		case strings.Contains(req.URL.Path, "/api/locations/provinces"):
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"16","name":"Sumatera Selatan"}]}`
-		case strings.Contains(req.URL.Path, "/api/locations/regencies"):
-			if got := req.URL.Query().Get("province_code"); got != "16" {
-				t.Fatalf("expected province_code 16, got %q", got)
+	want := []entry{{"11", "Aceh"}, {"31", "DKI Jakarta"}, {"32", "Jawa Barat"}}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			svc := newTestService(t, &locationRepoTestDouble{}, answering(body))
+			got, err := svc.fetchEntries(context.Background(), "province", "/api/locations/provinces", nil, "")
+			if err != nil {
+				t.Fatalf("fetchEntries = %v", err)
 			}
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Kota Palembang"}]}`
-		case strings.Contains(req.URL.Path, "/api/locations/districts"):
-			if got := req.URL.Query().Get("regency_code"); got != "71" {
-				t.Fatalf("expected regency_code 71, got %q", got)
+			if len(got) != len(want) {
+				t.Fatalf("entries = %+v, want %+v", got, want)
 			}
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Ilir Timur I"}]}`
-		case strings.Contains(req.URL.Path, "/api/locations/villages"):
-			if got := req.URL.Query().Get("district_code"); got != "01" {
-				t.Fatalf("expected district_code 01, got %q", got)
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("entries = %+v, want %+v (sorted by name, trimmed, invalid code dropped)", got, want)
+				}
 			}
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"1001","name":"Sungai Pangeran"}]}`
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-	}))
-	return svc
-}
-
-func TestLocationServiceGetProvinceFallsBackToLocationService(t *testing.T) {
-	provinces, err := newLocationFallbackService(t).GetProvince(context.Background())
-	if err != nil || len(provinces) != 1 || provinces[0].Code != "16" {
-		t.Fatalf("province fallback failed: rows=%+v err=%v", provinces, err)
+		})
 	}
 }
 
-func TestLocationServiceGetCityFallsBackToLocationService(t *testing.T) {
-	cities, err := newLocationFallbackService(t).GetCity(context.Background(), "16")
-	if err != nil || len(cities) != 1 || cities[0].Code != "1671" {
-		t.Fatalf("city fallback failed: rows=%+v err=%v", cities, err)
-	}
-}
-
-func TestLocationServiceGetDistrictFallsBackToLocationService(t *testing.T) {
-	districts, err := newLocationFallbackService(t).GetDistrict(context.Background(), "1671")
-	if err != nil || len(districts) != 1 || districts[0].Code != "167101" {
-		t.Fatalf("district fallback failed: rows=%+v err=%v", districts, err)
-	}
-}
-
-func TestLocationServiceGetVillageFallsBackToLocationService(t *testing.T) {
-	villages, err := newLocationFallbackService(t).GetVillage(context.Background(), "167101")
-	if err != nil || len(villages) != 1 || villages[0].Code != "1671011001" {
-		t.Fatalf("village fallback failed: rows=%+v err=%v", villages, err)
-	}
-}
-
-func TestFetchLocationMapHandlesHTTPResponses(t *testing.T) {
-	svc := newTestService(t, &locationRepoTestDouble{}, roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"11","full_code":"11","name":"Aceh","level":"province"}]}`)),
-			Header:     make(http.Header),
-		}, nil
-	}))
-	got, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province")
+func TestFetchEntriesDropsWhatDoesNotBelongOrIsNotValid(t *testing.T) {
+	longName := strings.Repeat("n", 256)
+	body := `[
+		{"code":"71","name":"Jakarta Selatan"},
+		{"code":"3172","name":"Jakarta Utara"},
+		{"code":"1101","name":"Foreign full code"},
+		{"code":"7","name":""},
+		{"code":"8","name":"` + longName + `"},
+		{"code":"9;DROP","name":"Injected"},
+		{"code":"71","name":"Duplicate wins last"}
+	]`
+	svc := newTestService(t, &locationRepoTestDouble{}, answering(body))
+	got, err := svc.fetchEntries(context.Background(), "city", "/api/locations/regencies", nil, "31")
 	if err != nil {
-		t.Fatalf("expected success, got %v", err)
+		t.Fatal(err)
 	}
-	if got["11"] != "Aceh" {
-		t.Fatalf("unexpected location map: %+v", got)
-	}
-
-	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Body:       io.NopCloser(strings.NewReader("")),
-			Header:     make(http.Header),
-		}, nil
-	})}
-	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
-		t.Fatal("expected status error")
-	}
-
-	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, errors.New("network down")
-	})}
-	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
-		t.Fatal("expected transport error")
-	}
-
-	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{`)),
-			Header:     make(http.Header),
-		}, nil
-	})}
-	if _, err := svc.fetchLocationMap(context.Background(), "https://example.com/location", "province"); err == nil {
-		t.Fatal("expected decode error")
+	want := []entry{{"3171", "Duplicate wins last"}, {"3172", "Jakarta Utara"}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("entries = %+v, want %+v", got, want)
 	}
 }
 
-func newScopedLocationSyncService(t *testing.T, repo *locationRepoTestDouble) *Service {
+func TestFetchEntriesAcceptsAName255CharactersLong(t *testing.T) {
+	name := strings.Repeat("é", 255)
+	svc := newTestService(t, &locationRepoTestDouble{}, answering(`{"31":"`+name+`"}`))
+	got, err := svc.fetchEntries(context.Background(), "province", "/p", nil, "")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v: the limit counts characters, as the column does", got, err)
+	}
+}
+
+func TestEveryUpstreamFailureIsAnErrUpstream(t *testing.T) {
+	cases := map[string]http.RoundTripper{
+		"status": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		}),
+		"transport": roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("network down") }),
+		"decode":    answering(`{`),
+		"shape":     answering(`"just a string"`),
+	}
+	for name, rt := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := newTestService(t, &locationRepoTestDouble{}, rt)
+			_, err := svc.fetchEntries(context.Background(), "province", "/api/locations/provinces", nil, "")
+			if !errors.Is(err, domainlocation.ErrUpstream) {
+				t.Fatalf("fetchEntries = %v, want ErrUpstream", err)
+			}
+		})
+	}
+}
+
+func TestFetchEntriesReadsNoMoreThanTheConfiguredCap(t *testing.T) {
+	var served atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		chunk := []byte(strings.Repeat("x", 4096))
+		for {
+			n, err := w.Write(chunk)
+			served.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	svc := NewService(&locationRepoTestDouble{}, Options{BaseURL: srv.URL, MaxResponseBytes: 10 << 10})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	_, err := svc.fetchEntries(context.Background(), "province", "/api/locations/provinces", nil, "")
+	if !errors.Is(err, domainlocation.ErrUpstream) || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("fetchEntries = %v, want an oversize ErrUpstream", err)
+	}
+}
+
+func TestAResponseExactlyAtTheCapIsAccepted(t *testing.T) {
+	body := `{"31":"DKI Jakarta"}`
+	svc := NewService(&locationRepoTestDouble{}, Options{MaxResponseBytes: int64(len(body))})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	svc.httpClient = &http.Client{Transport: answering(body)}
+	if got, err := svc.fetchEntries(context.Background(), "province", "/p", nil, ""); err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		elsewhere.Add(1)
+		_, _ = io.WriteString(w, `{"31":"DKI Jakarta"}`)
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	svc := NewService(&locationRepoTestDouble{}, Options{BaseURL: srv.URL})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	_, err := svc.fetchEntries(context.Background(), "province", "/api/locations/provinces", nil, "")
+	if !errors.Is(err, domainlocation.ErrUpstream) {
+		t.Fatalf("fetchEntries = %v, want ErrUpstream for a redirect", err)
+	}
+	if elsewhere.Load() != 0 {
+		t.Fatal("the redirect target was requested")
+	}
+}
+
+func TestDecodePairsStopsUnwrappingDeepEnvelopes(t *testing.T) {
+	deep := `{"data":{"data":{"data":{"data":{"31":"DKI Jakarta"}}}}}`
+	if got, err := decodePairs([]byte(deep), 0); err == nil && len(got) == 1 && got[0].Code == "31" {
+		t.Fatalf("an envelope nested more than %d deep must not be unwrapped to data", maxEnvelopeDepth)
+	}
+}
+
+func TestLocationServiceURLEncodesAndSkipsBlankQueryValues(t *testing.T) {
+	svc := newTestService(t, &locationRepoTestDouble{}, nil)
+	svc.baseURL = "https://locations.example.invalid/"
+	got := svc.locationServiceURL("/api/locations/regencies", map[string]string{"province_code": "31", "code_format": "short", "blank": " "})
+	want := "https://locations.example.invalid/api/locations/regencies?code_format=short&province_code=31"
+	if got != want {
+		t.Fatalf("URL = %q, want %q", got, want)
+	}
+}
+
+func newScopedSync(t *testing.T, repo *locationRepoTestDouble) *Service {
 	t.Helper()
-	return newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	return newTestService(t, repo, scopedUpstream())
+}
+
+func scopedUpstream() *upstream {
+	return &upstream{handle: func(req *http.Request) *http.Response {
 		body := `{}`
 		switch {
 		case strings.Contains(req.URL.Path, "/api/locations/provinces"):
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","full_code":"31","name":"DKI Jakarta","level":"province"}]}`
+			body = `{"data":[{"code":"31","full_code":"31","name":"DKI Jakarta","level":"province"}]}`
 		case strings.Contains(req.URL.Path, "/api/locations/regencies"):
-			if got := req.URL.Query().Get("province_code"); got != "31" {
-				t.Fatalf("expected province_code 31, got %q", got)
-			}
-			if got := req.URL.Query().Get("code_format"); got != "short" {
-				t.Fatalf("expected short code format, got %q", got)
-			}
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","full_code":"31.71","name":"Jakarta Selatan","level":"regency","parent_code":"31"}]}`
+			body = `{"data":[{"code":"71","full_code":"31.71","name":"Jakarta Selatan","level":"regency","parent_code":"31"}]}`
 		case strings.Contains(req.URL.Path, "/api/locations/districts"):
-			if got := req.URL.Query().Get("regency_code"); got != "71" {
-				t.Fatalf("expected regency_code 71, got %q", got)
-			}
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01","name":"Tebet","level":"district","parent_code":"31.71"}]}`
+			body = `{"data":[{"code":"01","full_code":"31.71.01","name":"Tebet","level":"district","parent_code":"31.71"}]}`
 		case strings.Contains(req.URL.Path, "/api/locations/villages"):
-			if got := req.URL.Query().Get("district_code"); got != "01" {
-				t.Fatalf("expected district_code 01, got %q", got)
-			}
-			body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","full_code":"31.71.01.0001","name":"Tebet Barat","level":"village","parent_code":"31.71.01"}]}`
+			body = `{"data":[{"code":"01","full_code":"31.71.01.0001","name":"Tebet Barat","level":"village","parent_code":"31.71.01"}]}`
 		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     make(http.Header),
-		}, nil
-	}))
+		return okResponse(body)
+	}}
 }
 
-func TestLocationFetchScopedLevelsNormalizeCodes(t *testing.T) {
-	svc := newScopedLocationSyncService(t, &locationRepoTestDouble{})
+func relativeCodesUpstream(t *testing.T) *upstream {
+	return &upstream{handle: func(req *http.Request) *http.Response {
+		q := req.URL.Query()
+		requireQuery(t, req.URL.Path, q, map[string]string{"code_format": "short"})
+		switch {
+		case strings.Contains(req.URL.Path, "regencies"):
+			requireQuery(t, "regencies", q, map[string]string{"province_code": "31"})
+			return okResponse(`[{"code":"71","name":"Jakarta Selatan"}]`)
+		case strings.Contains(req.URL.Path, "districts"):
+			requireQuery(t, "districts", q, map[string]string{"province_code": "31", "regency_code": "71"})
+			return okResponse(`[{"code":"01","name":"Tebet"}]`)
+		default:
+			requireQuery(t, "villages", q, map[string]string{"regency_code": "71", "district_code": "01"})
+			return okResponse(`[{"code":"0001","name":"Tebet Barat"}]`)
+		}
+	}}
+}
+
+func requireQuery(t *testing.T, label string, q url.Values, want map[string]string) {
+	t.Helper()
+	for key, value := range want {
+		if got := q.Get(key); got != value {
+			t.Errorf("%s: %s = %q, want %q", label, key, got, value)
+		}
+	}
+}
+
+func TestFetchLevelsSendTheRelativeCodesAndStoreFullOnes(t *testing.T) {
+	svc := newTestService(t, &locationRepoTestDouble{}, relativeCodesUpstream(t))
 	ctx := context.Background()
-	cities, err := svc.fetchCities(ctx, "2026", "31")
-	if err != nil || len(cities) != 1 || cities[0].Code != "3171" {
-		t.Fatalf("fetch cities: cities=%+v err=%v", cities, err)
+
+	cities, err := svc.fetchCities(ctx, "31")
+	if err != nil || len(cities) != 1 || cities[0].Code != "3171" || cities[0].ProvinceCode != "31" {
+		t.Fatalf("cities = %+v, %v", cities, err)
 	}
-	districts, err := svc.fetchDistricts(ctx, "2026", "31", "3171")
-	if err != nil || len(districts) != 1 || districts[0].Code != "317101" {
-		t.Fatalf("fetch districts: districts=%+v err=%v", districts, err)
+	districts, err := svc.fetchDistricts(ctx, "31", "3171")
+	if err != nil || len(districts) != 1 || districts[0].Code != "317101" || districts[0].CityCode != "3171" {
+		t.Fatalf("districts = %+v, %v", districts, err)
 	}
-	villages, err := svc.fetchVillages(ctx, "2026", "31", "3171", "317101")
-	if err != nil || len(villages) != 1 || villages[0].Code != "31710101" {
-		t.Fatalf("fetch villages: villages=%+v err=%v", villages, err)
+	villages, err := svc.fetchVillages(ctx, "31", "3171", "317101")
+	if err != nil || len(villages) != 1 || villages[0].Code != "3171010001" || villages[0].DistrictCode != "317101" {
+		t.Fatalf("villages = %+v, %v", villages, err)
 	}
 }

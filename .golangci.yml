@@ -24,18 +24,29 @@ linters:
     - nilerr
     - noctx
     - prealloc
+    - revive
     - rowserrcheck
     - sqlclosecheck
     - staticcheck
     - unconvert
     - unused
   settings:
+    revive:
+      rules:
+        - name: var-naming
+        # An application has no public API: a missing comment on an exported
+        # name is excluded below, but a comment that exists must start with the
+        # name it documents.
+        - name: exported
     dupl:
       threshold: 80
     misspell:
       locale: US
   exclusions:
     rules:
+      - linters:
+          - revive
+        text: "should have comment or be unexported"
       - linters:
           - misspell
         text: "`thn` is a misspelling of `then`"

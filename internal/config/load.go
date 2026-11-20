@@ -9,9 +9,6 @@ import (
 
 const maxSizeMB = 1024
 
-// FromEnv reads the environment as it is (callers load .env and Consul first).
-// Every value is read with gokit.GetEnv: unparsable ones fall back to their
-// defaults and are reported by Validate through gokit.EnvErrors.
 func FromEnv() Config {
 	cfg := Config{
 		App: App{
@@ -26,7 +23,9 @@ func FromEnv() Config {
 			WriteTimeout:      gokit.GetEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
 			IdleTimeout:       gokit.GetEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout:   gokit.GetEnv("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
+			ShutdownDelay:     gokit.GetEnv("HTTP_SHUTDOWN_DELAY", 5*time.Second),
 			MaxBodyBytes:      megabytes("HTTP_MAX_BODY_MB", 10),
+			TrustedProxies:    gokit.GetEnv("TRUSTED_PROXIES", []string(nil)),
 		},
 		Database: Database{
 			URL:             gokit.GetEnv("DATABASE_URL", ""),
@@ -46,8 +45,8 @@ func FromEnv() Config {
 			Path: gokit.GetEnv("PATH_MIGRATE", "file://migrations"),
 		},
 		Location: locationFromEnv(),
-		Auth:     authkit.ConfigFromEnv(),
 	}
+	cfg.Auth, cfg.authErr = authkit.ConfigFromEnv()
 
 	cfg.Media, cfg.Storage = mediaFromEnv()
 
@@ -59,7 +58,6 @@ func FromEnv() Config {
 		DB:       gokit.GetEnv("REDIS_DB", 0),
 	}
 
-	// SMTP values stay empty when unset so the mailer applies its defaults.
 	cfg.SMTP = SMTP{
 		Host:         gokit.GetEnv("SMTP_HOST", ""),
 		Port:         gokit.GetEnv("SMTP_PORT", 0),
@@ -74,8 +72,6 @@ func FromEnv() Config {
 	return cfg
 }
 
-// megabytes reads whole megabytes and returns bytes. An out-of-range value
-// returns 0 before shifting so huge values cannot wrap; Validate reports it.
 func megabytes(key string, def int) int64 {
 	n := gokit.GetEnv(key, def)
 	if n < 1 || n > maxSizeMB {

@@ -2,6 +2,9 @@ package location
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,18 +24,41 @@ func TestNewLocationServiceNeverDisablesTheHTTPTimeout(t *testing.T) {
 	}
 }
 
-// fakeCache records writes so service rules can be tested without Redis.
 type fakeCache struct {
+	mu      sync.Mutex
 	entries map[string]time.Duration
+	data    map[string][]dtolocation.Location
+	gets    []string
+	deletes []string
 }
 
-func newFakeCache() *fakeCache { return &fakeCache{entries: map[string]time.Duration{}} }
+func newFakeCache() *fakeCache {
+	return &fakeCache{entries: map[string]time.Duration{}, data: map[string][]dtolocation.Location{}}
+}
 
-func (f *fakeCache) Get(context.Context, string) ([]dtolocation.Location, bool) { return nil, false }
+func locationsOf(code, name string) []dtolocation.Location {
+	return []dtolocation.Location{{Code: code, Name: name}}
+}
+
+func (f *fakeCache) Get(_ context.Context, key string) ([]dtolocation.Location, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gets = append(f.gets, key)
+	data, ok := f.data[key]
+	return data, ok
+}
+
 func (f *fakeCache) Set(_ context.Context, key string, _ []dtolocation.Location, ttl time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.entries[key] = ttl
 }
-func (f *fakeCache) DeleteKeys(context.Context, string) {}
+
+func (f *fakeCache) DeleteKeys(_ context.Context, prefix string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletes = append(f.deletes, prefix)
+}
 
 func TestLocationCacheIsSkippedWithoutPositiveTTL(t *testing.T) {
 	cache := newFakeCache()
@@ -63,5 +89,29 @@ func TestNewLocationServiceWithoutCacheAlwaysMisses(t *testing.T) {
 	svc.setLocationCache(context.Background(), "location:province", []dtolocation.Location{{Code: "11", Name: "Aceh"}})
 	if _, ok := svc.cache.Get(context.Background(), "location:province"); ok {
 		t.Fatal("a service without a cache must always miss")
+	}
+}
+
+func TestNewServiceDefaultsItsLimits(t *testing.T) {
+	svc := NewService(&locationRepoTestDouble{}, Options{})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	if svc.maxResponse != 4<<20 || svc.heartbeatInterval != 15*time.Second || svc.staleAfter != 2*time.Minute || svc.progressInterval != 2*time.Second {
+		t.Fatalf("defaults = %d, %v, %v, %v", svc.maxResponse, svc.heartbeatInterval, svc.staleAfter, svc.progressInterval)
+	}
+	if svc.staleAfter <= 2*svc.heartbeatInterval {
+		t.Fatal("a job must survive at least a couple of missed heartbeats before it counts as stale")
+	}
+	svc = NewService(&locationRepoTestDouble{}, Options{MaxResponseBytes: 1 << 20, StaleAfter: time.Second})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	if svc.maxResponse != 1<<20 || svc.staleAfter != time.Second {
+		t.Fatalf("explicit options not kept: %d, %v", svc.maxResponse, svc.staleAfter)
+	}
+}
+
+func TestTheHTTPClientDoesNotFollowRedirects(t *testing.T) {
+	svc := NewService(&locationRepoTestDouble{}, Options{})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	if err := svc.httpClient.CheckRedirect(nil, nil); !errors.Is(err, http.ErrUseLastResponse) {
+		t.Fatalf("CheckRedirect = %v, want http.ErrUseLastResponse", err)
 	}
 }

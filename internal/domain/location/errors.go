@@ -1,18 +1,23 @@
 package location
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
-// ErrNotFound is returned by repositories when a requested location record
-// does not exist. Callers match it with errors.Is and never see the ORM error.
 var ErrNotFound = errors.New("location record not found")
 
+var ErrSyncJobNotFound = fmt.Errorf("location sync job not found: %w", ErrNotFound)
+
 var (
-	// ErrSyncRunning is returned when a location sync is requested while
-	// another one is queued or running.
+	ErrInvalidCode = errors.New("invalid location code")
+
+	ErrUpstream = errors.New("location service unavailable")
+
+	ErrShuttingDown = errors.New("location service is shutting down")
+
 	ErrSyncRunning = errors.New("location sync is already running")
 
-	// ErrInvalidSync is matched (errors.Is) by every sync request validation
-	// failure. Build instances with NewInvalidSync.
 	ErrInvalidSync = errors.New("invalid location sync request")
 )
 
@@ -22,6 +27,12 @@ func (e *invalidSyncError) Error() string { return e.msg }
 
 func (e *invalidSyncError) Unwrap() error { return ErrInvalidSync }
 
-// NewInvalidSync returns a validation error whose Error text is msg and which
-// matches ErrInvalidSync.
 func NewInvalidSync(msg string) error { return &invalidSyncError{msg: msg} }
+
+type invalidCodeError struct{ field string }
+
+func (e *invalidCodeError) Error() string { return e.field + " must be 1 to 20 digits" }
+
+func (e *invalidCodeError) Unwrap() error { return ErrInvalidCode }
+
+func NewInvalidCode(field string) error { return &invalidCodeError{field: field} }

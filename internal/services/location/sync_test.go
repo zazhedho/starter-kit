@@ -3,7 +3,6 @@ package location
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,151 +12,233 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-func TestLocationSyncAll(t *testing.T) {
+func TestSyncAll(t *testing.T) {
 	repo := &locationRepoTestDouble{}
-	svc := newScopedLocationSyncService(t, repo)
-	var progressCalls int
-	result, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "all", Year: "2026"}, func(progress syncProgress) {
-		progressCalls++
-	})
+	svc := newScopedSync(t, repo)
+	var reports int
+	result, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "all"}, func(domainlocation.SyncProgress) { reports++ })
 	if err != nil {
 		t.Fatalf("sync all: %v", err)
 	}
-	if result.ProvinceCount != 1 || result.CityCount != 1 || result.DistrictCount != 1 || result.VillageCount != 1 {
+	if result.ProvinceCount != 1 || result.CityCount != 1 || result.DistrictCount != 1 || result.VillageCount != 1 || result.Message != "Full location sync completed" {
 		t.Fatalf("unexpected sync result: %+v", result)
 	}
-	if progressCalls == 0 {
-		t.Fatal("expected progress callbacks")
+	if reports == 0 {
+		t.Fatal("expected progress reports")
 	}
 	if repo.upsertProvinceCount != 1 || repo.upsertCityCount != 1 || repo.upsertDistrictCount != 1 || repo.upsertVillageCount != 1 {
 		t.Fatalf("expected all upserts, repo=%+v", repo)
 	}
 }
 
-func TestLocationSyncIndividualLevels(t *testing.T) {
-	makeService := func(repo *locationRepoTestDouble) *Service {
-		return newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			body := `{}`
-			switch {
-			case strings.Contains(req.URL.Path, "/api/locations/provinces"):
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/regencies"):
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/districts"):
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
-			case strings.Contains(req.URL.Path, "/api/locations/villages"):
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
-			}
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(body)),
-				Header:     make(http.Header),
-			}, nil
-		}))
+func TestSyncIndividualLevels(t *testing.T) {
+	tests := []struct {
+		req  dtolocation.SyncRequest
+		want domainlocation.SyncProgress
+	}{
+		{dtolocation.SyncRequest{Level: "province"}, domainlocation.SyncProgress{Message: "Province sync completed", ProvinceCount: 1}},
+		{dtolocation.SyncRequest{Level: "city", ProvinceCode: "31"}, domainlocation.SyncProgress{Message: "City sync completed", CityCount: 1}},
+		{dtolocation.SyncRequest{Level: "district", ProvinceCode: "31", CityCode: "3171"}, domainlocation.SyncProgress{Message: "District sync completed", DistrictCount: 1}},
+		{dtolocation.SyncRequest{Level: "village", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"}, domainlocation.SyncProgress{Message: "Village sync completed", VillageCount: 1}},
 	}
-
-	tests := []dtolocation.SyncRequest{
-		{Level: "province", Year: "2026"},
-		{Level: "city", Year: "2026", ProvinceCode: "31"},
-		{Level: "district", Year: "2026", ProvinceCode: "31", CityCode: "3171"},
-		{Level: "village", Year: "2026", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"},
-	}
-
-	for _, req := range tests {
-		t.Run(req.Level, func(t *testing.T) {
-			repo := &locationRepoTestDouble{}
-			svc := makeService(repo)
-			result, err := svc.sync(context.Background(), req, func(progress syncProgress) {})
-			if err != nil {
-				t.Fatalf("expected sync success, got %v", err)
-			}
-			if result.Message == "" {
-				t.Fatalf("expected result message, got %+v", result)
+	for _, tt := range tests {
+		t.Run(tt.req.Level, func(t *testing.T) {
+			svc := newScopedSync(t, &locationRepoTestDouble{})
+			got, err := svc.sync(context.Background(), tt.req, func(domainlocation.SyncProgress) {})
+			if err != nil || got != tt.want {
+				t.Fatalf("sync = %+v, %v, want %+v", got, err, tt.want)
 			}
 		})
 	}
+}
 
-	svc := makeService(&locationRepoTestDouble{})
-	if _, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "bad"}, func(progress syncProgress) {}); err == nil {
-		t.Fatal("expected invalid sync level error")
+func TestSyncOfALevelWithNoRowsSucceeds(t *testing.T) {
+	svc := newTestService(t, &locationRepoTestDouble{}, answering(`[]`))
+	got, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "city", ProvinceCode: "31"}, func(domainlocation.SyncProgress) {})
+	if err != nil || got.CityCount != 0 {
+		t.Fatalf("sync = %+v, %v", got, err)
 	}
 }
 
-func TestLocationSyncUpsertErrors(t *testing.T) {
-	makeService := func(repo *locationRepoTestDouble) *Service {
-		return newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			body := `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`
-			if strings.Contains(req.URL.Path, "/api/locations/regencies") {
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"71","name":"Jakarta Selatan"}]}`
-			}
-			if strings.Contains(req.URL.Path, "/api/locations/districts") {
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet"}]}`
-			}
-			if strings.Contains(req.URL.Path, "/api/locations/villages") {
-				body = `{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"01","name":"Tebet Barat"}]}`
-			}
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-		}))
-	}
-
+func TestSyncUpsertErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		repo *locationRepoTestDouble
 		req  dtolocation.SyncRequest
 	}{
-		{name: "province", repo: &locationRepoTestDouble{upsertProvinceErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "province", Year: "2026"}},
-		{name: "city", repo: &locationRepoTestDouble{upsertCityErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "city", Year: "2026", ProvinceCode: "31"}},
-		{name: "district", repo: &locationRepoTestDouble{upsertDistrictErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "district", Year: "2026", ProvinceCode: "31", CityCode: "3171"}},
-		{name: "village", repo: &locationRepoTestDouble{upsertVillageErr: errors.New("database down")}, req: dtolocation.SyncRequest{Level: "village", Year: "2026", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"}},
+		{"province", &locationRepoTestDouble{upsertProvinceErr: errors.New("database down")}, dtolocation.SyncRequest{Level: "province"}},
+		{"city", &locationRepoTestDouble{upsertCityErr: errors.New("database down")}, dtolocation.SyncRequest{Level: "city", ProvinceCode: "31"}},
+		{"district", &locationRepoTestDouble{upsertDistrictErr: errors.New("database down")}, dtolocation.SyncRequest{Level: "district", ProvinceCode: "31", CityCode: "3171"}},
+		{"village", &locationRepoTestDouble{upsertVillageErr: errors.New("database down")}, dtolocation.SyncRequest{Level: "village", ProvinceCode: "31", CityCode: "3171", DistrictCode: "317101"}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := makeService(tt.repo)
-			if _, err := svc.sync(context.Background(), tt.req, func(progress syncProgress) {}); err == nil {
+			svc := newScopedSync(t, tt.repo)
+			if _, err := svc.sync(context.Background(), tt.req, func(domainlocation.SyncProgress) {}); err == nil {
 				t.Fatal("expected upsert error")
 			}
 		})
 	}
 }
 
-func TestRunSyncJobCompletesAndHandlesGuards(t *testing.T) {
-	now := time.Now()
-	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "queued", Level: "province", Year: "2026", CreatedAt: now}}
-	svc := newTestService(t, repo, roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"log_id":"test","code":200,"status":true,"message":"Success","data":[{"code":"31","name":"DKI Jakarta"}]}`)), Header: make(http.Header)}, nil
-	}))
+func TestSyncDropsOnlyTheCacheKeysItTouched(t *testing.T) {
+	cache := newFakeCache()
+	svc := NewService(&locationRepoTestDouble{}, Options{Cache: cache, HeartbeatInterval: time.Hour})
+	svc.httpClient = &http.Client{Transport: scopedUpstream()}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
-	svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province", Year: "2026"})
-	if len(repo.updatedJobs) < 2 {
-		t.Fatalf("expected running and completed job updates, got %+v", repo.updatedJobs)
+	if _, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "city", ProvinceCode: "31"}, func(domainlocation.SyncProgress) {}); err != nil {
+		t.Fatal(err)
 	}
-	if got := repo.updatedJobs[len(repo.updatedJobs)-1]; got.Status != "completed" || got.ProvinceCount != 1 {
-		t.Fatalf("expected completed job, got %+v", got)
-	}
-
-	repo = &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-2", Status: "queued", CreatedAt: now}}
-	svc = newTestService(t, repo, nil)
-	svc.syncing.Store(true)
-	svc.runSyncJob("job-2", dtolocation.SyncRequest{Level: "province", Year: "2026"})
-	if len(repo.updatedJobs) != 1 || repo.updatedJobs[0].Status != "failed" {
-		t.Fatalf("expected busy sync to mark failed, got %+v", repo.updatedJobs)
+	if len(cache.deletes) != 1 || cache.deletes[0] != "location:city:31" {
+		t.Fatalf("deleted %v, want only location:city:31", cache.deletes)
 	}
 }
 
-func TestLocationSyncProgressAndFailureHelpers(t *testing.T) {
-	now := time.Now()
-	repo := &locationRepoTestDouble{syncJob: domainlocation.SyncJob{ID: "job-1", Status: "running", CreatedAt: now}}
-	svc := newTestService(t, repo, nil)
+func runJob(t *testing.T, repo *locationRepoTestDouble, rt http.RoundTripper, opts Options, req dtolocation.SyncRequest) *Service {
+	t.Helper()
+	opts.HeartbeatInterval = orDefault(opts.HeartbeatInterval, time.Hour)
+	svc := NewService(repo, opts)
+	svc.httpClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	svc.runSyncJob("job-1", req)
+	return svc
+}
 
-	job := domainlocation.SyncJob{ID: "job-1"}
-	svc.applySyncProgress(&job, syncProgress{Message: "halfway", ProvinceCount: 1})
-	if job.Message != "halfway" || job.ProvinceCount != 1 || job.UpdatedAt == nil {
-		t.Fatalf("unexpected progress application: %+v", job)
+func TestRunSyncJobRecordsStartProgressAndCompletion(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	runJob(t, repo, answering(`[{"code":"31","name":"DKI Jakarta"}]`), Options{InstanceID: "instance-a"}, dtolocation.SyncRequest{Level: "province"})
+
+	if len(repo.started) != 1 || repo.started[0] != "job-1" {
+		t.Fatalf("started = %v", repo.started)
+	}
+	got := repo.lastFinish(t)
+	if got.Status != "completed" || got.Message != "Location sync completed" || got.ErrorMessage != "" {
+		t.Fatalf("final state = %+v", got)
+	}
+	if last := repo.progress[len(repo.progress)-1]; last.ProvinceCount != 1 {
+		t.Fatalf("last progress = %+v, want the final counts", last)
+	}
+}
+
+func TestRunSyncJobRecordsAFailure(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	rt := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("network down") })
+	runJob(t, repo, rt, Options{}, dtolocation.SyncRequest{Level: "province"})
+
+	got := repo.lastFinish(t)
+	if got.Status != "failed" || got.Message != "Location sync failed" || !strings.Contains(got.ErrorMessage, "network down") {
+		t.Fatalf("final state = %+v", got)
+	}
+}
+
+func TestRunSyncJobThatCannotStartIsLoggedNotFinished(t *testing.T) {
+	repo := &locationRepoTestDouble{startErr: domainlocation.ErrNotFound}
+	up := answering(`[{"code":"31","name":"DKI Jakarta"}]`)
+	runJob(t, repo, up, Options{}, dtolocation.SyncRequest{Level: "province"})
+	if up.calls() != 0 {
+		t.Fatal("a job that could not be started must not run")
+	}
+}
+
+func TestProgressWritesAreThrottled(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	svc := NewService(repo, Options{ProgressInterval: time.Hour, HeartbeatInterval: time.Hour})
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+	w := &progressWriter{s: svc, jobID: "job-1"}
+
+	for i := range 100 {
+		w.report(context.Background(), domainlocation.SyncProgress{Message: "step", CityCount: i})
+	}
+	if _, _, progress := repo.counts(); progress != 1 {
+		t.Fatalf("100 reports inside one interval wrote %d times, want 1", progress)
 	}
 
-	svc.markSyncJobFailed("job-1", "failed")
-	if repo.syncJob.Status != "running" {
-		t.Fatalf("test double should keep original sync job copy, got %+v", repo.syncJob)
+	svc.progressInterval = time.Millisecond
+	time.Sleep(5 * time.Millisecond)
+	w.report(context.Background(), domainlocation.SyncProgress{Message: "later", CityCount: 100})
+	if _, _, progress := repo.counts(); progress != 2 {
+		t.Fatalf("a report after the interval must write, writes = %d", progress)
+	}
+}
+
+func TestARunningJobSendsHeartbeats(t *testing.T) {
+	repo := &locationRepoTestDouble{}
+	release := make(chan struct{})
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-release
+		return okResponse(`[{"code":"31","name":"DKI Jakarta"}]`), nil
+	})
+	svc := NewService(repo, Options{HeartbeatInterval: 5 * time.Millisecond})
+	svc.httpClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+
+	done := make(chan struct{})
+	go func() { svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province"}); close(done) }()
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, touches, _ := repo.counts(); touches >= 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("a running job sent fewer than 3 heartbeats")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	close(release)
+	<-done
+	if repo.lastFinish(t).Status != "completed" {
+		t.Fatal("the job did not complete")
+	}
+}
+
+func TestAJobThatWasTakenOverStopsWithoutFinishing(t *testing.T) {
+	repo := &locationRepoTestDouble{touchErr: domainlocation.ErrNotFound}
+	started := make(chan struct{})
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	svc := NewService(repo, Options{HeartbeatInterval: 5 * time.Millisecond})
+	svc.httpClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+
+	done := make(chan struct{})
+	go func() { svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province"}); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a job that lost its ownership kept running")
+	}
+	if finishes, _, _ := repo.counts(); finishes != 0 {
+		t.Fatalf("the job recorded %d final states over the takeover", finishes)
+	}
+}
+
+func TestAProgressWriteThatLostTheJobCancelsIt(t *testing.T) {
+	repo := &locationRepoTestDouble{progressErr: domainlocation.ErrNotFound}
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	svc := NewService(repo, Options{HeartbeatInterval: time.Hour})
+	svc.httpClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+
+	done := make(chan struct{})
+	go func() { svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province"}); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a job whose progress write lost ownership kept running")
+	}
+	if finishes, _, _ := repo.counts(); finishes != 0 {
+		t.Fatalf("the job recorded %d final states over the takeover", finishes)
 	}
 }

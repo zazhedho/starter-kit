@@ -1,6 +1,3 @@
-// Package logcapture lets a test binary read what the service logs.
-// logus builds its logger on the first write, around the then-current os.Stdout;
-// Start swaps in a pipe for that moment. Call it from TestMain, before any test logs.
 package logcapture
 
 import (
@@ -20,7 +17,6 @@ const flushTimeout = 5 * time.Second
 
 var syncMarker = regexp.MustCompile("\x00sync-[0-9]+\x00")
 
-// Capture collects log output written after Start.
 type Capture struct {
 	w     *os.File
 	r     *os.File
@@ -33,11 +29,8 @@ type Capture struct {
 	readEnd chan struct{}
 }
 
-// Mark is a position in the captured output.
 type Mark int
 
-// Start captures logus output and the standard log package. It panics if the
-// pipe cannot be created (out of file descriptors).
 func Start() *Capture {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -47,12 +40,7 @@ func Start() *Capture {
 	c.cond = sync.NewCond(&c.mu)
 	go c.read()
 
-	realStdout := os.Stdout
-	os.Stdout = w
-	// Written at error level so that a low LOG_LEVEL cannot skip it: the
-	// first line that passes the level check is what builds the logger.
-	logus.WriteLog(logus.LogLevelError, "logcapture started")
-	os.Stdout = realStdout
+	logus.SetOutput(w)
 	log.SetOutput(w)
 	return c
 }
@@ -74,8 +62,6 @@ func (c *Capture) read() {
 	}
 }
 
-// flush waits until everything written so far has been read from the pipe, by
-// writing a marker and waiting for it to arrive.
 func (c *Capture) flush() {
 	c.mu.Lock()
 	c.syncs++
@@ -95,7 +81,6 @@ func (c *Capture) flush() {
 	}
 }
 
-// Mark returns the current end of the output.
 func (c *Capture) Mark() Mark {
 	c.flush()
 	c.mu.Lock()
@@ -103,7 +88,6 @@ func (c *Capture) Mark() Mark {
 	return Mark(c.buf.Len())
 }
 
-// Since returns what was logged after m.
 func (c *Capture) Since(m Mark) string {
 	c.flush()
 	c.mu.Lock()
@@ -112,12 +96,10 @@ func (c *Capture) Since(m Mark) string {
 	return syncMarker.ReplaceAllString(out, "")
 }
 
-// All returns everything captured so far.
 func (c *Capture) All() string { return c.Since(0) }
 
-// Stop restores log output and ends the capture; logus cannot be rebuilt, so call
-// it only just before exit.
 func (c *Capture) Stop() {
+	logus.SetOutput(nil)
 	log.SetOutput(c.prevL)
 	_ = c.w.Close()
 	<-c.readEnd

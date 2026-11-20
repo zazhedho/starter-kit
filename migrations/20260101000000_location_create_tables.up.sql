@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS location_sync_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     status VARCHAR(20) NOT NULL,
     level VARCHAR(20) NOT NULL,
-    year VARCHAR(10) NOT NULL,
     province_code VARCHAR(20),
     city_code VARCHAR(20),
     district_code VARCHAR(20),
@@ -55,7 +54,9 @@ CREATE TABLE IF NOT EXISTS location_sync_jobs (
     started_at TIMESTAMP,
     finished_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    updated_at TIMESTAMP,
+    owner_instance_id VARCHAR(64) NOT NULL,
+    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_provinces_deleted_at ON provinces(deleted_at);
@@ -67,10 +68,12 @@ CREATE INDEX IF NOT EXISTS idx_villages_district_code ON villages(district_code)
 CREATE INDEX IF NOT EXISTS idx_villages_deleted_at ON villages(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_location_sync_jobs_status ON location_sync_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_location_sync_jobs_created_at ON location_sync_jobs(created_at DESC);
+-- At most one job is queued or running, whatever the number of service instances.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_location_sync_jobs_one_active ON location_sync_jobs ((TRUE)) WHERE status IN ('queued', 'running');
 
 INSERT INTO permissions (id, name, display_name, resource, action) VALUES
     (gen_random_uuid(), 'sync_locations', 'Sync Locations', 'locations', 'sync')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (name) WHERE deleted_at IS NULL DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id

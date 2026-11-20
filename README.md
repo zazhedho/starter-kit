@@ -44,8 +44,10 @@ every route. `docs/smoke-test.md` is a full check of a fresh checkout.
   permissions of the current user, and a parent menu appears when a permitted child exists.
 - Endpoints are protected with `d.Kit.Auth()` and `d.Kit.Can(resource, action)` (authkit's middleware).
 
-Admin flow: create a role, assign it permissions, and let menus follow. Menus are defined in code and
-migrations (a module's migration seeds its menu and permissions); the admin API does not create or delete them.
+Admin flow: create a role, assign it permissions, and let menus follow. Menus are defined in migrations; the
+admin API does not create or delete them. A module with a UI seeds its menu item, permissions and default role
+grants with authkit's `module-seed` (see [Adding a module](docs/adding-a-module.md)). The two reference modules,
+`location` and `media`, are API-only: their migrations seed permissions and no menu.
 
 ### Runtime configuration
 
@@ -81,7 +83,6 @@ starter-kit/
 │   ├── architecture/              # guard tests: the dependency rule, import aliases, package names, migration names
 │   └── testutil/                  # test helpers: logcapture, routertest (shared router test Deps and helpers)
 ├── migrations/                    # this project's migrations: <UTC timestamp>_<module>_<change>.{up,down}.sql, see migrations/README.md
-├── deploy/entrypoint.sh           # container entrypoint (runs the migration when asked)
 ├── docs/
 │   ├── adding-a-module.md         # checklist and a worked example
 │   ├── modules/<module>.md        # routes, permissions, env variables, operational notes per module
@@ -119,8 +120,10 @@ Dependencies point inward only: everything depends on `domain` (and `dto`), and 
                                         imports no domain or dto, except infrastructure/cache/<module>, which
                                         implements that module's port and may import its domain
 
-  router, app     --> everything        the only code that constructs the pieces and joins them:
+  router          --> everything        the only code that constructs the pieces and joins them:
                                         handler(service(repository)), so Go checks every fit at compile time
+  app             --> config, infrastructure, router   opens the connections and starts the router
+  cmd             --> app               signal handling and the exit code
 ```
 
 What `internal/architecture` checks on every `go test ./...` (it parses the source with `go/parser`; no extra dependency):
@@ -129,9 +132,9 @@ What `internal/architecture` checks on every `go test ./...` (it parses the sour
 - `dto` imports only the standard library and `domain`.
 - `services` import neither `infrastructure`, `repositories`, `handlers`, `router`, `app` nor `config`, and none of gin, gorm, go-redis, `github.com/minio/minio-go`, `gokit` or `authkit`. IDs are injected (`NewID`), the caller's identity arrives as plain input (`domainmedia.Actor`, a user id), and persistence, cache and storage are interfaces the service declares in its own `ports.go`. Logging through `logus` is the one deliberate global.
 - `handlers` import neither `services`, `repositories`, `infrastructure`, `router`, `app` nor `config`, and neither gorm, go-redis nor `github.com/minio/minio-go`; they talk to a `Service` interface they declare themselves. They are where `authkit` and `gokit` belong: they turn the request into plain input and domain errors into HTTP statuses.
-- `repositories` import neither `services`, `handlers`, `infrastructure`, `router`, `app` nor `config`, and not gin. `infrastructure` imports neither `services`, `handlers`, `repositories`, `router` nor `app`, and no `domain` either: it owns its types (`storage.Provider`, not a domain interface). The one exception is `infrastructure/cache/<module>`, which implements that module's port and may import that module's domain. `config` imports nothing from this module, and `router` does not import `app`.
+- `repositories` import neither `services`, `handlers`, `infrastructure`, `router`, `app` nor `config`, and not gin. `infrastructure` imports neither `services`, `handlers`, `repositories`, `router` nor `app`, and no `domain` either: it owns its types (`storage.Provider`, not a domain interface). The one exception is `infrastructure/cache/<module>`, which implements that module's port and may import that module's domain. `config` imports no layer except `domain` (a module's own facts, such as the content types media can store, are validated from there), and `router` does not import `app`.
 - A module's peer layers never import each other: no service-to-service, handler-to-handler, repository-to-repository or router-to-router imports across modules. The one allowance is another module's `domain` and `dto` packages, which services, repositories, handlers, `infrastructure/cache` and `router` may import (a `projects` module referencing users); `domain` and `dto` themselves import no other module. Modules otherwise meet only in `router` and `app`.
-- A `shared` directory (`<tree>/shared`, for example `handlers/http/shared` for pagination or response helpers, or `dto/shared`) is the one reserved name in a per-module tree. It is not a module: any module of that tree may import it, and it must not import any business module of any tree (it may import the `shared` packages of layers its own layer may import). The layer rules of its tree still apply (`dto/shared` stays standard library plus domain), the import alias is the prefix plus `shared` (`dtoshared`, `httpshared`), and no module may be named `shared`. Create one only when two modules need the same helper; no `shared` package exists yet.
+- A `shared` directory (`<tree>/shared`, for example `handlers/http/shared` for the error response, or `dto/shared`) is the one reserved name in a per-module tree. It is not a module: any module of that tree may import it, and it must not import any business module of any tree (it may import the `shared` packages of layers its own layer may import). The layer rules of its tree still apply (`dto/shared` stays standard library plus domain), the import alias is the prefix plus `shared` (`dtoshared`, `httpshared`), and no module may be named `shared`. Create one only when two modules need the same helper; `handlers/http/shared` (alias `httpshared`) holds the error response and its log level, which both modules use.
 - Every top-level directory of `internal/` is a known layer (`TestInternalLayersAreKnown`): a new layer needs a rule in `internal/architecture/architecture_test.go` and a line in this dependency rule. Every `internal/router/<module>` is mounted in `modules.go` under its own name (`TestEveryRouterDirectoryIsMounted`), so an unlisted package fails instead of serving no routes.
 - Exported `New*` constructors in `services`, `repositories` and `handlers` return a pointer to a struct (and optionally an error), never an interface. Interfaces live with their consumer: there is no shared `interfaces` package and no `Interface` suffix.
 
@@ -139,7 +142,7 @@ Internal-import rules apply to non-test files only. Test files are checked only 
 
 Infrastructure factories such as `storage.NewStorageProvider` may return an interface, because they select an implementation.
 
-Also checked: no `log.Fatal` or `os.Exit` outside `cmd/`, no package-level gorm, sql or Redis connections, the import aliases, and package names matching their directories.
+Also checked: no `log.Fatal` or `os.Exit` call outside `cmd/` (read from the syntax tree with import aliases resolved, so comments, strings and a renamed `log` or `os` are judged correctly), no `panic` outside `cmd/` (the guard's `panicAllowed` map lists the exceptions, each with its reason), no one-line doc comment that only repeats the declaration it documents (`// NewRepository returns a Repository over db.`), no package-level gorm, sql or Redis connections, the import aliases, package names matching their directories, `app` never importing a module's layers (`domain`, `dto`, `services`, `repositories`, `handlers`), `cmd` importing only `internal/app`, and no comment block longer than 3 lines in a non-test file (say why in a few lines; longer text belongs in `docs/`).
 
 ### Names and import aliases
 
@@ -161,10 +164,10 @@ The same applies to `media` and to every module you add. goimports and gopls sug
 
 Rules that keep the structure uniform:
 - Nothing outside `cmd/` calls `os.Exit` or `log.Fatal` (the guard checks this); everything else returns errors. Nothing outside `internal/config` reads the environment. Connections are opened only from `internal/app`, through `internal/infrastructure/database`; the router and modules receive a `module.Deps` value (`internal/router/module`).
-- A repository can embed the generic `gokit.Repository` from `github.com/zazhedho/gokit`, built with `gokit.NewRepository[T](db)`, for common CRUD and list queries. `internal/repositories/media` does this and overrides `GetByID` to translate the ORM's not-found error. Keep a module's own repository methods for what the generic one does not cover (joins, aggregates, transactions, error translation); `internal/repositories/location` has no embedded `gokit.Repository` and only custom methods.
+- A repository can embed the generic `gokit.Repository` from `github.com/zazhedho/gokit`, built with `gokit.NewRepository[T](db)`, for common CRUD and list queries. `internal/repositories/media` does this and overrides `GetByID` and `Delete` to translate gokit's `ErrNotFound` (also returned by `Update` and `SoftDelete` when no row matched). `Store` and `Update` take a pointer, and `GetAll` caps the page size at `QueryOptions.MaxLimit` (default 100): report `opts.PageSize(params)` as the page's `limit`, as the media `List` does. Keep a module's own repository methods for what the generic one does not cover (joins, aggregates, transactions, error translation); `internal/repositories/location` has no embedded `gokit.Repository` and only custom methods, because it has no plain CRUD surface; [Adding a module](docs/adding-a-module.md#when-to-embed-gokitrepository) says when to embed it.
 - Protect project routes with `d.Kit.Auth()` and `d.Kit.Can(resource, action)`; get the audit service from `d.Kit.Audit()`. `d.Kit` is the `*authkit.Kit` in `module.Deps`.
 - For mutation handlers, embed `authkit.AuditWriter` (`github.com/zazhedho/authkit`) instead of creating per-handler audit wrapper methods; `internal/handlers/http/media/handler.go` is the example.
-- Background work a module starts (the location sync job) stops through `module.Deps.Lifecycle`. Register a hook with `d.Lifecycle.OnClose(name, fn)`, where `fn` is a `func(context.Context) error` that must return when its context ends; `internal/router/location/wire.go` registers the sync service's `Close` this way. `App.Close` runs the hooks in reverse order of registration with the shutdown context, before it closes Redis and the database.
+- Background work a module starts (the location sync job) stops through `module.Deps.Lifecycle`. Register a hook with `d.Lifecycle.OnClose(name, fn)`, where `fn` is a `func(context.Context) error` that must return when its context ends, and, when the work should stop as soon as shutdown starts, `d.Lifecycle.OnDrain(fn)` with a non-blocking `fn`; `internal/router/location/wire.go` registers the sync service's `Interrupt` and `Close` this way. The drain functions run when the signal arrives; `App.Close` runs the close hooks in reverse order of registration with the shutdown context, before it closes Redis and the database.
 
 
 ## Startup, shutdown and migrations
@@ -177,10 +180,12 @@ cmd/api/main.go
     |- 1. load configuration (internal/app.loadConfig), in this order:
     |      a. .env            godotenv, never overrides variables that are already set;
     |                         a missing file is an error only when APP_ENV is not set
-    |      b. CONFIG_ID       config.LoadRemote(): Consul or config file fills the environment
+    |      b. remote config   config.LoadRemote(): Consul or a config file fills the variables
+    |                         that are not set yet (the environment wins)
     |      c. environment     config.FromEnv() builds the typed Config (database, Redis, SMTP, ...)
     |      d. flags           -port, -appname, -migrate, -migrate-only
     |      e. Validate()      every problem reported at once, naming variables, never values
+    |                         (including authkit.ConfigFromEnv's error for its own variables)
     |
     |- 2. open the dependencies (internal/app.New); a failure closes whatever is already open
     |      a. load APP_TIMEZONE
@@ -188,7 +193,8 @@ cmd/api/main.go
     |      c. open Redis, only if REDIS_URL or REDIS_HOST is set (PING must succeed)
     |      d. open object storage, only if MEDIA_ENABLED=true
     |      e. authkit.New; the mailer is built from the SMTP section of Config and handed
-    |         over only when Redis is open and SMTP_HOST, SMTP_PASS and SMTP_FROM are all set
+    |         over only when Redis is open and SMTP_HOST, SMTP_PASS and SMTP_FROM are all set;
+    |         Kit.Close is registered first on the lifecycle (it runs last of the hooks)
     |
     |- 3. migrate, when -migrate is on (RUN_MIGRATION, default true) or -migrate-only:
     |      authkit migrations first, then this project's migrations
@@ -198,13 +204,16 @@ cmd/api/main.go
     |      and the http.Server with the HTTP_* timeouts
     |
     `- 5. serve until SIGINT/SIGTERM, then shut down gracefully
-           stop accepting connections, wait for running requests, stop background work
-           (a running location sync is canceled and waited for), all within one
-           HTTP_SHUTDOWN_TIMEOUT counted from the signal; then close Redis, close the database
+           /readyz turns 503 and background work is told to stop (the location sync is canceled),
+           the listener stays open for HTTP_SHUTDOWN_DELAY so load balancers see the 503,
+           then stop accepting connections, wait for running requests and for the background work,
+           then authkit.Kit.Close drains
+           in-flight mail sends, all within one HTTP_SHUTDOWN_TIMEOUT counted from the signal;
+           then close Redis, close the database
 ```
 
 The routes are built after the migrations because a module may read its tables while it is registered (the
-location module fails sync jobs a previous process left behind; see [`docs/modules/location.md`](docs/modules/location.md)).
+location module fails sync jobs whose instance stopped reporting; see [`docs/modules/location.md`](docs/modules/location.md)).
 A module whose registration fails stops the service with `register <module> routes: ...`. With
 `RUN_MIGRATION=false` the schema must already exist.
 
@@ -216,8 +225,10 @@ A module whose registration fails stops the service with `register <module> rout
 - Authkit's core tables (users, RBAC, audit trails, app configs) come from `Kit.Migrate`, which runs first and
   keeps its own version table (`authkit_schema_migrations`). The project's migrations use the default
   `schema_migrations` table and run through the already open database pool, under golang-migrate's advisory lock.
-- A module's migration also seeds its menu and permissions (`go run github.com/zazhedho/authkit/cmd/module-seed`,
-  see [Adding a module](docs/adding-a-module.md)).
+- A module's migration also seeds its permissions, and its menu when it has one
+  (`go run github.com/zazhedho/authkit/cmd/module-seed` prints both, see [Adding a module](docs/adding-a-module.md)).
+  Seeds into `permissions` use `ON CONFLICT (name) WHERE deleted_at IS NULL`, the conflict target of authkit's
+  live-name index.
 
 ### Run flags and exit codes
 
@@ -235,8 +246,8 @@ go run ./cmd/api -migrate-only    # migrate, then exit 0 without serving or open
 | `-migrate-only` | run migrations and exit |
 | `-h` | print usage and exit 0 |
 
-In Docker, `deploy/entrypoint.sh` (copied to `/app/entrypoint.sh` in the image) adds `-migrate` when
-`RUN_MIGRATION` is `true` or `1`.
+`RUN_MIGRATION` defaults to `true`, so the container migrates at startup unless it is set to `false`.
+The image's entrypoint is the binary itself (`ENTRYPOINT ["./main"]`), so container arguments are the flags above.
 
 | Code | When |
 |---|---|
@@ -251,14 +262,16 @@ Both probes are on the engine root, outside `/api`:
 | Probe | Checks | Answers |
 |---|---|---|
 | `GET /healthcheck` | nothing; the process is up | `200 {"message":"OK!!"}` |
-| `GET /readyz` | `PING` on PostgreSQL, and on Redis when configured, within 2 s | `200 {"status":"ok"}`, or `503 {"status":"unavailable"}` |
+| `GET /readyz` | `PING` on PostgreSQL, and on Redis when configured, within 2 s; always `503` once shutdown has started | `200 {"status":"ok"}`, or `503 {"status":"unavailable"}` |
 
 Use `/healthcheck` for liveness and `/readyz` to decide whether to send traffic. The reason for a `503` is in the
 log (`readyz; database ping failed: ...`), never in the response.
 
-On SIGINT or SIGTERM the service logs `Shutdown started`, stops accepting connections, closes idle keep-alive
-connections and waits up to `HTTP_SHUTDOWN_TIMEOUT` for running requests. Then it stops background work (the
-`Lifecycle` hooks, in reverse order of registration), still inside that one deadline, closes Redis and the
+On SIGINT or SIGTERM the service logs `Shutdown started`, turns `/readyz` to `503` and tells background work to
+stop (the `Lifecycle` drain functions, so a running location sync records its end while requests finish), keeps
+the listener open for `HTTP_SHUTDOWN_DELAY` (default 5 s, inside the one deadline) so a load balancer polling `/readyz`
+sees the `503`, then stops accepting connections, closes idle keep-alive connections and waits up to `HTTP_SHUTDOWN_TIMEOUT` for running
+requests. Then it waits for the background work (the `Lifecycle` close hooks, in reverse order of registration), still inside that one deadline, closes Redis and the
 database, logs `Shutdown complete` and exits `0`. If requests are still running when the limit passes they are cut
 off and the exit code is `1` (`app: shutdown timed out with requests still in flight`). A second SIGINT or SIGTERM
 while the service is still waiting ends the process at once. Set the orchestrator's termination grace period above
@@ -268,18 +281,41 @@ while the service is still waiting ends the process at once. Set the orchestrato
 
 Copy `.env.example` to `.env`; it lists every variable, grouped by section and by module, with the defaults noted
 in comments. The `.env` file is optional when `APP_ENV` is already set in the environment (this is how containers
-run). Variables that are already set always win over `.env`. Module variables (`LOCATION_*`, `MEDIA_*`,
-`STORAGE_*`) are documented in [`docs/modules/`](docs/modules/).
+run). Variables that are already set always win over `.env`. A placeholder value (`CHANGE_ME_...`, `minioadmin`, `your_password`) in a secret stops startup outside `APP_ENV` development, dev, local and test (the storage keys count only when media is enabled); in those it is a startup warning. Both name the variable, never the value. Module variables (`LOCATION_*`, `MEDIA_*`,
+`STORAGE_*`) are documented in [`docs/modules/`](docs/modules/). Media uploads are capped in process: at most
+`MEDIA_UPLOAD_MAX_CONCURRENT` (default 8) at once, and `MEDIA_UPLOAD_MAX_CONCURRENT_PER_USER` (default 2) per user, so
+one user with slow bodies cannot hold every slot for `MEDIA_UPLOAD_TIMEOUT` (default 1m); over the per-user cap the
+answer is `429`, over the global cap `503`.
 
 Required: `APP_NAME` (unique per application; authkit binds tokens to it), `APP_ENV`, `PORT` (no default),
 `DATABASE_URL` or the `DB_*` parts (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_NAME`, `DB_PASS`; `DB_SSLMODE`
-defaults to `disable`), `JWT_KEY` (at least 32 characters) and `JWT_EXP`. `OTP_SECRET` and `RESET_SECRET` are
-required only when both Redis and SMTP are configured. `PATH_MIGRATE` defaults to `file://migrations`.
+defaults to `disable`) and `JWT_KEY` (at least 32 characters). `JWT_EXP_MINUTES` is the access-token lifetime (default 15). `OTP_SECRET` and `RESET_SECRET` are
+required only when both Redis and SMTP are configured, and must be at least 32 characters whenever they are set. `PATH_MIGRATE` defaults to `file://migrations`.
 
 Configuration is validated once at startup. An invalid value stops the service with exit code 1 and a message
 that names the variable but never prints its value, for example `HTTP_READ_TIMEOUT must be a valid duration such as 60, 30s, 1m or 1h`.
 Config is read only through `gokit.GetEnv` (unset or blank means the default; an unparsable value falls back and is
 reported) and checked once with `gokit.EnvErrors()`, which `Validate` folds into its error.
+
+### Precedence and remote configuration
+
+A variable takes its value from the first of these that sets it (a blank value counts as unset):
+
+1. the process environment;
+2. `.env` (loaded without overriding the environment);
+3. remote configuration: Consul when `CONSUL` is set, otherwise a file;
+4. the default in code.
+
+| Variable | Meaning |
+|---|---|
+| `CONSUL` | Consul agent address, for example `127.0.0.1:8500`; enables the Consul source |
+| `CONSUL_PATH` | key prefix; the key read is `<CONSUL_PATH>/<APP_ENV>` and holds a JSON object of settings |
+| `APP_CONFIG` | directory holding `app.env`; without it the file is `config/<APP_ENV>.env` |
+
+A missing config file is logged at debug level only; a source that exists but cannot be read is logged as an error and
+ignored. Remote configuration never overrides a variable that is already set, but it may set any variable that is
+unset, secrets and `TRUSTED_PROXIES` included, so operators must trust the Consul source (or the config file) as much
+as the environment.
 
 ### HTTP, time zone and database pool
 
@@ -293,11 +329,18 @@ Durations accept bare seconds (`60`) or Go syntax (`30s`, `1m`, `1h`) and must b
 | `HTTP_WRITE_TIMEOUT` | `30s` | time to write the response |
 | `HTTP_IDLE_TIMEOUT` | `60s` | keep-alive idle time |
 | `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time the whole shutdown gets after SIGINT/SIGTERM, counted from the signal |
+| `HTTP_SHUTDOWN_DELAY` | `5s` | how long the listener stays open, `/readyz` answering `503`, after the signal; zero or more and below `HTTP_SHUTDOWN_TIMEOUT` |
 | `HTTP_MAX_BODY_MB` | `10` | largest request body, 1-1024 MB |
+| `TRUSTED_PROXIES` | none | comma-separated IPs or CIDRs of reverse proxies whose `X-Forwarded-For` is believed |
 | `DB_MAX_OPEN_CONNS` | `100` | pool: open connections, greater than zero |
 | `DB_MAX_IDLE_CONNS` | `10` | pool: idle connections, zero or more |
 | `DB_CONN_MAX_LIFETIME` | `1h` | pool: longest life of a connection |
 | `DB_CONN_MAX_IDLE_TIME` | `5m` | pool: longest idle time of a connection |
+
+No proxy is trusted by default: the client IP is the connection's remote address and `X-Forwarded-For` is
+ignored, so a caller cannot dodge a per-IP rate limit by rotating that header. A deployment behind a load balancer
+or CDN must list it in `TRUSTED_PROXIES` (for example `10.0.0.0/8`); otherwise every client looks like the proxy
+and they share one limit. An invalid entry stops startup with an error that names the variable.
 
 A request whose declared `Content-Length` exceeds `HTTP_MAX_BODY_MB` is answered with `413`; a body without a
 declared length is cut off at the limit while it is read.
@@ -322,6 +365,22 @@ credential:
 | `connect to database: timed out` | the host did not answer in time |
 | `connect to database: unreachable` | any other failure to reach the server |
 
+### Email (SMTP)
+
+Email (register OTP, password reset) needs Redis and `SMTP_HOST`, `SMTP_PASS` and `SMTP_FROM`, all three: setting one
+makes the other two required, and `SMTP_FROM` must be a valid address. The rest is optional, and empty means the
+mailer's default:
+
+| Variable | Meaning |
+|---|---|
+| `SMTP_PORT` | server port, 1-65535 |
+| `SMTP_USER` | login user of the server |
+| `SMTP_SUBJECT` | subject of the register OTP email |
+| `RESET_SUBJECT` | subject of the password-reset email |
+| `AUTH_EMAIL_APP_NAME` | application name shown in the emails |
+
+`OTP_SECRET` and `RESET_SECRET` (at least 32 characters) are required when both Redis and SMTP are configured.
+
 ### Redis
 
 Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is not empty (`REDIS_PORT` defaults to
@@ -333,7 +392,24 @@ Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is n
 - Configured but unreachable (or wrong password): the service refuses to start, exit code 1, with
   `open redis: ping redis: connection refused` (or the matching reason). The URL and password are never logged.
 
-`.env.example` ships with the Redis lines commented out.
+`.env.example` ships with the Redis lines commented out. Media upload limits (per IP and per user) and the public location read limit need Redis; without Redis the service logs a startup warning for the location reads (and for media when it is enabled). When Redis is configured but fails, those limiters let requests through unless `LIMITER_FAIL_CLOSED=true`, which answers `503`.
+
+### Logging
+
+Logging goes through `logus`: `logus.Logf(level, format, args...)` for formatted messages, `logus.Log(level, args...)`
+(arguments are joined with single spaces, so do not add separators), and `LogContext`/`LogContextf` inside a request so the
+line carries the request id. `LOG_LEVEL`, `LOG_FORMAT` and `NODE` are read once. `SERVER_IP` is written as `server_ip` on every line; the service sets it at startup to the host's first
+non-loopback IPv4 address.
+
+### Responses and middleware
+
+Every response uses gokit's envelope: `log_id`, `code`, `status`, `message`, `data`, and on failure `error`, which is always
+a list of `{field, code, message}`. `message` is a fixed text chosen by the handler (never an error's text); the detail
+for the caller is in `error`. Nil slices are sent as `[]`. The engine's middleware order is `RequestIDMiddleware`,
+`Recovery`, `CORS(CORSOptions{})` (open: any origin, no credentials), authkit's request logger, then the body limit, so
+every component of a request logs and answers with the same `log_id`. A repository built on `gokit.Repository` returns
+`gokit.ErrNotFound` when `Update`, `Delete` or `SoftDelete` match no row; translate it to the module's domain error
+(`internal/repositories/media` does for `GetByID` and `Delete`).
 
 ## Development
 
@@ -344,12 +420,12 @@ make fmt         # golangci-lint fmt: formats the code and the import groups
 make hook-install   # git hooks: lint on commit, lint and tests on push
 ```
 
-The Docker image builds from `golang:1.27-alpine` and ships a static binary, the migrations and `deploy/entrypoint.sh`. Dependabot (`.github/dependabot.yml`) opens weekly pull requests for Go modules, GitHub Actions and the Docker base image; the base image is pinned to the minor line, so only a new minor opens a PR.
+The Docker image builds from `golang:1.27-alpine` and ships a static, stripped binary (`-trimpath`), and the migrations; `.dockerignore` keeps `.env*`, `.claude`, key and certificate files (`*.pem`, `*.key`), `.git`, docs and coverage output out of the build context, and a `HEALTHCHECK` calls `/healthcheck` on `PORT`, so `PORT` must be set in the container environment (the service requires it anyway). Dependabot (`.github/dependabot.yml`) opens weekly pull requests for Go modules, GitHub Actions and the Docker base image; the base image is pinned to the minor line, so only a new minor opens a PR.
 
-CI runs build, vet and test in `.github/workflows/ci.yml` and lint in `.github/workflows/lint.yml`. The unit tests need no services.
-`internal/infrastructure/database` also has integration tests against a real PostgreSQL; they are skipped unless
-`STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable`
-against a throwaway container.
+CI (`.github/workflows/ci.yml`, every action pinned by commit SHA) runs four jobs: golangci-lint (revive, goimports and the rest of `.golangci.yml`; the action builds v2.14.0 with the job's Go through `install-mode: goinstall`, so it matches `go 1.27`), `go vet` with a `go mod tidy` diff check, build and tests (with a PostgreSQL service container and `STARTER_KIT_TEST_DATABASE_URL` set), and `govulncheck`. The unit tests need no services.
+The database, repository and migration tests run against a real PostgreSQL when `STARTER_KIT_TEST_DATABASE_URL` is
+set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container,
+and are skipped otherwise (each test uses its own schema, with authkit's and this project's migrations applied).
 
 `internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong
 import alias, imports another module, returns an interface from a constructor, declares a package name that

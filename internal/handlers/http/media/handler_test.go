@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -45,7 +46,6 @@ func TestMediaErrorResponseMapsDomainErrors(t *testing.T) {
 	}
 }
 
-// serviceDouble records what the handlers pass to the service.
 type serviceDouble struct {
 	maxFileSize int64
 	media       domainmedia.Media
@@ -61,12 +61,13 @@ type serviceDouble struct {
 	listReq   dtomedia.ListRequest
 	listItems []domainmedia.Media
 	listTotal int64
+	listLimit int
 }
 
-func (d *serviceDouble) List(_ context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) ([]domainmedia.Media, int64, error) {
+func (d *serviceDouble) List(_ context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	d.calls++
 	d.listActor, d.listReq = actor, req
-	return d.listItems, d.listTotal, d.err
+	return dtomedia.ListResult{Items: d.listItems, Total: d.listTotal, Limit: d.listLimit}, d.err
 }
 
 func (d *serviceDouble) MaxFileSize() int64 { return d.maxFileSize }
@@ -83,31 +84,42 @@ func (d *serviceDouble) Delete(_ context.Context, actor domainmedia.Actor, id st
 	return d.media, d.err
 }
 
-// serve mounts the handler behind a middleware that installs the authenticated
-// scope, then performs one request.
 func serve(t *testing.T, svc Service, userID, role, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveWithPermissions(t, svc, userID, role, nil, method, target, body, contentType)
+	return serveWithPermissions(t, svc, caller{userID, role, nil}, request{method, target, body, contentType})
 }
 
-// serveWithPermissions is serve for a caller holding permissions, each written
-// as "resource:action".
-func serveWithPermissions(t *testing.T, svc Service, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
+type caller struct {
+	userID, role string
+	permissions  []string
+}
+
+type request struct {
+	method, target string
+	body           []byte
+	contentType    string
+}
+
+func serveWithPermissions(t *testing.T, svc Service, who caller, req request) *httptest.ResponseRecorder {
+	t.Helper()
+	return serveHandler(t, New(svc, nil, 0, 0, 0), who, req)
+}
+
+func serveHandler(t *testing.T, h *Handler, who caller, r request) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	h := New(svc, nil, 0)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
-		scope := authkit.NewScope(userID, "tester", role, permissions)
+		scope := authkit.NewScope(who.userID, "tester", who.role, who.permissions)
 		c.Request = c.Request.WithContext(authkit.WithScope(c.Request.Context(), scope))
 	})
 	engine.GET("/media", h.List)
 	engine.POST("/media", h.Upload)
 	engine.DELETE("/media/:id", h.Delete)
 
-	req := httptest.NewRequest(method, target, bytes.NewReader(body))
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	req := httptest.NewRequest(r.method, r.target, bytes.NewReader(r.body))
+	if r.contentType != "" {
+		req.Header.Set("Content-Type", r.contentType)
 	}
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, req)
@@ -134,19 +146,29 @@ func multipartBody(t *testing.T, field, filename string, content []byte) ([]byte
 func errorMessage(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
 	var res struct {
-		Error any `json:"error"`
+		Error []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("response is not JSON with an error list: %v: %s", err, rec.Body.String())
+	}
+	if len(res.Error) != 1 || res.Error[0].Code == "" {
+		t.Fatalf("error = %+v, want one entry with a code: %s", res.Error, rec.Body.String())
+	}
+	return res.Error[0].Message
+}
+
+func envelopeMessage(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var res struct {
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
 		t.Fatalf("response is not JSON: %v: %s", err, rec.Body.String())
 	}
-	switch e := res.Error.(type) {
-	case string:
-		return e
-	case map[string]any:
-		msg, _ := e["message"].(string)
-		return msg
-	}
-	return ""
+	return res.Message
 }
 
 func TestUploadHandlerPassesTheAuthenticatedUserToTheService(t *testing.T) {
@@ -183,7 +205,6 @@ func TestUploadHandlerRejectsARequestWithoutFile(t *testing.T) {
 
 func TestUploadHandlerAnswers413ForABodyOverTheLimit(t *testing.T) {
 	svc := &serviceDouble{maxFileSize: 10}
-	// The limit is the service's maximum plus the multipart overhead allowance.
 	body, ct := multipartBody(t, "file", "big.png", bytes.Repeat([]byte("x"), int(multipartOverhead)+1024))
 
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodPost, "/media", body, ct)
@@ -213,7 +234,6 @@ func TestUploadHandlerMapsServiceErrors(t *testing.T) {
 			body, ct := multipartBody(t, "file", "a.png", []byte("data"))
 			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodPost, "/media", body, ct)
 			if c.status == http.StatusInternalServerError {
-				// gokit.InternalServerError: generic text plus the log ID.
 				if rec.Code != c.status || !strings.HasPrefix(errorMessage(t, rec), c.message) {
 					t.Fatalf("got %d %s, want 500 starting with %q", rec.Code, rec.Body.String(), c.message)
 				}
@@ -255,7 +275,7 @@ func TestDeleteHandlerBuildsTheActorFromTheScope(t *testing.T) {
 	id := uuid.NewString()
 	user := uuid.NewString()
 	svc := &serviceDouble{media: domainmedia.Media{ID: id}}
-	rec := serveWithPermissions(t, svc, user, "viewer", []string{"media:delete_any"}, http.MethodDelete, "/media/"+id, nil, "")
+	rec := serveWithPermissions(t, svc, caller{user, "viewer", []string{"media:delete_any"}}, request{method: http.MethodDelete, target: "/media/" + id})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -316,7 +336,7 @@ func TestListHandlerRejectsABadOwnerFilter(t *testing.T) {
 	} {
 		t.Run(target, func(t *testing.T) {
 			svc := &serviceDouble{}
-			rec := serveWithPermissions(t, svc, uuid.NewString(), "viewer", []string{"media:list_any"}, http.MethodGet, target, nil, "")
+			rec := serveWithPermissions(t, svc, caller{uuid.NewString(), "viewer", []string{"media:list_any"}}, request{method: http.MethodGet, target: target})
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
@@ -334,7 +354,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
-	want := dtomedia.ListRequest{Page: 1, Limit: 20} // the default order is the repository's
+	want := dtomedia.ListRequest{Page: 1, Limit: 20}
 	if svc.listReq != want {
 		t.Fatalf("defaults: got %+v, want %+v", svc.listReq, want)
 	}
@@ -350,7 +370,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 	}
 	want = dtomedia.ListRequest{
 		Search: "cat", OwnerUserID: other, ContentType: "image/png",
-		OrderBy: "size", OrderDirection: "asc", Page: 3, Limit: 5, Offset: 10,
+		OrderBy: "size", OrderDirection: "asc", Page: 3, Limit: 5,
 	}
 	if svc.listReq != want {
 		t.Fatalf("got %+v, want %+v", svc.listReq, want)
@@ -358,7 +378,7 @@ func TestListHandlerAppliesDefaultsAndPassesQuery(t *testing.T) {
 }
 
 func TestListHandlerRespondsWithThePaginationShape(t *testing.T) {
-	svc := &serviceDouble{listItems: []domainmedia.Media{{ID: "m-1", OwnerUserID: "u-1"}}, listTotal: 41}
+	svc := &serviceDouble{listItems: []domainmedia.Media{{ID: "m-1", OwnerUserID: "u-1"}}, listTotal: 41, listLimit: 20}
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?limit=20&page=2", nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -393,45 +413,38 @@ func TestListHandlerMapsServiceErrors(t *testing.T) {
 	}
 }
 
-// A user-facing list is bounded: gokit keeps limit=-1 (no limit) and accepts
-// up to 10000, so the handler clamps before the service sees the value.
-func TestListHandlerClampsTheLimit(t *testing.T) {
+func TestListHandlerPassesTheLimitAndReportsTheAppliedOne(t *testing.T) {
 	cases := []struct {
-		name       string
-		query      string
-		wantLimit  int
-		wantOffset int
+		name      string
+		query     string
+		wantLimit int
 	}{
-		// gokit resets the page to 1 for -1, so the offset is 0.
-		{"minus one is not unbounded", "limit=-1&page=3", defaultListLimit, 0},
-		{"zero falls back", "limit=0", defaultListLimit, 0},
-		{"above the maximum", "limit=101&page=2", maxListLimit, maxListLimit},
-		{"huge value", "limit=10000", maxListLimit, 0},
-		{"normal value", "limit=5&page=3", 5, 10},
-		{"the maximum itself", "limit=100", maxListLimit, 0},
+		{"minus one is the unbounded sentinel, left for the repository to refuse", "limit=-1&page=3", -1},
+		{"zero falls back", "limit=0", defaultListLimit},
+		{"missing falls back", "page=2", defaultListLimit},
+		{"above the cap is left for the repository", "limit=10000", 10000},
+		{"normal value", "limit=5&page=3", 5},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			svc := &serviceDouble{}
+			svc := &serviceDouble{listLimit: 77}
 			rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?"+c.query, nil, "")
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
-			if svc.listReq.Limit != c.wantLimit || svc.listReq.Offset != c.wantOffset {
-				t.Fatalf("limit/offset = %d/%d, want %d/%d", svc.listReq.Limit, svc.listReq.Offset, c.wantLimit, c.wantOffset)
+			if svc.listReq.Limit != c.wantLimit {
+				t.Fatalf("limit passed to the service = %d, want %d", svc.listReq.Limit, c.wantLimit)
 			}
 			var res struct {
 				Limit int `json:"limit"`
 			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || res.Limit != c.wantLimit {
-				t.Fatalf("response limit = %d (%v), want %d", res.Limit, err, c.wantLimit)
+			if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || res.Limit != 77 {
+				t.Fatalf("response limit = %d (%v), want the repository's 77", res.Limit, err)
 			}
 		})
 	}
 }
 
-// Without media:list_any the owner filter is ignored (the service forces the
-// caller's own id), so a malformed value must not turn into a 400.
 func TestListHandlerIgnoresAMalformedOwnerFilterWithoutListAny(t *testing.T) {
 	svc := &serviceDouble{}
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media?filters[owner_user_id]=not-a-uuid", nil, "")
@@ -443,10 +456,8 @@ func TestListHandlerIgnoresAMalformedOwnerFilterWithoutListAny(t *testing.T) {
 	}
 }
 
-// An empty page still has the full envelope: data is [], never null, and the
-// totals are zero.
 func TestListHandlerEmptyResultShape(t *testing.T) {
-	svc := &serviceDouble{} // nil items, total 0
+	svc := &serviceDouble{listLimit: defaultListLimit}
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -473,8 +484,6 @@ func TestListHandlerEmptyResultShape(t *testing.T) {
 	}
 }
 
-// Every plain 500 uses gokit.InternalServerError: a generic message and the
-// log ID for support, with no internal detail.
 func TestListHandler500UsesTheStandardBody(t *testing.T) {
 	svc := &serviceDouble{err: errors.New("database down")}
 	rec := serve(t, svc, uuid.NewString(), "viewer", http.MethodGet, "/media", nil, "")
@@ -495,5 +504,171 @@ func TestListHandler500UsesTheStandardBody(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "database down") {
 		t.Fatal("the response must not reveal the internal error")
+	}
+}
+
+func TestMediaErrorsUseAFixedEnvelopeMessagePerStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		method  string
+		target  string
+		err     error
+		status  int
+		message string
+		detail  string
+	}{
+		{"delete of a missing row", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrNotFound, http.StatusNotFound, gokit.MsgResourceNotFound, "media not found"},
+		{"delete of another user's row", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrMediaForbidden, http.StatusNotFound, gokit.MsgResourceNotFound, "media not found"},
+		{"too large", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrFileTooLarge, http.StatusRequestEntityTooLarge, gokit.MsgRequestTooLarge, domainmedia.ErrFileTooLarge.Error()},
+		{"bad content", http.MethodDelete, "/media/" + uuid.NewString(), domainmedia.ErrEmptyFile, http.StatusBadRequest, gokit.MsgInvalidRequest, domainmedia.ErrEmptyFile.Error()},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := &serviceDouble{err: c.err}
+			rec := serve(t, svc, uuid.NewString(), "viewer", c.method, c.target, nil, "")
+			if rec.Code != c.status || envelopeMessage(t, rec) != c.message || errorMessage(t, rec) != c.detail {
+				t.Fatalf("got %d %s, want %d message %q detail %q", rec.Code, rec.Body.String(), c.status, c.message, c.detail)
+			}
+		})
+	}
+}
+
+type auditDouble struct {
+	authkit.AuditService
+	mu     sync.Mutex
+	events []authkit.AuditEvent
+}
+
+func (a *auditDouble) Store(_ context.Context, event authkit.AuditEvent) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = append(a.events, event)
+	return nil
+}
+
+func TestFailedUploadAuditStoresTheSanitizedName(t *testing.T) {
+	audit := &auditDouble{}
+	svc := &serviceDouble{maxFileSize: 1024, err: domainmedia.ErrUnsupportedContentType}
+	body, ct := multipartBody(t, "file", "../evil\u202Egnp\u200B.exe", []byte("data"))
+
+	rec := serveHandler(t, New(svc, audit, 0, 0, 0), caller{userID: uuid.NewString(), role: "viewer"}, request{http.MethodPost, "/media", body, ct})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(audit.events))
+	}
+	after, _ := audit.events[0].AfterData.(map[string]any)
+	if got := after["original_name"]; got != "evilgnp.exe" {
+		t.Fatalf("audited original_name = %q, want the sanitized name", got)
+	}
+}
+
+type blockingService struct {
+	serviceDouble
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingService) Upload(_ context.Context, _ string, _ multipart.File, _ *multipart.FileHeader) (domainmedia.Media, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return b.media, nil
+}
+
+func TestUploadsBeyondTheConcurrencyCapAnswer503(t *testing.T) {
+	svc := &blockingService{serviceDouble: serviceDouble{maxFileSize: 1024}, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	h := New(svc, nil, 0, 1, 0)
+	upload := func() *httptest.ResponseRecorder {
+		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
+		return serveHandler(t, h, caller{userID: uuid.NewString(), role: "viewer"}, request{http.MethodPost, "/media", body, ct})
+	}
+
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- upload() }()
+	<-svc.entered
+
+	mark := logs.Mark()
+	rec := upload()
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("an upload over the cap = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	if out := logs.Since(mark); !strings.Contains(out, `"level":"WARN"`) {
+		t.Fatalf("a refused upload is expected traffic, logged at WARN; got:\n%s", out)
+	}
+
+	close(svc.release)
+	if got := <-first; got.Code != http.StatusCreated {
+		t.Fatalf("the first upload = %d: %s", got.Code, got.Body.String())
+	}
+	if again := upload(); again.Code != http.StatusCreated {
+		t.Fatalf("after the slot was freed an upload = %d: %s", again.Code, again.Body.String())
+	}
+}
+
+func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
+	cases := []struct {
+		name, target string
+		perms        []string
+		err          error
+		wantLevel    string
+	}{
+		{"bad query", "/media?page=abc", nil, nil, "WARN"},
+		{"bad owner filter", "/media?filters[owner_user_id]=x", []string{"media:list_any"}, nil, "WARN"},
+		{"not found", "/media", nil, domainmedia.ErrNotFound, "WARN"},
+		{"unexpected", "/media", nil, errors.New("database down"), "ERROR"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mark := logs.Mark()
+			serveWithPermissions(t, &serviceDouble{err: c.err}, caller{uuid.NewString(), "viewer", c.perms}, request{method: http.MethodGet, target: c.target})
+			out := logs.Since(mark)
+			if !strings.Contains(out, `"level":"`+c.wantLevel+`"`) {
+				t.Fatalf("want a %s log line, got:\n%s", c.wantLevel, out)
+			}
+			if c.wantLevel == "WARN" && strings.Contains(out, `"level":"ERROR"`) {
+				t.Fatalf("a client error was logged at ERROR:\n%s", out)
+			}
+			if !strings.Contains(out, "[MediaHandler][List]") {
+				t.Fatalf("the line lacks the handler prefix:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestOneUserCannotExhaustTheGlobalUploadSlots(t *testing.T) {
+	svc := &blockingService{serviceDouble: serviceDouble{maxFileSize: 1024}, entered: make(chan struct{}, 8), release: make(chan struct{})}
+	h := New(svc, nil, 0, 3, 2)
+	greedy, other := uuid.NewString(), uuid.NewString()
+	upload := func(user string) *httptest.ResponseRecorder {
+		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
+		return serveHandler(t, h, caller{userID: user, role: "viewer"}, request{http.MethodPost, "/media", body, ct})
+	}
+
+	held := make(chan *httptest.ResponseRecorder, 3)
+	for range 2 {
+		go func() { held <- upload(greedy) }()
+		<-svc.entered
+	}
+
+	mark := logs.Mark()
+	if rec := upload(greedy); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("a third concurrent upload of one user = %d, want 429: %s", rec.Code, rec.Body.String())
+	}
+	if out := logs.Since(mark); !strings.Contains(out, `"level":"WARN"`) || strings.Contains(out, `"level":"ERROR"`) {
+		t.Fatalf("a refused upload is logged at WARN only; got:\n%s", out)
+	}
+
+	go func() { held <- upload(other) }()
+	<-svc.entered
+	close(svc.release)
+	for range 3 {
+		if got := <-held; got.Code != http.StatusCreated {
+			t.Fatalf("a held upload = %d: %s", got.Code, got.Body.String())
+		}
+	}
+	if again := upload(greedy); again.Code != http.StatusCreated {
+		t.Fatalf("after the slots were freed the user's upload = %d", again.Code)
 	}
 }
