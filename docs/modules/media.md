@@ -5,7 +5,7 @@ list, and owner-controlled deletion. It is the reference for the ownership conve
 [`docs/adding-a-module.md`](../adding-a-module.md#ownership-and-the-_any-permissions).
 
 - Code: `internal/{domain,dto,services,repositories}/media`, `internal/handlers/http/media`,
-  `internal/router/media` (`wire.go`, `register.go`, `storage_adapter.go`), `internal/infrastructure/storage`,
+  `internal/router/media` (`wire.go`, `register.go`), `internal/infrastructure/storage`,
   `internal/config/media.go`.
 - Off by default: nothing is mounted unless `MEDIA_ENABLED=true`, and the storage provider is only opened
   then.
@@ -59,7 +59,7 @@ capped at 255 characters and replaced by `file` when nothing is left, before it 
 |---|---|---|
 | `MEDIA_ENABLED` | `false` | mount the media routes and open storage |
 | `MEDIA_MAX_FILE_SIZE_MB` | `5` | largest accepted file, 1-1024 MB |
-| `MEDIA_ALLOWED_CONTENT_TYPES` | `image/jpeg,image/png,image/webp,image/gif,application/pdf` | comma-separated accepted types; each must be one of those five (the sniffer can match them and the service has an extension for them), anything else, `text/html` and SVG included, stops the service at startup |
+| `MEDIA_ALLOWED_CONTENT_TYPES` | `application/pdf,image/gif,image/jpeg,image/png,image/webp` | comma-separated accepted types; each must be one of those five (`domainmedia.SupportedContentTypes`: the sniffer can match them and each has an extension), anything else, `text/html` and SVG included, stops the service at startup |
 | `MEDIA_UPLOAD_TIMEOUT` | `2m` | read and write deadline for one upload request, replacing `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` for that route; the write deadline is extended too so the response of a slow upload is delivered instead of cut off |
 | `MEDIA_UPLOAD_RATE_LIMIT` | `20` | uploads allowed per client IP per window; must be above zero when media is enabled |
 | `MEDIA_UPLOAD_RATE_WINDOW_SECONDS` | `60` | rate-limit window in seconds; must be above zero when media is enabled |

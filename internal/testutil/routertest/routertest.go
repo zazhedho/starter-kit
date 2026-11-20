@@ -144,8 +144,8 @@ type FakeStorage struct{}
 
 var _ storage.Provider = FakeStorage{}
 
-func (FakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (storage.StoredFile, error) {
-	return storage.StoredFile{ObjectName: folder + "/object.png", URL: "https://files.example.test/" + folder + "/object.png"}, nil
+func (FakeStorage) UploadFile(_ context.Context, _ multipart.File, _ *multipart.FileHeader, folder string) (string, string, error) {
+	return folder + "/object.png", "https://files.example.test/" + folder + "/object.png", nil
 }
 
 func (FakeStorage) DeleteObject(context.Context, string) error { return nil }

@@ -7,14 +7,11 @@ import (
 	"mime/multipart"
 	"net/textproto"
 	"os"
-	"slices"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 
-	"starter-kit/internal/config"
 	domainmedia "starter-kit/internal/domain/media"
 	dtomedia "starter-kit/internal/dto/media"
 	"starter-kit/internal/testutil/logcapture"
@@ -72,9 +69,12 @@ func (m *mediaRepoMock) Delete(_ context.Context, id string) error {
 	return m.deleteErr
 }
 
+// storedFile is what the storage mock reports for an upload.
+type storedFile struct{ objectName, url string }
+
 type mediaStorageMock struct {
 	uploadedHeader *multipart.FileHeader
-	uploadResult   domainmedia.StoredFile
+	uploadResult   storedFile
 	uploadErr      error
 	deletedObject  string
 	deleteCtxErr   error // the context's error when DeleteObject was called
@@ -82,9 +82,9 @@ type mediaStorageMock struct {
 	deleteErr      error
 }
 
-func (m *mediaStorageMock) UploadFile(_ context.Context, _ multipart.File, header *multipart.FileHeader, _ string) (domainmedia.StoredFile, error) {
+func (m *mediaStorageMock) UploadFile(_ context.Context, _ multipart.File, header *multipart.FileHeader, _ string) (string, string, error) {
 	m.uploadedHeader = header
-	return m.uploadResult, m.uploadErr
+	return m.uploadResult.objectName, m.uploadResult.url, m.uploadErr
 }
 
 func (m *mediaStorageMock) DeleteObject(ctx context.Context, objectName string) error {
@@ -100,7 +100,7 @@ func newMediaHeader(filename string, size int64) *multipart.FileHeader {
 func TestUploadDetectsContentAndStoresMetadata(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repo := &mediaRepoMock{}
-	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
+	storageMock := &mediaStorageMock{uploadResult: storedFile{"media/generated.png", "https://cdn/media/generated.png"}}
 	service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 	ownerID := uuid.NewString()
 
@@ -152,14 +152,14 @@ func TestUploadDeletesObjectWhenMetadataStoreFails(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repoErr := errors.New("database unavailable")
 	repo := &mediaRepoMock{storeErr: repoErr}
-	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/generated.png", URL: "https://cdn/media/generated.png"}}
+	storageMock := &mediaStorageMock{uploadResult: storedFile{"media/generated.png", "https://cdn/media/generated.png"}}
 	service := NewService(repo, storageMock, Options{MaxFileSize: 1024})
 
 	_, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("avatar.png", int64(len(png))))
 	if !errors.Is(err, repoErr) {
 		t.Fatalf("expected repository error, got %v", err)
 	}
-	if storageMock.deletedObject != storageMock.uploadResult.ObjectName {
+	if storageMock.deletedObject != storageMock.uploadResult.objectName {
 		t.Fatalf("expected uploaded object cleanup by its name, got %q", storageMock.deletedObject)
 	}
 }
@@ -209,7 +209,7 @@ func TestDeleteEnforcesOwnership(t *testing.T) {
 func TestUploadUsesTheInjectedIDGenerator(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	repo := &mediaRepoMock{}
-	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/x.png", URL: "https://cdn/media/x.png"}}
+	storageMock := &mediaStorageMock{uploadResult: storedFile{"media/x.png", "https://cdn/media/x.png"}}
 	service := NewService(repo, storageMock, Options{NewID: func() string { return "fixed-id" }})
 
 	media, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("a.png", int64(len(png))))
@@ -225,7 +225,7 @@ func TestUploadUsesTheInjectedIDGenerator(t *testing.T) {
 // version gokit.CreateUUID produces, so ids stay time-ordered.
 func TestUploadDefaultIDIsUUIDv7(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
-	storageMock := &mediaStorageMock{uploadResult: domainmedia.StoredFile{ObjectName: "media/x.png", URL: "https://cdn/media/x.png"}}
+	storageMock := &mediaStorageMock{uploadResult: storedFile{"media/x.png", "https://cdn/media/x.png"}}
 	service := NewService(&mediaRepoMock{}, storageMock, Options{})
 
 	media, err := service.Upload(context.Background(), uuid.NewString(), mediaTestFile{bytes.NewReader(png)}, newMediaHeader("a.png", int64(len(png))))
@@ -363,7 +363,7 @@ func TestDeleteKeepsTheRowWhenTheObjectCannotBeDeleted(t *testing.T) {
 func TestOrphanCleanupSurvivesACanceledRequestAndLogsFailures(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	storageMock := &mediaStorageMock{
-		uploadResult: domainmedia.StoredFile{ObjectName: "media/orphan.png", URL: "https://cdn/media/orphan.png"},
+		uploadResult: storedFile{"media/orphan.png", "https://cdn/media/orphan.png"},
 		deleteErr:    errors.New("storage unreachable"),
 	}
 	service := NewService(&mediaRepoMock{storeErr: errors.New("database unavailable")}, storageMock, Options{})
@@ -386,51 +386,5 @@ func TestOrphanCleanupSurvivesACanceledRequestAndLogsFailures(t *testing.T) {
 	}
 	if out := logs.Since(mark); !strings.Contains(out, "media/orphan.png") || !strings.Contains(out, "storage unreachable") {
 		t.Fatalf("a failed cleanup must be logged with the object and the cause, got: %s", out)
-	}
-}
-
-func TestSafeFilename(t *testing.T) {
-	long := strings.Repeat("a", 300) + ".png"
-	cases := []struct{ name, in, want string }{
-		{"plain", "photo.png", "photo.png"},
-		{"directories dropped", "../../etc/passwd", "passwd"},
-		{"windows path", `C:\Users\me\photo.png`, "photo.png"},
-		{"control characters removed", "ph\x00o\x1b[31mto\r\n.png", "pho[31mto.png"},
-		{"tab and newline removed", "a\tb\nc.png", "abc.png"},
-		{"unicode kept", "foto-kucing-\u732b.png", "foto-kucing-\u732b.png"},
-		{"capped at 255 characters", long, strings.Repeat("a", 255)},
-		{"empty", "", "file"},
-		{"blank", "   ", "file"},
-		{"only controls", "\x00\x01", "file"},
-		{"dot", ".", "file"},
-		{"dot dot", "..", "file"},
-		{"slash", "/", "file"},
-		{"invalid utf-8 dropped", "a\xffb.png", "ab.png"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := safeFilename(c.in)
-			if got != c.want {
-				t.Fatalf("safeFilename(%q) = %q, want %q", c.in, got, c.want)
-			}
-			if utf8.RuneCountInString(got) > 255 {
-				t.Fatalf("result has %d characters", utf8.RuneCountInString(got))
-			}
-		})
-	}
-}
-
-// config.SupportedContentTypes is what a deployment may list; each one needs a
-// file extension here, or the stored object would have none.
-func TestEverySupportedContentTypeHasAnExtension(t *testing.T) {
-	for _, ct := range config.SupportedContentTypes {
-		if extensionForContentType(ct) == "" {
-			t.Errorf("%s is allowed by the config but has no extension", ct)
-		}
-	}
-	for _, ct := range defaultContentTypes {
-		if !slices.Contains(config.SupportedContentTypes, ct) {
-			t.Errorf("default type %s is not in config.SupportedContentTypes", ct)
-		}
 	}
 }

@@ -21,12 +21,12 @@ const (
 	orphanCleanupTimeout = 10 * time.Second
 )
 
-// Options tunes the service. The zero value is valid: a 10 MiB limit, the
-// default content types and UUIDv7 identifiers.
+// Options tunes the service. The zero value is valid: a 10 MiB limit, every
+// supported content type and UUIDv7 identifiers.
 type Options struct {
 	// MaxFileSize is the largest accepted upload in bytes; zero or less means 10 MiB.
 	MaxFileSize int64
-	// AllowedContentTypes lists accepted media types; empty means the defaults.
+	// AllowedContentTypes lists accepted media types; empty means every supported one.
 	AllowedContentTypes []string
 	// NewID returns a new identifier for a stored media row; nil means UUIDv7.
 	NewID func() string
@@ -47,7 +47,7 @@ func NewService(repo Repository, storage Storage, opts Options) *Service {
 	}
 	allowedContentTypes := opts.AllowedContentTypes
 	if len(allowedContentTypes) == 0 {
-		allowedContentTypes = defaultContentTypes
+		allowedContentTypes = domainmedia.SupportedContentTypes()
 	}
 	newID := opts.NewID
 	if newID == nil {
@@ -56,7 +56,7 @@ func NewService(repo Repository, storage Storage, opts Options) *Service {
 
 	allowed := make(map[string]struct{}, len(allowedContentTypes))
 	for _, contentType := range allowedContentTypes {
-		if normalized := normalizeContentType(contentType); normalized != "" {
+		if normalized := domainmedia.NormalizeContentType(contentType); normalized != "" {
 			allowed[normalized] = struct{}{}
 		}
 	}
@@ -97,9 +97,9 @@ func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart
 	uploadHeader := *header
 	uploadHeader.Header = make(textproto.MIMEHeader)
 	uploadHeader.Header.Set("Content-Type", contentType)
-	uploadHeader.Filename = "upload" + extensionForContentType(contentType)
+	uploadHeader.Filename = "upload" + domainmedia.ExtensionFor(contentType)
 
-	uploaded, err := s.storage.UploadFile(ctx, file, &uploadHeader, mediaFolder)
+	objectName, url, err := s.storage.UploadFile(ctx, file, &uploadHeader, mediaFolder)
 	if err != nil {
 		return domainmedia.Media{}, err
 	}
@@ -107,15 +107,15 @@ func (s *Service) Upload(ctx context.Context, ownerUserID string, file multipart
 	media := domainmedia.Media{
 		ID:           s.newID(),
 		OwnerUserID:  ownerUserID,
-		ObjectKey:    uploaded.ObjectName,
-		URL:          uploaded.URL,
-		OriginalName: safeFilename(header.Filename),
+		ObjectKey:    objectName,
+		URL:          url,
+		OriginalName: domainmedia.SafeFilename(header.Filename),
 		ContentType:  contentType,
 		Size:         header.Size,
 		CreatedAt:    time.Now(),
 	}
 	if err := s.repo.Store(ctx, &media); err != nil {
-		s.removeOrphan(ctx, uploaded.ObjectName)
+		s.removeOrphan(ctx, objectName)
 		return domainmedia.Media{}, err
 	}
 

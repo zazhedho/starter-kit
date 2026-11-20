@@ -17,10 +17,12 @@ type Repository interface {
 	List(ctx context.Context, req dtomedia.ListRequest) (dtomedia.ListResult, error)
 }
 
-// Storage is the object storage the media service needs. Adapters live in
-// internal/infrastructure/storage and satisfy it by method set.
+// Storage is the object storage the media service needs. The providers in
+// internal/infrastructure/storage satisfy it by method set.
 type Storage interface {
-	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (domainmedia.StoredFile, error)
-	// DeleteObject removes an object by StoredFile.ObjectName.
+	// UploadFile stores the file under folder and returns the generated object
+	// name and the URL of the object.
+	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (objectName, url string, err error)
+	// DeleteObject removes an object by the name UploadFile returned.
 	DeleteObject(ctx context.Context, objectName string) error
 }

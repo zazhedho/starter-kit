@@ -6,59 +6,43 @@ import (
 	"mime/multipart"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// MinIOAdapter is the MinIO implementation of Provider.
+// MinIOAdapter is the MinIO implementation of Provider. Files are addressed
+// under <baseURL>/<bucket>/<object>.
 type MinIOAdapter struct {
-	client     *minio.Client
-	bucketName string
-	baseURL    string
+	s3Core
+	baseURL string
 }
 
 // NewMinIOAdapter connects to MinIO and creates the bucket when it is missing.
 // A bucket created here is private unless Config.PublicRead is set; an existing
 // bucket's policy is never changed.
 func NewMinIOAdapter(config Config) (*MinIOAdapter, error) {
-	minioClient, err := minio.New(config.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, ""),
-		Secure: config.UseSSL,
-		Region: config.Region,
-	})
+	core, err := newS3Core("MinIO", config, config.Endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MinIO client: %w", err)
+		return nil, err
 	}
 
-	created, err := ensureBucket(minioClient, config.BucketName, config.Region)
+	created, err := ensureBucket(core.client, config.BucketName, config.Region)
 	if err != nil {
 		return nil, err
 	}
 	if created && config.PublicRead {
-		if err := setPublicReadPolicy(minioClient, config.BucketName); err != nil {
+		if err := setPublicReadPolicy(core.client, config.BucketName); err != nil {
 			return nil, err
 		}
 	}
 
-	return &MinIOAdapter{
-		client:     minioClient,
-		bucketName: config.BucketName,
-		baseURL:    config.BaseURL,
-	}, nil
+	return &MinIOAdapter{s3Core: core, baseURL: config.BaseURL}, nil
 }
 
-func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (StoredFile, error) {
-	objectName, err := uploadMultipart(ctx, m.client, m.bucketName, file, fileHeader, folder, "failed to upload file")
+func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (string, string, error) {
+	objectName, err := m.upload(ctx, file, fileHeader, folder)
 	if err != nil {
-		return StoredFile{}, err
+		return "", "", err
 	}
-	return StoredFile{ObjectName: objectName, URL: fmt.Sprintf("%s/%s/%s", m.baseURL, m.bucketName, objectName)}, nil
-}
-
-func (m *MinIOAdapter) DeleteObject(ctx context.Context, objectName string) error {
-	if err := m.client.RemoveObject(ctx, m.bucketName, objectName, minio.RemoveObjectOptions{}); err != nil {
-		return fmt.Errorf("failed to delete file: %w", err)
-	}
-	return nil
+	return objectName, fmt.Sprintf("%s/%s/%s", m.baseURL, m.bucket, objectName), nil
 }
 
 // setPublicReadPolicy lets anyone read the bucket's objects without signing.

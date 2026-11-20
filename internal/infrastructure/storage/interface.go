@@ -5,19 +5,14 @@ import (
 	"mime/multipart"
 )
 
-// StoredFile describes an object a provider has written.
-type StoredFile struct {
-	ObjectName string
-	URL        string
-}
-
 // Provider is the object storage the application uses. The media service
-// depends on the same two methods through its own port.
+// declares the same two methods as its own port, so a Provider satisfies it.
 type Provider interface {
-	// UploadFile stores a multipart file under folder; the object name is generated.
-	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (StoredFile, error)
+	// UploadFile stores a multipart file under folder and returns the generated
+	// object name and the URL of the object.
+	UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (objectName, url string, err error)
 
-	// DeleteObject removes the object stored under objectName (StoredFile.ObjectName).
+	// DeleteObject removes the object stored under the name UploadFile returned.
 	DeleteObject(ctx context.Context, objectName string) error
 }
 

@@ -220,36 +220,54 @@ func TestUploadAndDeleteObject(t *testing.T) {
 			if err != nil {
 				t.Fatalf("build: %v", err)
 			}
-			stored, err := p.UploadFile(context.Background(), multipartFile{bytes.NewReader(data)}, pngHeader("upload.png", int64(len(data))), "media")
+			objectName, url, err := p.UploadFile(context.Background(), multipartFile{bytes.NewReader(data)}, pngHeader("upload.png", int64(len(data))), "media")
 			if err != nil {
 				t.Fatalf("UploadFile: %v", err)
 			}
-			if !strings.HasPrefix(stored.URL, c.wantURL) || !strings.HasSuffix(stored.URL, ".png") || !strings.HasPrefix(stored.ObjectName, "media/") {
-				t.Fatalf("stored = %+v", stored)
+			if !strings.HasPrefix(url, c.wantURL) || !strings.HasSuffix(url, ".png") || !strings.HasPrefix(objectName, "media/") {
+				t.Fatalf("stored %q at %q", objectName, url)
 			}
-			if !fake.seen("PUT /bucket/" + stored.ObjectName) {
+			if !fake.seen("PUT /bucket/" + objectName) {
 				t.Fatalf("the object was not put, requests: %v", fake.all())
 			}
 
-			if err := p.DeleteObject(context.Background(), stored.ObjectName); err != nil {
+			if err := p.DeleteObject(context.Background(), objectName); err != nil {
 				t.Fatalf("DeleteObject: %v", err)
 			}
-			if !fake.seen("DELETE /bucket/" + stored.ObjectName) {
+			if !fake.seen("DELETE /bucket/" + objectName) {
 				t.Fatalf("the object was not deleted by its name, requests: %v", fake.all())
 			}
 		})
 	}
 }
 
-func TestDeleteObjectReturnsStorageErrors(t *testing.T) {
-	_, endpoint := newFakeS3(t, true)
-	p, err := NewMinIOAdapter(newConfig(endpoint))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := p.DeleteObject(ctx, "media/x.png"); err == nil {
-		t.Fatal("DeleteObject with a canceled context must fail")
+// A canceled request must fail the upload and the delete of both providers, and
+// the error names the provider.
+func TestStorageCallsFailWithACanceledContext(t *testing.T) {
+	data := []byte("\x89PNG\r\n\x1a\n")
+	for name, c := range map[string]struct {
+		build func(Config) (Provider, error)
+		label string
+	}{
+		"minio": {func(c Config) (Provider, error) { return NewMinIOAdapter(c) }, "MinIO"},
+		"r2":    {func(c Config) (Provider, error) { return NewR2Adapter(c) }, "R2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, endpoint := newFakeS3(t, true)
+			p, err := c.build(newConfig(endpoint))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, _, err = p.UploadFile(ctx, multipartFile{bytes.NewReader(data)}, pngHeader("upload.png", int64(len(data))), "media")
+			if err == nil || !strings.Contains(err.Error(), c.label) {
+				t.Fatalf("UploadFile with a canceled context = %v, want an error naming %s", err, c.label)
+			}
+			err = p.DeleteObject(ctx, "media/x.png")
+			if err == nil || !strings.Contains(err.Error(), c.label) {
+				t.Fatalf("DeleteObject with a canceled context = %v, want an error naming %s", err, c.label)
+			}
+		})
 	}
 }

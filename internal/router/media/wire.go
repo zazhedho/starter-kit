@@ -24,7 +24,7 @@ func wire(d module.Deps) (*wired, error) {
 	}
 	m := d.Config.Media
 	repo := repositorymedia.NewRepository(d.DB)
-	svc := servicemedia.NewService(repo, storageAdapter{d.Storage}, servicemedia.Options{
+	svc := servicemedia.NewService(repo, d.Storage, servicemedia.Options{
 		MaxFileSize:         m.MaxFileSizeBytes,
 		AllowedContentTypes: m.AllowedContentTypes,
 		NewID:               gokit.CreateUUID,

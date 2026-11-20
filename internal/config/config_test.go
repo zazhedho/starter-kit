@@ -114,7 +114,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	if m.Enabled {
 		t.Fatal("media must be disabled by default")
 	}
-	if got := strings.Join(m.AllowedContentTypes, ","); got != "image/jpeg,image/png,image/webp,image/gif,application/pdf" {
+	if got := strings.Join(m.AllowedContentTypes, ","); got != "application/pdf,image/gif,image/jpeg,image/png,image/webp" {
 		t.Fatalf("AllowedContentTypes = %q", got)
 	}
 	if cfg.Location.ServiceTimeout != 20*time.Second || cfg.Location.CacheTTL != 180*24*time.Hour {

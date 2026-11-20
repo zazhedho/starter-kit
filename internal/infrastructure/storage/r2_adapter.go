@@ -5,34 +5,25 @@ import (
 	"fmt"
 	"mime/multipart"
 	"strings"
-
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// R2Adapter is the Cloudflare R2 implementation of Provider.
+// R2Adapter is the Cloudflare R2 implementation of Provider. Files are
+// addressed under <baseURL>/<object>.
 type R2Adapter struct {
-	client     *minio.Client
-	bucketName string
-	baseURL    string
+	s3Core
+	baseURL string
 }
 
 // NewR2Adapter connects to R2 and creates the bucket when it is missing. Without
 // BaseURL, files are addressed under https://<bucket>.r2.dev. Public access to R2
 // is configured in Cloudflare, not through a bucket policy.
 func NewR2Adapter(config Config) (*R2Adapter, error) {
-	endpoint := r2Endpoint(config)
-
-	r2Client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, ""),
-		Secure: config.UseSSL,
-		Region: config.Region,
-	})
+	core, err := newS3Core("R2", config, r2Endpoint(config))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create R2 client: %w", err)
+		return nil, err
 	}
 
-	if _, err := ensureBucket(r2Client, config.BucketName, config.Region); err != nil {
+	if _, err := ensureBucket(core.client, config.BucketName, config.Region); err != nil {
 		return nil, err
 	}
 
@@ -41,11 +32,7 @@ func NewR2Adapter(config Config) (*R2Adapter, error) {
 		baseURL = fmt.Sprintf("https://%s.r2.dev", config.BucketName)
 	}
 
-	return &R2Adapter{
-		client:     r2Client,
-		bucketName: config.BucketName,
-		baseURL:    baseURL,
-	}, nil
+	return &R2Adapter{s3Core: core, baseURL: baseURL}, nil
 }
 
 // r2Endpoint is the host to dial: the account's own R2 host when an account ID
@@ -59,17 +46,10 @@ func r2Endpoint(config Config) string {
 	return endpoint
 }
 
-func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (StoredFile, error) {
-	objectName, err := uploadMultipart(ctx, r.client, r.bucketName, file, fileHeader, folder, "failed to upload file to R2")
+func (r *R2Adapter) UploadFile(ctx context.Context, file multipart.File, fileHeader *multipart.FileHeader, folder string) (string, string, error) {
+	objectName, err := r.upload(ctx, file, fileHeader, folder)
 	if err != nil {
-		return StoredFile{}, err
+		return "", "", err
 	}
-	return StoredFile{ObjectName: objectName, URL: fmt.Sprintf("%s/%s", strings.TrimRight(r.baseURL, "/"), objectName)}, nil
-}
-
-func (r *R2Adapter) DeleteObject(ctx context.Context, objectName string) error {
-	if err := r.client.RemoveObject(ctx, r.bucketName, objectName, minio.RemoveObjectOptions{}); err != nil {
-		return fmt.Errorf("failed to delete file from R2: %w", err)
-	}
-	return nil
+	return objectName, fmt.Sprintf("%s/%s", strings.TrimRight(r.baseURL, "/"), objectName), nil
 }

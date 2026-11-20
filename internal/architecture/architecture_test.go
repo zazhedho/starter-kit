@@ -292,8 +292,10 @@ var rules = []rule{
 		exceptTrees:    []string{"internal/infrastructure/cache"},
 	},
 	{
+		// config may import a domain package: the module's own facts, such as the
+		// content types it can store, are validated there once.
 		tree:           "internal/config",
-		forbidInternal: []string{"internal/"},
+		forbidInternal: []string{"internal/dto", "internal/services", "internal/handlers", "internal/repositories", "internal/infrastructure", "internal/router", "internal/app"},
 	},
 	{
 		tree:           "internal/router",

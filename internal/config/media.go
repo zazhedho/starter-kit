@@ -8,14 +8,9 @@ import (
 	"time"
 
 	"github.com/zazhedho/gokit"
+
+	domainmedia "starter-kit/internal/domain/media"
 )
-
-const defaultAllowedContentTypes = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
-
-// SupportedContentTypes is every type MEDIA_ALLOWED_CONTENT_TYPES may list: those
-// the sniffer recognizes and the service has an extension for. HTML and SVG are
-// left out: served from a public bucket they would run script.
-var SupportedContentTypes = []string{"application/pdf", "image/gif", "image/jpeg", "image/png", "image/webp"}
 
 // Media is the media module's setting.
 type Media struct {
@@ -52,7 +47,7 @@ func mediaFromEnv() (Media, Storage) {
 	media := Media{
 		Enabled:             gokit.GetEnv("MEDIA_ENABLED", false),
 		MaxFileSizeBytes:    megabytes("MEDIA_MAX_FILE_SIZE_MB", 5),
-		AllowedContentTypes: splitList(gokit.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
+		AllowedContentTypes: splitList(gokit.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", strings.Join(domainmedia.SupportedContentTypes(), ","))),
 		UploadRateLimit:     gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
 		UploadRateWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
 		UserUploadLimit:     gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_LIMIT", 10),
@@ -158,18 +153,13 @@ func (c Config) validateStorage() []string {
 // safely or can never match, because the content type comes from sniffing the
 // file's first bytes.
 func (c Config) validateContentTypes() []string {
+	supported := domainmedia.SupportedContentTypes()
 	for _, configured := range c.Media.AllowedContentTypes {
-		if !slices.Contains(SupportedContentTypes, normalizeContentType(configured)) {
-			return []string{"MEDIA_ALLOWED_CONTENT_TYPES may list only: " + strings.Join(SupportedContentTypes, ", ") + " (text/html and SVG are never allowed)"}
+		if !slices.Contains(supported, domainmedia.NormalizeContentType(configured)) {
+			return []string{"MEDIA_ALLOWED_CONTENT_TYPES may list only: " + strings.Join(supported, ", ") + " (text/html and SVG are never allowed)"}
 		}
 	}
 	return nil
-}
-
-// normalizeContentType lower-cases a media type and drops its parameters.
-func normalizeContentType(contentType string) string {
-	contentType, _, _ = strings.Cut(normalizeKey(contentType), ";")
-	return strings.TrimSpace(contentType)
 }
 
 func (c Config) validateMediaRate() []string {
