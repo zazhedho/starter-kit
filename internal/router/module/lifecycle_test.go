@@ -45,18 +45,30 @@ func TestLifecycleCloseHandsTheContextToHooks(t *testing.T) {
 	}
 }
 
-func TestLifecycleLenCountsHooks(t *testing.T) {
+func TestLifecycleDrainRunsDrainFunctionsOnceInReverseOrder(t *testing.T) {
 	var l Lifecycle
-	if l.Len() != 0 {
-		t.Fatalf("Len = %d on a new Lifecycle", l.Len())
+	var order []string
+	l.OnDrain(func() { order = append(order, "first") })
+	l.OnDrain(func() { order = append(order, "second") })
+	l.OnClose("not a drain", func(context.Context) error { order = append(order, "close"); return nil })
+
+	if l.Draining() {
+		t.Fatal("a new Lifecycle is not draining")
 	}
-	l.OnClose("a", func(context.Context) error { return nil })
-	l.OnClose("b", func(context.Context) error { return nil })
-	if l.Len() != 2 {
-		t.Fatalf("Len = %d, want 2", l.Len())
+	l.Drain()
+	l.Drain()
+	if !l.Draining() {
+		t.Fatal("Drain must mark the lifecycle as draining")
 	}
-	_ = l.Close(context.Background())
-	if l.Len() != 0 {
-		t.Fatalf("Len = %d after Close, want 0", l.Len())
+	if !reflect.DeepEqual(order, []string{"second", "first"}) {
+		t.Fatalf("drain functions ran as %v, want each once, in reverse order, without the close hooks", order)
+	}
+}
+
+func TestLifecycleDrainWithoutFunctionsStillMarksDraining(t *testing.T) {
+	var l Lifecycle
+	l.Drain()
+	if !l.Draining() {
+		t.Fatal("Draining = false after Drain")
 	}
 }

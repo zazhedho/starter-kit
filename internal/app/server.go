@@ -45,6 +45,11 @@ func (a *App) Serve(ctx context.Context) error {
 	}
 
 	logus.Log(logus.LevelInfo, "Shutdown started")
+	// Before the drain: /readyz turns 503 and background work is told to stop,
+	// so it can record its final state while the requests finish.
+	if a.lifecycle != nil {
+		a.lifecycle.Drain()
+	}
 	// One deadline for the whole shutdown: the HTTP drain, the lifecycle hooks
 	// and the final writes of the jobs they stop all end by it. The caller's
 	// ctx is already canceled; the limit is its own.

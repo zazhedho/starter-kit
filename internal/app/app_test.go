@@ -340,10 +340,6 @@ func TestNewRegistersAuthkitCloseOnTheLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = a.Close() }()
-	if got := a.lifecycle.Len(); got != 1 {
-		t.Fatalf("lifecycle has %d hooks after New, want authkit's alone", got)
-	}
-
 	var order []string
 	a.lifecycle.OnClose("module", func(context.Context) error {
 		order = append(order, "module")
@@ -980,5 +976,48 @@ func TestRunWarnsAboutUnsafeSettings(t *testing.T) {
 	}
 	if strings.Contains(out, "CHANGE_ME_DB_PASSWORD") {
 		t.Fatalf("a warning printed a secret value:\n%s", out)
+	}
+}
+
+// Background work is told to stop when the signal arrives, not after the HTTP
+// drain, which could use the whole budget and leave it no time to record its
+// final state. The drain hook must therefore run while a request is in flight,
+// and /readyz must already answer 503 then.
+func TestServeDrainsBackgroundWorkAndReadinessBeforeTheHTTPDrain(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTP.ShutdownTimeout = 5 * time.Second
+	started, release := make(chan struct{}), make(chan struct{})
+	a, ln := newTestApp(t, cfg, func(e *gin.Engine) {
+		e.GET("/slow", func(c *gin.Context) {
+			close(started)
+			<-release
+			c.String(http.StatusOK, "finished")
+		})
+	})
+	drained := make(chan struct{})
+	a.lifecycle.OnDrain(func() { close(drained) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := serveAsync(ctx, a)
+	reply := make(chan int, 1)
+	go func() { status, _ := get(t, "http://"+ln.Addr().String()+"/slow"); reply <- status }()
+	<-started
+	cancel()
+
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the drain hook did not run while the request was still in flight")
+	}
+	if !a.lifecycle.Draining() {
+		t.Fatal("the lifecycle is not marked as draining")
+	}
+	close(release)
+	if status := <-reply; status != http.StatusOK {
+		t.Fatalf("in-flight request = %d", status)
+	}
+	if err := waitServe(t, done, 2*time.Second); err != nil {
+		t.Fatalf("Serve = %v", err)
 	}
 }

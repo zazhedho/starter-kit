@@ -24,6 +24,13 @@ func registerHealth(r gin.IRouter, d module.Deps) error {
 	})
 
 	r.GET("/readyz", func(ctx *gin.Context) {
+		// Once shutdown has started the service is still up but must receive no
+		// new traffic, so the load balancer is told before the server drains.
+		if d.Lifecycle != nil && d.Lifecycle.Draining() {
+			logus.LogContext(ctx, logus.LevelDebug, "readyz; shutting down")
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+			return
+		}
 		pingCtx, cancel := context.WithTimeout(ctx.Request.Context(), readyTimeout)
 		defer cancel()
 

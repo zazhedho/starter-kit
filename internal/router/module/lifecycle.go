@@ -11,11 +11,15 @@ import (
 	"sync"
 )
 
-// Lifecycle collects shutdown hooks for work that outlives a request. Close
-// runs once, after the HTTP server drains and before the database and Redis close.
+// Lifecycle collects the shutdown hooks of work that outlives a request.
+// Shutdown has two steps. Drain runs first, when the signal arrives and before the
+// HTTP server drains: it tells background work to stop. Close runs after the
+// server has drained and before the database and Redis close: it waits for that work.
 type Lifecycle struct {
-	mu    sync.Mutex
-	hooks []hook
+	mu       sync.Mutex
+	hooks    []hook
+	drains   []func()
+	draining bool
 }
 
 type hook struct {
@@ -30,11 +34,36 @@ func (l *Lifecycle) OnClose(name string, fn func(context.Context) error) {
 	l.hooks = append(l.hooks, hook{name: name, fn: fn})
 }
 
-// Len reports how many hooks are registered; modules use it in tests.
-func (l *Lifecycle) Len() int {
+// OnDrain registers fn to run when shutdown starts, before requests drain. fn
+// must not block: it only signals the work to stop, and OnClose waits for it.
+func (l *Lifecycle) OnDrain(fn func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return len(l.hooks)
+	l.drains = append(l.drains, fn)
+}
+
+// Drain marks the service as shutting down and runs the OnDrain functions in
+// reverse order of registration. Only the first call acts.
+func (l *Lifecycle) Drain() {
+	l.mu.Lock()
+	if l.draining {
+		l.mu.Unlock()
+		return
+	}
+	l.draining = true
+	drains := l.drains
+	l.mu.Unlock()
+
+	for _, fn := range slices.Backward(drains) {
+		fn()
+	}
+}
+
+// Draining reports whether shutdown has started; /readyz answers 503 from then on.
+func (l *Lifecycle) Draining() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.draining
 }
 
 // Close runs the hooks in reverse order of registration with ctx, and returns

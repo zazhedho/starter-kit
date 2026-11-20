@@ -211,6 +211,18 @@ func TestReadyz(t *testing.T) {
 		}
 	})
 
+	// A load balancer must stop sending traffic as soon as shutdown starts, while
+	// the database is still fine and requests are still being served.
+	t.Run("draining answers 503 without touching the database", func(t *testing.T) {
+		d := routertest.NewDeps(t, nil) // the mock expects no ping
+		engine := newEngine(t, d)
+		d.Lifecycle.Drain()
+		rec := get(engine)
+		if rec.Code != http.StatusServiceUnavailable || compact(rec) != `{"status":"unavailable"}` {
+			t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("redis checked when present", func(t *testing.T) {
 		mr := miniredis.RunT(t)
 		client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
