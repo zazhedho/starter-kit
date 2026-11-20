@@ -21,7 +21,7 @@ docker exec starter-kit-smoke psql -U postgres -c 'CREATE DATABASE smoke'
 # 2. Build outside the repository and set a fake environment
 go build -o "$SCRATCH/starter-kit-smoke" ./cmd/api
 export APP_NAME=starter-kit-smoke APP_ENV=development GIN_MODE=release PORT=18080
-export JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef JWT_EXP=24
+export JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef JWT_EXP_MINUTES=15
 export PATH_MIGRATE=file://migrations MEDIA_ENABLED=false
 export DB_HOST=127.0.0.1 DB_PORT=55439 DB_USERNAME=postgres DB_PASS=test DB_NAME=smoke DB_SSLMODE=disable
 # no REDIS_*, SMTP_* or DATABASE_URL unless a check says so
@@ -68,7 +68,7 @@ REDIS_HOST=127.0.0.1 REDIS_PORT=1 REDIS_PASSWORD=fake-redis-password-xyz \
 docker build -t starter-kit-smoke-image .
 docker run --rm -d --name starter-kit-smoke-app -p 127.0.0.1:18081:8080 \
   -e APP_NAME=starter-kit-smoke -e APP_ENV=development -e GIN_MODE=release \
-  -e JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef -e JWT_EXP=24 -e PORT=8080 -e RUN_MIGRATION=true \
+  -e JWT_KEY=fake-smoke-test-jwt-key-0123456789abcdef -e JWT_EXP_MINUTES=15 -e PORT=8080 -e RUN_MIGRATION=true \
   -e DB_HOST=host.docker.internal -e DB_PORT=55439 -e DB_USERNAME=postgres -e DB_PASS=test \
   -e DB_NAME=smoke -e DB_SSLMODE=disable -e MEDIA_ENABLED=false starter-kit-smoke-image
 curl -i localhost:18081/healthcheck
