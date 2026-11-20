@@ -1,0 +1,48 @@
+name: Sonar
+
+# SonarCloud's free plan cannot add quality-gate conditions, so this job
+# fails the build whenever any issue or unreviewed hotspot is open.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: read
+
+jobs:
+  zero-issues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PROJECT: zazhedho_${{ github.event.repository.name }}
+      SCOPE: ${{ github.event_name == 'pull_request' && format('pullRequest={0}', github.event.pull_request.number) || 'branch=main' }}
+    steps:
+      - name: Wait for the SonarCloud analysis of this commit
+        run: |
+          for _ in $(seq 1 90); do
+            status=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?check_name=SonarCloud%20Code%20Analysis" \
+              --jq '.check_runs[0].status // "missing"')
+            if [ "$status" = "completed" ]; then
+              sleep 15 # the issues API trails the check by a few seconds
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "SonarCloud analysis did not finish within 30 minutes"
+          exit 1
+
+      - name: Require zero open issues and hotspots
+        run: |
+          api=https://sonarcloud.io/api
+          issues=$(curl -fsS "$api/issues/search?componentKeys=${PROJECT}&${SCOPE}&resolved=false&ps=100")
+          hotspots=$(curl -fsS "$api/hotspots/search?projectKey=${PROJECT}&${SCOPE}&status=TO_REVIEW&ps=100")
+          jq -r '.issues[] | "\(.severity) \(.rule) \(.component | split(":")[1]):\(.line // "-") \(.message)"' <<<"$issues"
+          jq -r '.hotspots[] | "HOTSPOT \(.component | split(":")[1]):\(.line // "-") \(.message)"' <<<"$hotspots"
+          open=$(jq '.total' <<<"$issues")
+          review=$(jq '.paging.total' <<<"$hotspots")
+          echo "Open issues: ${open}, hotspots to review: ${review}"
+          [ "$open" -eq 0 ] && [ "$review" -eq 0 ]
