@@ -89,32 +89,45 @@ func (d *serviceDouble) Delete(_ context.Context, actor domainmedia.Actor, id st
 // scope, then performs one request.
 func serve(t *testing.T, svc Service, userID, role, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveWithPermissions(t, svc, userID, role, nil, method, target, body, contentType)
+	return serveWithPermissions(t, svc, caller{userID, role, nil}, request{method, target, body, contentType})
 }
 
-// serveWithPermissions is serve for a caller holding permissions, each written
-// as "resource:action".
-func serveWithPermissions(t *testing.T, svc Service, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
+// caller is who a test request is made as; permissions are each written as
+// "resource:action".
+type caller struct {
+	userID, role string
+	permissions  []string
+}
+
+// request is the HTTP request a test sends.
+type request struct {
+	method, target string
+	body           []byte
+	contentType    string
+}
+
+// serveWithPermissions is serve for a caller that may hold permissions.
+func serveWithPermissions(t *testing.T, svc Service, who caller, req request) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveHandler(t, New(svc, nil, 0, 0, 0), userID, role, permissions, method, target, body, contentType)
+	return serveHandler(t, New(svc, nil, 0, 0, 0), who, req)
 }
 
 // serveHandler is serveWithPermissions for a handler built by the test.
-func serveHandler(t *testing.T, h *Handler, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
+func serveHandler(t *testing.T, h *Handler, who caller, r request) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
-		scope := authkit.NewScope(userID, "tester", role, permissions)
+		scope := authkit.NewScope(who.userID, "tester", who.role, who.permissions)
 		c.Request = c.Request.WithContext(authkit.WithScope(c.Request.Context(), scope))
 	})
 	engine.GET("/media", h.List)
 	engine.POST("/media", h.Upload)
 	engine.DELETE("/media/:id", h.Delete)
 
-	req := httptest.NewRequest(method, target, bytes.NewReader(body))
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	req := httptest.NewRequest(r.method, r.target, bytes.NewReader(r.body))
+	if r.contentType != "" {
+		req.Header.Set("Content-Type", r.contentType)
 	}
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, req)
@@ -273,7 +286,7 @@ func TestDeleteHandlerBuildsTheActorFromTheScope(t *testing.T) {
 	id := uuid.NewString()
 	user := uuid.NewString()
 	svc := &serviceDouble{media: domainmedia.Media{ID: id}}
-	rec := serveWithPermissions(t, svc, user, "viewer", []string{"media:delete_any"}, http.MethodDelete, "/media/"+id, nil, "")
+	rec := serveWithPermissions(t, svc, caller{user, "viewer", []string{"media:delete_any"}}, request{method: http.MethodDelete, target: "/media/" + id})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -334,7 +347,7 @@ func TestListHandlerRejectsABadOwnerFilter(t *testing.T) {
 	} {
 		t.Run(target, func(t *testing.T) {
 			svc := &serviceDouble{}
-			rec := serveWithPermissions(t, svc, uuid.NewString(), "viewer", []string{"media:list_any"}, http.MethodGet, target, nil, "")
+			rec := serveWithPermissions(t, svc, caller{uuid.NewString(), "viewer", []string{"media:list_any"}}, request{method: http.MethodGet, target: target})
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
@@ -565,7 +578,7 @@ func TestFailedUploadAuditStoresTheSanitizedName(t *testing.T) {
 	svc := &serviceDouble{maxFileSize: 1024, err: domainmedia.ErrUnsupportedContentType}
 	body, ct := multipartBody(t, "file", "../evil\u202Egnp\u200B.exe", []byte("data"))
 
-	rec := serveHandler(t, New(svc, audit, 0, 0, 0), uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
+	rec := serveHandler(t, New(svc, audit, 0, 0, 0), caller{userID: uuid.NewString(), role: "viewer"}, request{http.MethodPost, "/media", body, ct})
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
@@ -599,7 +612,7 @@ func TestUploadsBeyondTheConcurrencyCapAnswer503(t *testing.T) {
 	h := New(svc, nil, 0, 1, 0)
 	upload := func() *httptest.ResponseRecorder {
 		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
-		return serveHandler(t, h, uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
+		return serveHandler(t, h, caller{userID: uuid.NewString(), role: "viewer"}, request{http.MethodPost, "/media", body, ct})
 	}
 
 	first := make(chan *httptest.ResponseRecorder, 1)
@@ -639,7 +652,7 @@ func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			mark := logs.Mark()
-			serveWithPermissions(t, &serviceDouble{err: c.err}, uuid.NewString(), "viewer", c.perms, http.MethodGet, c.target, nil, "")
+			serveWithPermissions(t, &serviceDouble{err: c.err}, caller{uuid.NewString(), "viewer", c.perms}, request{method: http.MethodGet, target: c.target})
 			out := logs.Since(mark)
 			if !strings.Contains(out, `"level":"`+c.wantLevel+`"`) {
 				t.Fatalf("want a %s log line, got:\n%s", c.wantLevel, out)
@@ -662,7 +675,7 @@ func TestOneUserCannotExhaustTheGlobalUploadSlots(t *testing.T) {
 	greedy, other := uuid.NewString(), uuid.NewString()
 	upload := func(user string) *httptest.ResponseRecorder {
 		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
-		return serveHandler(t, h, user, "viewer", nil, http.MethodPost, "/media", body, ct)
+		return serveHandler(t, h, caller{userID: user, role: "viewer"}, request{http.MethodPost, "/media", body, ct})
 	}
 
 	held := make(chan *httptest.ResponseRecorder, 3)
