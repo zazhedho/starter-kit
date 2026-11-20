@@ -398,18 +398,29 @@ func TestLocationErrorsUseTheErrorListEnvelope(t *testing.T) {
 			if rec.Code != c.status {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, c.status, rec.Body.String())
 			}
-			res := decodeEnvelope(t, rec)
-			if res.Status || res.Message != c.message {
-				t.Fatalf("status %v message %q, want false and %q", res.Status, res.Message, c.message)
-			}
-			if len(res.Error) != 1 || res.Error[0].Message != c.detail || res.Error[0].Code == "" {
-				t.Fatalf("error = %+v, want one entry %q with a code", res.Error, c.detail)
-			}
-			if hasData := len(res.Data) > 0 && string(res.Data) != "null"; hasData != c.wantData {
-				t.Fatalf("data = %s, want present=%v", res.Data, c.wantData)
-			}
+			requireErrorEnvelope(t, rec, c.message, c.detail, c.wantData)
 		})
 	}
+}
+
+// requireErrorEnvelope checks a failed response: false status, one error entry
+// with a code, and data present only when wantData.
+func requireErrorEnvelope(t *testing.T, rec *httptest.ResponseRecorder, message, detail string, wantData bool) {
+	t.Helper()
+	res := decodeEnvelope(t, rec)
+	if res.Status || res.Message != message {
+		t.Fatalf("status %v message %q, want false and %q", res.Status, res.Message, message)
+	}
+	if len(res.Error) != 1 || res.Error[0].Message != detail || res.Error[0].Code == "" {
+		t.Fatalf("error = %+v, want one entry %q with a code", res.Error, detail)
+	}
+	if carriesData(res.Data) != wantData {
+		t.Fatalf("data = %s, want present=%v", res.Data, wantData)
+	}
+}
+
+func carriesData(data json.RawMessage) bool {
+	return len(data) > 0 && string(data) != "null"
 }
 
 // A nil result list is sent as [], never null.
