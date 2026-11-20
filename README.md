@@ -326,10 +326,16 @@ Durations accept bare seconds (`60`) or Go syntax (`30s`, `1m`, `1h`) and must b
 | `HTTP_IDLE_TIMEOUT` | `60s` | keep-alive idle time |
 | `HTTP_SHUTDOWN_TIMEOUT` | `15s` | time the whole shutdown gets after SIGINT/SIGTERM, counted from the signal |
 | `HTTP_MAX_BODY_MB` | `10` | largest request body, 1-1024 MB |
+| `TRUSTED_PROXIES` | none | comma-separated IPs or CIDRs of reverse proxies whose `X-Forwarded-For` is believed |
 | `DB_MAX_OPEN_CONNS` | `100` | pool: open connections, greater than zero |
 | `DB_MAX_IDLE_CONNS` | `10` | pool: idle connections, zero or more |
 | `DB_CONN_MAX_LIFETIME` | `1h` | pool: longest life of a connection |
 | `DB_CONN_MAX_IDLE_TIME` | `5m` | pool: longest idle time of a connection |
+
+No proxy is trusted by default: the client IP is the connection's remote address and `X-Forwarded-For` is
+ignored, so a caller cannot dodge a per-IP rate limit by rotating that header. A deployment behind a load balancer
+or CDN must list it in `TRUSTED_PROXIES` (for example `10.0.0.0/8`); otherwise every client looks like the proxy
+and they share one limit. An invalid entry stops startup with an error that names the variable.
 
 A request whose declared `Content-Length` exceeds `HTTP_MAX_BODY_MB` is answered with `413`; a body without a
 declared length is cut off at the limit while it is read.

@@ -40,6 +40,11 @@ func New(d module.Deps) (*gin.Engine, error) {
 	}
 
 	engine := gin.New()
+	// Nil trusts no proxy, so X-Forwarded-For cannot pick the client IP the
+	// limiters key on; deployments behind a load balancer list it in TRUSTED_PROXIES.
+	if err := engine.SetTrustedProxies(d.Config.HTTP.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("set trusted proxies: %w", err)
+	}
 
 	// The request id comes first: recovery, the limiters and every handler then
 	// log and answer with one log_id per request.

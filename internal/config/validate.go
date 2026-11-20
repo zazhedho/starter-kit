@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"net/mail"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -78,6 +79,12 @@ func (c Config) validateHTTP() []string {
 	}
 	if c.HTTP.MaxBodyBytes <= 0 {
 		problems = append(problems, "HTTP_MAX_BODY_MB must be between 1 and 1024")
+	}
+	for _, proxy := range c.HTTP.TrustedProxies {
+		if !validProxy(proxy) {
+			problems = append(problems, "TRUSTED_PROXIES must be a comma-separated list of IP addresses or CIDRs")
+			break
+		}
 	}
 	return problems
 }
@@ -167,6 +174,14 @@ func (c Config) validateSMTP() []string {
 		}
 	}
 	return problems
+}
+
+func validProxy(entry string) bool {
+	if _, err := netip.ParseAddr(entry); err == nil {
+		return true
+	}
+	_, err := netip.ParsePrefix(entry)
+	return err == nil
 }
 
 func validPort(value string) bool {

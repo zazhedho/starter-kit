@@ -27,6 +27,7 @@ func FromEnv() Config {
 			IdleTimeout:       gokit.GetEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout:   gokit.GetEnv("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
 			MaxBodyBytes:      megabytes("HTTP_MAX_BODY_MB", 10),
+			TrustedProxies:    gokit.GetEnv("TRUSTED_PROXIES", []string(nil)),
 		},
 		Database: Database{
 			URL:             gokit.GetEnv("DATABASE_URL", ""),

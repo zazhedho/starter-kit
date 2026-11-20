@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 var managedEnv = []string{
 	"APP_NAME", "APP_ENV", "PORT", "APP_TIMEZONE", "JWT_KEY", "OTP_SECRET", "RESET_SECRET",
 	"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT",
-	"HTTP_SHUTDOWN_TIMEOUT", "HTTP_MAX_BODY_MB",
+	"HTTP_SHUTDOWN_TIMEOUT", "HTTP_SHUTDOWN_DELAY", "HTTP_MAX_BODY_MB", "TRUSTED_PROXIES",
 	"DATABASE_URL", "DB_HOST", "DB_PORT", "DB_USERNAME", "DB_PASS", "DB_NAME", "DB_SSLMODE",
 	"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 	"REDIS_URL", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
@@ -87,7 +88,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		ShutdownTimeout:   15 * time.Second,
 		MaxBodyBytes:      10 << 20,
 	}
-	if cfg.HTTP != wantHTTP {
+	if !reflect.DeepEqual(cfg.HTTP, wantHTTP) {
 		t.Fatalf("HTTP = %+v, want %+v", cfg.HTTP, wantHTTP)
 	}
 	if cfg.App.Timezone != "Asia/Jakarta" {
@@ -157,8 +158,8 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if cfg.App.Name != "svc" || cfg.App.Env != "production" || cfg.App.Timezone != "UTC" {
 		t.Fatalf("App = %+v", cfg.App)
 	}
-	want := HTTP{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second, 20 << 20}
-	if cfg.HTTP != want {
+	want := HTTP{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second, 20 << 20, nil}
+	if !reflect.DeepEqual(cfg.HTTP, want) {
 		t.Fatalf("HTTP = %+v, want %+v", cfg.HTTP, want)
 	}
 	if cfg.Media.UploadTimeout != 3*time.Minute || cfg.Media.UploadRateWindow != 90*time.Second {

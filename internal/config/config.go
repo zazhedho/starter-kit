@@ -56,6 +56,9 @@ type App struct{ Name, Env, Port, Timezone string }
 type HTTP struct {
 	ReadHeaderTimeout, ReadTimeout, WriteTimeout, IdleTimeout, ShutdownTimeout time.Duration
 	MaxBodyBytes                                                               int64
+	// TrustedProxies lists the IPs and CIDRs whose X-Forwarded-For is believed.
+	// Empty trusts none: the client IP is the connection's remote address.
+	TrustedProxies []string
 }
 
 type Database struct {
