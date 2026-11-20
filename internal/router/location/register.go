@@ -1,5 +1,3 @@
-// Package location mounts the location module: wire.go builds it from
-// module.Deps, register.go mounts its routes. Alias routerlocation.
 package location
 
 import (
@@ -9,7 +7,6 @@ import (
 	"starter-kit/internal/router/module"
 )
 
-// Register wires the module and mounts its routes under r.
 func Register(r gin.IRouter, d module.Deps) error {
 	w, err := wire(d)
 	if err != nil {
@@ -17,8 +14,6 @@ func Register(r gin.IRouter, d module.Deps) error {
 	}
 	h := w.handler
 
-	// Public reads can call the Location Service, so they are limited per client
-	// IP. The limiter needs Redis (config.Warnings says so when it is absent).
 	// Limit and Window are validated in config: gokit panics on a value <= 0.
 	location := r.Group("/location")
 	if d.Redis != nil {

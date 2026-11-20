@@ -1,5 +1,3 @@
-// Package media mounts the media module: wire.go builds it from module.Deps,
-// register.go mounts its routes. Alias routermedia.
 package media
 
 import (
@@ -11,8 +9,6 @@ import (
 	"starter-kit/internal/router/module"
 )
 
-// Register mounts nothing when media is disabled; otherwise it wires the module
-// and mounts its routes under r.
 func Register(r gin.IRouter, d module.Deps) error {
 	m := d.Config.Media
 	if !m.Enabled {
@@ -28,9 +24,8 @@ func Register(r gin.IRouter, d module.Deps) error {
 
 	media := r.Group("/media").Use(d.Kit.Auth())
 	{
-		// The limiters need Redis; without it the route is unthrottled.
 		// Limits and windows are validated in config: gokit panics on a value <= 0.
-		// The per-user limit comes after Auth, which sets the user the key reads.
+		// The per-user limit comes after Auth, which sets the user its key reads.
 		var uploadHandlers []gin.HandlerFunc
 		if d.Redis != nil {
 			uploadHandlers = append(uploadHandlers,
@@ -51,8 +46,6 @@ func Register(r gin.IRouter, d module.Deps) error {
 				}))
 		}
 		uploadHandlers = append(uploadHandlers, h.Upload)
-		// Permission-aware routes load the caller's permissions after Auth; the
-		// handler reads them through the scope and never rejects on its own.
 		loadPermissions := d.Kit.LoadPermissions()
 		media.GET("", loadPermissions, h.List)
 		media.POST("", uploadHandlers...)

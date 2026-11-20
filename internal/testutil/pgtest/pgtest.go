@@ -1,6 +1,3 @@
-// Package pgtest gives a test its own schema in the PostgreSQL named by
-// STARTER_KIT_TEST_DATABASE_URL, with all migrations applied; without the
-// variable the test is skipped.
 package pgtest
 
 import (
@@ -17,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/zazhedho/authkit"
 	"gorm.io/gorm"
 
@@ -25,8 +22,6 @@ import (
 	"starter-kit/internal/infrastructure/database"
 )
 
-// Open returns a gorm database whose search_path is a new schema with the
-// migrations applied; the schema is dropped when the test ends.
 func Open(t *testing.T) *gorm.DB {
 	t.Helper()
 	raw := os.Getenv("STARTER_KIT_TEST_DATABASE_URL")
@@ -85,8 +80,8 @@ func Open(t *testing.T) *gorm.DB {
 	return db
 }
 
-// DDL cannot bind an identifier, so the schema name is bound to two session
-// functions that quote it with format's %I; no statement is built from it.
+// DDL cannot bind an identifier, so the schema name goes into two session functions that quote it
+// with format's %I.
 const (
 	createSchemaFunc = `CREATE FUNCTION pg_temp.skt_create_schema(name text) RETURNS void LANGUAGE plpgsql
 		AS $$ BEGIN EXECUTE format('CREATE SCHEMA %I', name); END $$`
@@ -94,9 +89,7 @@ const (
 		AS $$ BEGIN EXECUTE format('DROP SCHEMA %I CASCADE', name); END $$`
 )
 
-// createSchema creates the schema and drops it when the test ends. The
-// functions live in one connection's pg_temp, so that connection is kept until
-// the schema is dropped.
+// The functions live in one connection's pg_temp, so that connection is kept until the schema is dropped.
 func createSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	conn, err := admin.Conn(ctx)
@@ -117,8 +110,6 @@ func createSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema strin
 	})
 }
 
-// MigrationFiles lists the project's migration files with the given suffix
-// (".up.sql" or ".down.sql") in version order.
 func MigrationFiles(t *testing.T, suffix string) []string {
 	t.Helper()
 	_, here, _, _ := runtime.Caller(0)

@@ -1,6 +1,3 @@
-// Package module holds what every router/<module> package shares: the Deps a
-// module is wired from, the Lifecycle it registers shutdown hooks with, and the
-// Entry that mounts it. It imports no feature module.
 package module
 
 import (
@@ -11,9 +8,8 @@ import (
 	"sync"
 )
 
-// Lifecycle collects shutdown hooks of work that outlives a request. Drain runs
-// when the signal arrives, before the HTTP drain, and tells the work to stop;
-// Close runs after the drain, before the database closes, and waits for it.
+// Lifecycle runs Drain hooks before the HTTP drain, and they only signal; Close hooks run after the
+// drain, before the database closes, and wait.
 type Lifecycle struct {
 	mu       sync.Mutex
 	hooks    []hook
@@ -26,23 +22,20 @@ type hook struct {
 	fn   func(context.Context) error
 }
 
-// OnClose registers fn to run at shutdown. fn must return when ctx ends.
+// OnClose registers fn, which must return when ctx ends.
 func (l *Lifecycle) OnClose(name string, fn func(context.Context) error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.hooks = append(l.hooks, hook{name: name, fn: fn})
 }
 
-// OnDrain registers fn to run when shutdown starts, before requests drain. fn
-// must not block: it only signals the work to stop, and OnClose waits for it.
+// OnDrain registers fn, which must not block: it only signals the work to stop, and OnClose waits for it.
 func (l *Lifecycle) OnDrain(fn func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.drains = append(l.drains, fn)
 }
 
-// Drain marks the service as shutting down and runs the OnDrain functions in
-// reverse order of registration. Only the first call acts.
 func (l *Lifecycle) Drain() {
 	l.mu.Lock()
 	if l.draining {
@@ -58,15 +51,12 @@ func (l *Lifecycle) Drain() {
 	}
 }
 
-// Draining reports whether shutdown has started; /readyz answers 503 from then on.
 func (l *Lifecycle) Draining() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.draining
 }
 
-// Close runs the hooks in reverse order of registration with ctx, and returns
-// every error joined. Hooks run once: a second Close does nothing.
 func (l *Lifecycle) Close(ctx context.Context) error {
 	l.mu.Lock()
 	hooks := l.hooks

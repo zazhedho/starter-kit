@@ -21,14 +21,11 @@ import (
 	"starter-kit/internal/testutil/routertest"
 )
 
-// engineFor mounts the media module alone under /api.
 func engineFor(t *testing.T, d module.Deps) *gin.Engine {
 	t.Helper()
 	return routertest.Mount(t, Register, d)
 }
 
-// mediaRoutes is every route the module mounts, pinned on purpose: a new route
-// must be added here and, if it is protected, to TestMediaRoutesProtection.
 var mediaRoutes = []string{
 	"DELETE /api/media/:id",
 	"GET /api/media",
@@ -102,10 +99,6 @@ const (
 	testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"
 )
 
-// authedDeps is mediaDeps over a database that answers what authkit's Auth
-// asks for each request (authkit checks the live user): the blacklist lookup
-// finds nothing and the user exists with the viewer role. Statements are
-// matched in order, so a query a route should not make fails the test.
 func authedDeps(t *testing.T) (module.Deps, sqlmock.Sqlmock) {
 	t.Helper()
 	d := mediaDeps(t)
@@ -119,7 +112,6 @@ func authedDeps(t *testing.T) (module.Deps, sqlmock.Sqlmock) {
 	return d, mock
 }
 
-// expectAuth queues the two queries Auth makes for a signed-in viewer.
 func expectAuth(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(`FROM "blacklist"`).WillReturnRows(sqlmock.NewRows([]string{"?column?"}))
 	mock.ExpectQuery(`FROM "users"`).WillReturnRows(sqlmock.NewRows([]string{"role", "tokens_valid_after"}).AddRow("viewer", nil))
@@ -187,9 +179,6 @@ func (r *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-// The response is written after the upload finishes, so the write deadline must
-// move with the read deadline: HTTP_WRITE_TIMEOUT (30 s) would otherwise cut
-// the response of a slow upload and make the client retry into a duplicate.
 func TestMediaUploadExtendsTheReadAndWriteDeadlines(t *testing.T) {
 	d, mock := authedDeps(t)
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
@@ -209,10 +198,6 @@ func TestMediaUploadExtendsTheReadAndWriteDeadlines(t *testing.T) {
 	}
 }
 
-// With Auth passing and the permission lookup finding no such user,
-// LoadPermissions answers 403 before the handler runs; a route without it would
-// reach the service. Auth's own queries are asserted too, so the 403 cannot come
-// from anywhere else.
 func TestMediaListAndDeleteLoadPermissionsAfterAuth(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{http.MethodGet, "/api/media"},
@@ -241,8 +226,6 @@ func TestMediaListAndDeleteLoadPermissionsAfterAuth(t *testing.T) {
 	}
 }
 
-// The mock has no permission query queued: an upload that loaded permissions
-// would fail on the unexpected statement instead of reaching the insert.
 func TestMediaUploadSkipsLoadPermissions(t *testing.T) {
 	d, mock := authedDeps(t)
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
@@ -256,8 +239,6 @@ func TestMediaUploadSkipsLoadPermissions(t *testing.T) {
 	}
 }
 
-// gokit's IPRateLimit panics when Limit or Window is not positive. Config
-// rejects such values; without Redis the limiter is not built at all.
 func TestMediaWithoutRedisSkipsTheUploadLimiter(t *testing.T) {
 	d := routertest.NewDeps(t, func(c *config.Config) {
 		c.Media.Enabled = true
@@ -268,7 +249,7 @@ func TestMediaWithoutRedisSkipsTheUploadLimiter(t *testing.T) {
 	})
 	d.Storage = routertest.FakeStorage{}
 	d.Redis = nil
-	engineFor(t, d) // must not panic
+	engineFor(t, d)
 }
 
 func TestMediaWithRedisBuildsTheUploadLimiter(t *testing.T) {
@@ -282,8 +263,6 @@ func TestMediaWithRedisBuildsTheUploadLimiter(t *testing.T) {
 	d.Config.Media.UploadRateWindow = time.Minute
 	engine := engineFor(t, d)
 
-	// First upload passes the limiter; the second is counted over the limit
-	// and answered 429 before the handler (no further database query).
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	first := httptest.NewRecorder()
 	engine.ServeHTTP(first, uploadRequest(t, d, 1024))
@@ -299,8 +278,6 @@ func TestMediaWithRedisBuildsTheUploadLimiter(t *testing.T) {
 	}
 }
 
-// The per-IP limit is generous here, so only the per-user limit can answer 429:
-// one user's second upload is refused while another user, from the same IP, is not.
 func TestMediaUploadIsLimitedPerUser(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})

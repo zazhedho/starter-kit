@@ -1,5 +1,3 @@
-// Package router builds the HTTP engine: middleware, health checks and module
-// routes. It opens nothing; callers pass in every connection.
 package router
 
 import (
@@ -32,22 +30,18 @@ func validate(d module.Deps) error {
 	return nil
 }
 
-// New returns the engine, or an error when Deps is incomplete or a module
-// fails to register. Probes live on the engine; modules (modules.go) mount under /api.
 func New(d module.Deps) (*gin.Engine, error) {
 	if err := validate(d); err != nil {
 		return nil, err
 	}
 
 	engine := gin.New()
-	// Nil trusts no proxy, so X-Forwarded-For cannot pick the client IP the
-	// limiters key on; deployments behind a load balancer list it in TRUSTED_PROXIES.
+	// Nil trusts no proxy, so X-Forwarded-For cannot pick the client IP the limiters key on.
 	if err := engine.SetTrustedProxies(d.Config.HTTP.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("set trusted proxies: %w", err)
 	}
 
-	// The request id comes first: recovery, the limiters and every handler then
-	// log and answer with one log_id per request.
+	// The request id comes first so recovery, the limiters and handlers share one log_id per request.
 	engine.Use(gokit.RequestIDMiddleware())
 	engine.Use(gokit.Recovery())
 	engine.Use(gokit.CORS(gokit.CORSOptions{})) // open by default: any origin, no credentials

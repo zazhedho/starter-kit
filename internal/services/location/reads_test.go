@@ -13,7 +13,6 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// fallbackRepo knows the whole chain of parents of village 167101/1001.
 func fallbackRepo() *locationRepoTestDouble {
 	return &locationRepoTestDouble{
 		knownProvinces: map[string]domainlocation.Province{"16": {Code: "16", Name: "Sumatera Selatan"}},
@@ -79,8 +78,6 @@ func codesOf(locations []dtolocation.Location, err error) ([]string, error) {
 	return out, err
 }
 
-// An unknown parent is a 404 decided from the table alone: the Location Service
-// is not called and nothing is stored, whatever code a public caller makes up.
 func TestAnUnknownParentIsNotFoundWithoutCallingTheLocationService(t *testing.T) {
 	ctx := context.Background()
 	reads := map[string]func(*Service) error{
@@ -138,7 +135,6 @@ func TestInvalidCodesNeverReachTheRepositoryTheCacheOrTheUpstream(t *testing.T) 
 
 func TestOnlyItemsOfTheRequestedParentAreStored(t *testing.T) {
 	repo := fallbackRepo()
-	// A misbehaving service ignores the province filter and answers for everyone.
 	up := answering(`[{"code":"71","name":"Kota Palembang"},{"code":"1101","name":"Banda Aceh"},{"code":"3171","name":"Jakarta Selatan"},{"code":"1672","name":"Kota Lubuklinggau"}]`)
 	got, err := newTestService(t, repo, up).GetCity(context.Background(), "16")
 	if err != nil || len(got) != 2 {
@@ -151,8 +147,6 @@ func TestOnlyItemsOfTheRequestedParentAreStored(t *testing.T) {
 	}
 }
 
-// An upstream failure is remembered briefly, so a down Location Service is not
-// called again by every public read; it is asked again once the memory expires.
 func TestAnUpstreamFailureIsReportedAndRememberedBriefly(t *testing.T) {
 	repo := fallbackRepo()
 	failing := true
@@ -182,8 +176,6 @@ func TestAnUpstreamFailureIsReportedAndRememberedBriefly(t *testing.T) {
 	}
 }
 
-// A level the Location Service has nothing for is asked about once, then
-// remembered, so repeated public reads do not each cost an outbound call.
 func TestAnEmptyUpstreamAnswerIsRemembered(t *testing.T) {
 	repo := fallbackRepo()
 	up := answering(`[]`)
@@ -201,7 +193,6 @@ func TestAnEmptyUpstreamAnswerIsRemembered(t *testing.T) {
 		t.Fatalf("upstream called %d times for 5 reads of an empty level, want 1", up.calls())
 	}
 
-	// Another key is not affected.
 	if _, err := svc.GetDistrict(context.Background(), "1671"); err != nil || up.calls() != 2 {
 		t.Fatalf("a different level must ask again: err=%v calls=%d", err, up.calls())
 	}
@@ -222,7 +213,6 @@ func TestARememberedEmptyAnswerExpires(t *testing.T) {
 	}
 }
 
-// Many requests for the same empty level that arrive together share one call.
 func TestConcurrentReadsOfAnEmptyLevelShareOneUpstreamCall(t *testing.T) {
 	repo := fallbackRepo()
 	release := make(chan struct{})
@@ -249,7 +239,7 @@ func TestConcurrentReadsOfAnEmptyLevelShareOneUpstreamCall(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	time.Sleep(200 * time.Millisecond) // the other readers have joined the call by now
+	time.Sleep(200 * time.Millisecond)
 	close(release)
 	wg.Wait()
 	if up.calls() != 1 {

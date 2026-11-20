@@ -5,11 +5,8 @@ import (
 	"time"
 )
 
-// maxMisses bounds the table; keys are existing parent codes, so it is rarely reached.
 const maxMisses = 10000
 
-// missCache remembers, per cache key, that the Location Service had nothing to
-// offer or failed, so the same lookup is not repeated on every request.
 type missCache struct {
 	mu         sync.Mutex
 	until      map[string]miss
@@ -19,14 +16,13 @@ type missCache struct {
 
 type miss struct {
 	until  time.Time
-	failed bool // the Location Service failed, as opposed to answering with nothing
+	failed bool
 }
 
 func newMissCache(ttl, failureTTL time.Duration) *missCache {
 	return &missCache{until: make(map[string]miss), ttl: ttl, failureTTL: failureTTL}
 }
 
-// lookup reports whether key is remembered and, if so, whether as a failure.
 func (m *missCache) lookup(key string) (failed, found bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

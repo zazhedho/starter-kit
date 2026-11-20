@@ -19,14 +19,11 @@ import (
 	"starter-kit/internal/testutil/routertest"
 )
 
-// engineFor mounts the location module alone under /api.
 func engineFor(t *testing.T, d module.Deps) *gin.Engine {
 	t.Helper()
 	return routertest.Mount(t, Register, d)
 }
 
-// locationRoutes is every route the module mounts, pinned on purpose: a new
-// route must be added here and, if it is protected, to TestLocationRoutesProtection.
 var locationRoutes = []string{
 	"GET /api/location/city",
 	"GET /api/location/district",
@@ -44,7 +41,6 @@ func TestLocationMountsExactlyItsRoutes(t *testing.T) {
 }
 
 func TestLocationRoutesProtection(t *testing.T) {
-	// The public read falls back to the Location Service; keep it off the network.
 	engine := engineFor(t, routertest.NewDeps(t, func(c *config.Config) { c.Location.ServiceBaseURL = "http://127.0.0.1:1" }))
 
 	switch got := routertest.Serve(engine, http.MethodGet, "/api/location/province"); got {
@@ -61,9 +57,6 @@ func TestLocationRoutesProtection(t *testing.T) {
 	}
 }
 
-// The public reads can cost an outbound call, so they are limited per client IP
-// when Redis is there. A request without its parent code answers 400 before any
-// work, which keeps the test off the database and the network.
 func TestPublicReadsAreRateLimitedPerIPWithRedis(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -82,7 +75,6 @@ func TestPublicReadsAreRateLimitedPerIPWithRedis(t *testing.T) {
 	}
 }
 
-// Without Redis the limiter is not built (gokit panics on a zero limit).
 func TestPublicReadsAreNotLimitedWithoutRedis(t *testing.T) {
 	d := routertest.NewDeps(t, func(c *config.Config) { c.Location.RateLimit, c.Location.RateWindow = 0, 0 })
 	d.Redis = nil
@@ -94,7 +86,6 @@ func TestPublicReadsAreNotLimitedWithoutRedis(t *testing.T) {
 	}
 }
 
-// Only the public group is limited: the sync routes keep answering 401.
 func TestTheRateLimiterDoesNotCoverTheSyncRoutes(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -109,8 +100,6 @@ func TestTheRateLimiterDoesNotCoverTheSyncRoutes(t *testing.T) {
 	}
 }
 
-// A Redis outage lets the public reads through, unless LIMITER_FAIL_CLOSED asks
-// for the limiter to refuse them.
 func TestPublicReadsFollowTheFailClosedSetting(t *testing.T) {
 	for _, c := range []struct {
 		failClosed bool
@@ -134,8 +123,6 @@ const (
 	jwtKey   = "test-jwt-key-that-is-at-least-32-characters-long"
 )
 
-// signedInDeps is Deps whose database answers what Auth asks for a signed-in
-// user with the given role, after the startup recovery.
 func signedInDeps(t *testing.T, role string) (module.Deps, sqlmock.Sqlmock) {
 	t.Helper()
 	d := routertest.NewDeps(t, nil)
@@ -145,13 +132,12 @@ func signedInDeps(t *testing.T, role string) (module.Deps, sqlmock.Sqlmock) {
 		t.Fatalf("authkit.New: %v", err)
 	}
 	d.DB, d.Kit = db, kit
-	mock.ExpectExec(`UPDATE .location_sync_jobs. SET`).WillReturnResult(sqlmock.NewResult(0, 0)) // startup recovery
+	mock.ExpectExec(`UPDATE .location_sync_jobs. SET`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`FROM "blacklist"`).WillReturnRows(sqlmock.NewRows([]string{"?column?"}))
 	mock.ExpectQuery(`FROM "users"`).WillReturnRows(sqlmock.NewRows([]string{"role", "tokens_valid_after"}).AddRow(role, nil))
 	return d, mock
 }
 
-// A signed-in user without locations:sync is refused by Can, not by the handler.
 func TestSyncRoutesAreForbiddenWithoutThePermission(t *testing.T) {
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodPost, "/api/location/sync", `{"level":"province"}`},

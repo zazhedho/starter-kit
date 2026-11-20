@@ -13,11 +13,8 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// A sync is an upsert: it adds rows and updates names, and removes nothing. A
-// location the Location Service stopped listing stays in the tables.
+// A sync only upserts: a location the Location Service stopped listing stays in the tables.
 
-// runSyncJob runs one job of this instance until Interrupt cancels it. A
-// heartbeat shows it is alive; a job taken over by another instance stops.
 func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	ctx, cancelJob := context.WithCancel(s.baseCtx)
 	defer cancelJob()
@@ -60,9 +57,6 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	}, "completed")
 }
 
-// beat reports the job's heartbeat every heartbeatInterval until the returned
-// stop function is called. When the job no longer belongs to this instance it
-// cancels the job.
 func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID string) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -89,8 +83,6 @@ func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID 
 	return func() { cancel(); <-done }
 }
 
-// progressWriter stores a job's progress, at most once per progressInterval so
-// that a sync of thousands of rows does not become thousands of writes.
 type progressWriter struct {
 	s         *Service
 	cancelJob context.CancelFunc
@@ -110,7 +102,7 @@ func (w *progressWriter) report(ctx context.Context, p domainlocation.SyncProgre
 	err := w.s.repo.SaveSyncProgress(ctx, w.jobID, w.s.instanceID, p, time.Now())
 	switch {
 	case errors.Is(err, domainlocation.ErrNotFound):
-		w.cancelJob() // another instance took the job over
+		w.cancelJob()
 	case err != nil && ctx.Err() == nil:
 		logus.Logf(logus.LevelWarn, "location: failed to update sync job progress %s: %v", w.jobID, err)
 	}
@@ -120,8 +112,6 @@ func (s *Service) markFailed(jobID, errorMessage string) {
 	s.finishFailed(jobID, "Location sync failed", errorMessage)
 }
 
-// markInterrupted ends a job cut short by shutdown with the message and error
-// text a stale takeover writes.
 func (s *Service) markInterrupted(jobID string) {
 	s.finishFailed(jobID, "Location sync interrupted", shutdownMessage)
 }
@@ -134,15 +124,12 @@ func (s *Service) finishFailed(jobID, message, errorMessage string) {
 	}, "failed")
 }
 
-// markIfInterrupted records the interrupted state when ctx was canceled, so a
-// job that never got going is not left queued.
 func (s *Service) markIfInterrupted(ctx context.Context, jobID string) {
 	if ctx.Err() != nil {
 		s.markInterrupted(jobID)
 	}
 }
 
-// syncLevel fetches one level, stores it and drops the cache keys it covers.
 func syncLevel[T any](ctx context.Context, s *Service, report func(domainlocation.SyncProgress), message string,
 	fetch func(context.Context) ([]T, error), upsert func(context.Context, []T) error, cacheKey string) ([]T, error) {
 	report(domainlocation.SyncProgress{Message: message})
@@ -182,7 +169,7 @@ func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, report 
 			s.repo.UpsertVillages, villageKey(req.DistrictCode))
 		return domainlocation.SyncProgress{Message: "Village sync completed", VillageCount: len(rows)}, err
 	}
-	return s.syncAll(ctx, report) // level "all": StartSync has validated the level
+	return s.syncAll(ctx, report)
 }
 
 func (s *Service) syncAll(ctx context.Context, report func(domainlocation.SyncProgress)) (domainlocation.SyncProgress, error) {

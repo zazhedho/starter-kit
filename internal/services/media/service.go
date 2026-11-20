@@ -16,22 +16,15 @@ import (
 )
 
 const (
-	defaultMaxFileSize = int64(10 << 20)
-	mediaFolder        = "media"
-	// orphanCleanupTimeout bounds the removal of an object whose row was not stored.
+	defaultMaxFileSize   = int64(10 << 20)
+	mediaFolder          = "media"
 	orphanCleanupTimeout = 10 * time.Second
 )
 
-// Options tunes the service. The zero value is valid: a 10 MiB limit, every
-// supported content type and UUIDv7 identifiers.
 type Options struct {
-	// MaxFileSize is the largest accepted upload in bytes; zero or less means 10 MiB.
-	MaxFileSize int64
-	// AllowedContentTypes lists accepted media types; empty means every supported one,
-	// and a type that is not supported is ignored.
+	MaxFileSize         int64
 	AllowedContentTypes []string
-	// NewID returns a new identifier for a stored media row; nil means UUIDv7.
-	NewID func() string
+	NewID               func() string
 }
 
 type Service struct {
@@ -56,7 +49,7 @@ func NewService(repo Repository, storage Storage, opts Options) *Service {
 		newID = newUUIDv7
 	}
 
-	// Only types the module can store safely are ever allowed, whatever Options says.
+	// Only types the module can store safely are allowed, whatever Options says.
 	supported := domainmedia.SupportedContentTypes()
 	allowed := make(map[string]struct{}, len(allowedContentTypes))
 	for _, contentType := range allowedContentTypes {
@@ -145,9 +138,7 @@ func (s *Service) Delete(ctx context.Context, actor domainmedia.Actor, id string
 	return media, nil
 }
 
-// removeOrphan deletes an object whose metadata row failed to store. The request
-// context may be canceled (the client gave up), so the removal gets its own
-// short deadline; a failure leaves an orphan, which is logged for cleanup.
+// The request context may be canceled, so the removal gets its own short deadline.
 func (s *Service) removeOrphan(ctx context.Context, objectName string) {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), orphanCleanupTimeout)
 	defer cancel()
@@ -156,8 +147,7 @@ func (s *Service) removeOrphan(ctx context.Context, objectName string) {
 	}
 }
 
-// List returns a page of media and the total match count. Without list_any the
-// owner filter is forced to the caller, whatever the request asked for.
+// List forces the owner filter to the caller without list_any.
 func (s *Service) List(ctx context.Context, actor domainmedia.Actor, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	if !actor.CanListAny {
 		req.OwnerUserID = strings.TrimSpace(actor.UserID)
@@ -165,8 +155,6 @@ func (s *Service) List(ctx context.Context, actor domainmedia.Actor, req dtomedi
 	return s.repo.List(ctx, req)
 }
 
-// newUUIDv7 returns a time-ordered UUID, falling back to a random one if the
-// clock source fails. The router normally injects the same behavior.
 func newUUIDv7() string {
 	if id, err := uuid.NewV7(); err == nil {
 		return id.String()

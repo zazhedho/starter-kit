@@ -14,17 +14,12 @@ import (
 	servicelocation "starter-kit/internal/services/location"
 )
 
-// recoveryTimeout bounds the startup recovery of interrupted sync jobs. A
-// variable so tests can shorten it.
 var recoveryTimeout = 10 * time.Second
 
-// wired is what the location routes need once the module is built.
 type wired struct {
 	handler *httplocation.Handler
 }
 
-// wire builds repository, cache, service and handler, fails sync jobs a previous
-// process left behind, and registers the service's shutdown hook.
 func wire(d module.Deps) (*wired, error) {
 	loc := d.Config.Location
 	repo := repositorylocation.NewRepository(d.DB)
@@ -37,15 +32,12 @@ func wire(d module.Deps) (*wired, error) {
 
 		MaxResponseBytes: loc.MaxResponseBytes,
 	})
-	// A sync job left queued or running by a previous process will never
-	// finish: fail it now, then let the application stop this process's job at
-	// shutdown.
 	recoverCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
 	defer cancel()
 	if err := svc.RecoverInterruptedJobs(recoverCtx); err != nil {
 		return nil, fmt.Errorf("recover location sync jobs: %w", err)
 	}
-	d.Lifecycle.OnDrain(svc.Interrupt) // the job records its end while requests drain
+	d.Lifecycle.OnDrain(svc.Interrupt)
 	d.Lifecycle.OnClose("location sync", svc.Close)
 	return &wired{handler: httplocation.New(svc)}, nil
 }

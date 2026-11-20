@@ -11,13 +11,10 @@ import (
 	servicemedia "starter-kit/internal/services/media"
 )
 
-// wired is what the media routes need once the module is built.
 type wired struct {
 	handler *httpmedia.Handler
 }
 
-// wire builds repository, service and handler. The module is enabled and
-// Deps.Storage must be set; it opens no connection and has no side effects.
 func wire(d module.Deps) (*wired, error) {
 	if d.Storage == nil {
 		return nil, errors.New("storage is required when media is enabled")

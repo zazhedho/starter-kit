@@ -12,9 +12,6 @@ import (
 	domainlocation "starter-kit/internal/domain/location"
 )
 
-// locationRepoTestDouble is an in-memory Repository. Fields are set before the
-// service runs; what the service did is read through the methods below, which
-// lock because sync jobs run in their own goroutine.
 type locationRepoTestDouble struct {
 	provinces []domainlocation.Province
 	cities    []domainlocation.City
@@ -22,26 +19,25 @@ type locationRepoTestDouble struct {
 	villages  []domainlocation.Village
 	listErr   error
 
-	// Parents known to GetProvinceByCode, GetCityByCode and GetDistrictByCode.
 	knownProvinces map[string]domainlocation.Province
 	knownCities    map[string]domainlocation.City
 	knownDistricts map[string]domainlocation.District
 
-	activeJob                                                                  domainlocation.SyncJob // returned by GetActiveSyncJob when its ID is set
-	syncJob                                                                    domainlocation.SyncJob // returned by GetSyncJobByID
+	activeJob                                                                  domainlocation.SyncJob
+	syncJob                                                                    domainlocation.SyncJob
 	syncJobErr                                                                 error
 	createSyncJobErr, startErr, touchErr, finishErr, failStaleErr, progressErr error
 
 	upsertProvinceErr, upsertCityErr, upsertDistrictErr, upsertVillageErr error
 
 	mu                  sync.Mutex
-	lookups             int // parent lookups (GetXByCode)
+	lookups             int
 	createdJob          *domainlocation.SyncJob
 	started             []string
 	progress            []domainlocation.SyncProgress
 	touches             int
 	finishes            []domainlocation.SyncFinish
-	failStale           []time.Duration // staleAfter of each call
+	failStale           []time.Duration
 	failStaleMessage    string
 	upsertProvinceCount int
 	upsertCityCount     int
@@ -49,7 +45,7 @@ type locationRepoTestDouble struct {
 	upsertVillageCount  int
 	upsertedCities      []domainlocation.City
 	upsertedVillages    []domainlocation.Village
-	deadlines           []time.Time // deadline of the context of each finish
+	deadlines           []time.Time
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -221,8 +217,6 @@ func (m *locationRepoTestDouble) counts() (finishes, touches, progress int) {
 	return len(m.finishes), m.touches, len(m.progress)
 }
 
-// upstream is an HTTP transport standing in for the Location Service; it counts
-// the requests it receives.
 type upstream struct {
 	mu       sync.Mutex
 	requests []string
@@ -246,13 +240,10 @@ func okResponse(body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
 
-// answering returns an upstream that serves body for every request.
 func answering(body string) *upstream {
 	return &upstream{handle: func(*http.Request) *http.Response { return okResponse(body) }}
 }
 
-// newTestService builds a Service through the constructor and, when rt is not
-// nil, swaps the HTTP transport so no network is used.
 func newTestService(t *testing.T, repo Repository, rt http.RoundTripper) *Service {
 	t.Helper()
 	svc := NewService(repo, Options{HeartbeatInterval: time.Hour})

@@ -13,7 +13,6 @@ import (
 
 const provinceBody = `{"data":[{"code":"31","name":"DKI Jakarta"}]}`
 
-// jobFixture wires a Service whose HTTP transport is supplied by the test.
 func jobFixture(t *testing.T, rt http.RoundTripper) (*Service, *locationRepoTestDouble) {
 	t.Helper()
 	repo := &locationRepoTestDouble{}
@@ -34,7 +33,7 @@ func TestCloseCancelsARunningSyncAndMarksItInterrupted(t *testing.T) {
 	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
 		t.Fatalf("StartSync = %v", err)
 	}
-	<-started // the job is inside its HTTP call
+	<-started
 
 	if err := svc.Close(context.Background()); err != nil {
 		t.Fatalf("Close = %v", err)
@@ -45,8 +44,6 @@ func TestCloseCancelsARunningSyncAndMarksItInterrupted(t *testing.T) {
 	}
 }
 
-// Interrupt only signals: the shutdown goes on and the job records its end
-// while the HTTP requests drain, so a long drain cannot starve the final write.
 func TestInterruptCancelsTheJobWithoutWaitingForIt(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	svc, repo := jobFixture(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -86,7 +83,7 @@ func TestCloseWaitsForTheJobToRecordItsState(t *testing.T) {
 		close(started)
 		<-req.Context().Done()
 		close(observedCancel)
-		<-release // the job is still busy after it noticed the cancellation
+		<-release
 		return nil, req.Context().Err()
 	}))
 	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
@@ -97,7 +94,7 @@ func TestCloseWaitsForTheJobToRecordItsState(t *testing.T) {
 	closed := make(chan error, 1)
 	go func() { closed <- svc.Close(context.Background()) }()
 
-	<-observedCancel // Close has canceled the job, which has not finished
+	<-observedCancel
 	select {
 	case err := <-closed:
 		t.Fatalf("Close returned (%v) while the job was still running", err)
@@ -116,7 +113,7 @@ func TestCloseIsBoundedByItsContext(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	svc, _ := jobFixture(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		close(started)
-		<-release // ignores cancellation, like a stuck call
+		<-release
 		return nil, errors.New("late")
 	}))
 	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
@@ -130,7 +127,7 @@ func TestCloseIsBoundedByItsContext(t *testing.T) {
 		t.Fatalf("Close = %v, want it to give up with the context error", err)
 	}
 	close(release)
-	if err := svc.Close(context.Background()); err != nil { // second call joins the job
+	if err := svc.Close(context.Background()); err != nil {
 		t.Fatalf("second Close = %v", err)
 	}
 }
@@ -174,8 +171,6 @@ func TestNewServiceDoesNotTouchTheRepository(t *testing.T) {
 	}
 }
 
-// Recovery fails only jobs whose heartbeat is older than StaleAfter: a job of
-// an instance that is still alive (a rolling deploy) is not touched.
 func TestRecoverInterruptedJobsTakesOverOnlyStaleJobs(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := NewService(repo, Options{StaleAfter: 90 * time.Second})
@@ -233,7 +228,7 @@ func TestSettleWriteIsSkippedOnceTheCloseDeadlineHasPassed(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	svc, repo := jobFixture(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		close(started)
-		<-release // ignores cancellation until after Close gave up
+		<-release
 		return nil, req.Context().Err()
 	}))
 	if _, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99"); err != nil {
@@ -247,7 +242,7 @@ func TestSettleWriteIsSkippedOnceTheCloseDeadlineHasPassed(t *testing.T) {
 		t.Fatalf("Close = %v, want the deadline error", err)
 	}
 	close(release)
-	_ = svc.Close(context.Background()) // joins the job
+	_ = svc.Close(context.Background())
 	if finishes, _, _ := repo.counts(); finishes != 0 {
 		t.Fatalf("the job wrote %d final states after the shutdown deadline", finishes)
 	}

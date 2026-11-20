@@ -17,7 +17,6 @@ import (
 	"starter-kit/internal/testutil/logcapture"
 )
 
-// logs captures what the service logs during the tests (see logcapture).
 var logs *logcapture.Capture
 
 func TestMain(m *testing.M) {
@@ -69,7 +68,6 @@ func (m *mediaRepoMock) Delete(_ context.Context, id string) error {
 	return m.deleteErr
 }
 
-// storedFile is what the storage mock reports for an upload.
 type storedFile struct{ objectName, url string }
 
 type mediaStorageMock struct {
@@ -77,8 +75,8 @@ type mediaStorageMock struct {
 	uploadResult   storedFile
 	uploadErr      error
 	deletedObject  string
-	deleteCtxErr   error // the context's error when DeleteObject was called
-	deleteHasLimit bool  // the context carried a deadline then
+	deleteCtxErr   error
+	deleteHasLimit bool
 	deleteErr      error
 }
 
@@ -221,8 +219,6 @@ func TestUploadUsesTheInjectedIDGenerator(t *testing.T) {
 	}
 }
 
-// Without an injected generator the service issues UUIDv7 ids, the same
-// version gokit.CreateUUID produces, so ids stay time-ordered.
 func TestUploadDefaultIDIsUUIDv7(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	storageMock := &mediaStorageMock{uploadResult: storedFile{"media/x.png", "https://cdn/media/x.png"}}
@@ -253,7 +249,6 @@ func TestDeleteOtherWithoutDeleteAnyIsForbidden(t *testing.T) {
 	storageMock := &mediaStorageMock{}
 	service := NewService(repo, storageMock, Options{})
 
-	// CanListAny must not leak into delete rights.
 	_, err := service.Delete(context.Background(), domainmedia.Actor{UserID: uuid.NewString(), CanListAny: true}, media.ID)
 	if !errors.Is(err, domainmedia.ErrMediaForbidden) {
 		t.Fatalf("expected forbidden, got %v", err)
@@ -324,8 +319,6 @@ func TestListReturnsRepositoryErrors(t *testing.T) {
 	}
 }
 
-// A media row keeps the object key the storage returned; the URL is built from
-// the base URL at upload time and goes stale when that changes.
 func TestDeleteUsesTheStoredObjectKeyNotTheURL(t *testing.T) {
 	ownerID := uuid.NewString()
 	media := domainmedia.Media{
@@ -358,8 +351,6 @@ func TestDeleteKeepsTheRowWhenTheObjectCannotBeDeleted(t *testing.T) {
 	}
 }
 
-// The request may already be canceled (a client that gave up); the orphan must
-// still be removed, with its own short deadline, and a failure must be logged.
 func TestOrphanCleanupSurvivesACanceledRequestAndLogsFailures(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	storageMock := &mediaStorageMock{
@@ -389,8 +380,6 @@ func TestOrphanCleanupSurvivesACanceledRequestAndLogsFailures(t *testing.T) {
 	}
 }
 
-// Config rejects unsupported types, but a hand-built Options must not be able to
-// allow what the module can never store safely.
 func TestNewServiceNeverAllowsAnUnsupportedContentType(t *testing.T) {
 	html := []byte("<html><script>alert(1)</script></html>")
 	storage := &mediaStorageMock{}

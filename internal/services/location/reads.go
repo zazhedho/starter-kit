@@ -9,17 +9,12 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// errRecentFailure answers a read while a failed Location Service call is remembered.
 var errRecentFailure = fmt.Errorf("%w: the call failed a moment ago", domainlocation.ErrUpstream)
 
-// level describes how one level of the hierarchy is read: from the cache, then
-// the table, then, when the table has nothing, from the Location Service.
 type level[T any] struct {
-	key  string
-	list func(ctx context.Context) ([]T, error)
-	view func(T) dtolocation.Location
-	// fetch checks that the parent exists locally and returns the rows the
-	// Location Service has for it; it never returns rows of another parent.
+	key    string
+	list   func(ctx context.Context) ([]T, error)
+	view   func(T) dtolocation.Location
 	fetch  func(ctx context.Context) ([]T, error)
 	upsert func(ctx context.Context, rows []T) error
 }
@@ -44,9 +39,6 @@ func readLevel[T any](ctx context.Context, s *Service, l level[T]) ([]dtolocatio
 	return locations, nil
 }
 
-// fillLevel fetches and stores a level the table has no rows for. Concurrent
-// reads share one call, and an empty answer or a brief failure is remembered, so
-// public reads cannot hammer the Location Service.
 func fillLevel[T any](ctx context.Context, s *Service, l level[T]) ([]T, error) {
 	if failed, found := s.misses.lookup(l.key); found {
 		if failed {

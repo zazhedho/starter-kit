@@ -24,8 +24,6 @@ func TestNewLocationServiceNeverDisablesTheHTTPTimeout(t *testing.T) {
 	}
 }
 
-// fakeCache is an in-memory cache that records what the service asks of it, so
-// service rules can be tested without Redis.
 type fakeCache struct {
 	mu      sync.Mutex
 	entries map[string]time.Duration

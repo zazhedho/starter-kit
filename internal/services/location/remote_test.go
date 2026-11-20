@@ -15,8 +15,6 @@ import (
 )
 
 func TestFetchEntriesReadsBothResponseShapesTheSameWay(t *testing.T) {
-	// The same three provinces, in the shapes the Location Service has used:
-	// each with a blank-padded name, one with a code that is not a code.
 	bodies := map[string]string{
 		"array":         `[{"code":"32","name":" Jawa Barat "},{"code":"31","name":"DKI Jakarta"},{"code":"3x","name":"Broken"},{"code":"11","name":"Aceh"}]`,
 		"wrapped array": `{"log_id":"t","data":[{"code":"32","name":" Jawa Barat "},{"code":"31","name":"DKI Jakarta"},{"code":"3x","name":"Broken"},{"code":"11","name":"Aceh"}]}`,
@@ -66,7 +64,7 @@ func TestFetchEntriesDropsWhatDoesNotBelongOrIsNotValid(t *testing.T) {
 }
 
 func TestFetchEntriesAcceptsAName255CharactersLong(t *testing.T) {
-	name := strings.Repeat("é", 255) // 255 characters, 510 bytes
+	name := strings.Repeat("é", 255)
 	svc := newTestService(t, &locationRepoTestDouble{}, answering(`{"31":"`+name+`"}`))
 	got, err := svc.fetchEntries(context.Background(), "province", "/p", nil, "")
 	if err != nil || len(got) != 1 {
@@ -97,7 +95,6 @@ func TestEveryUpstreamFailureIsAnErrUpstream(t *testing.T) {
 func TestFetchEntriesReadsNoMoreThanTheConfiguredCap(t *testing.T) {
 	var served atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// An endless body: a reader without a cap would never return.
 		chunk := []byte(strings.Repeat("x", 4096))
 		for {
 			n, err := w.Write(chunk)
@@ -172,7 +169,6 @@ func newScopedSync(t *testing.T, repo *locationRepoTestDouble) *Service {
 	return newTestService(t, repo, scopedUpstream())
 }
 
-// scopedUpstream serves one province, with one city, district and village under it.
 func scopedUpstream() *upstream {
 	return &upstream{handle: func(req *http.Request) *http.Response {
 		body := `{}`
@@ -190,8 +186,6 @@ func scopedUpstream() *upstream {
 	}}
 }
 
-// relativeCodesUpstream answers each level and fails the test unless the
-// request carries the relative codes of its parents.
 func relativeCodesUpstream(t *testing.T) *upstream {
 	return &upstream{handle: func(req *http.Request) *http.Response {
 		q := req.URL.Query()

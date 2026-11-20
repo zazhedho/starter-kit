@@ -1,6 +1,3 @@
-// Package logcapture lets a test binary read what the service logs.
-// Start sends logus output (logus.SetOutput) and the standard log package to a
-// pipe that the Capture reads. Call it from TestMain, before any test logs.
 package logcapture
 
 import (
@@ -20,7 +17,6 @@ const flushTimeout = 5 * time.Second
 
 var syncMarker = regexp.MustCompile("\x00sync-[0-9]+\x00")
 
-// Capture collects log output written after Start.
 type Capture struct {
 	w     *os.File
 	r     *os.File
@@ -35,8 +31,6 @@ type Capture struct {
 
 type Mark int
 
-// Start captures logus output and the standard log package. It panics if the
-// pipe cannot be created (out of file descriptors).
 func Start() *Capture {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -68,8 +62,6 @@ func (c *Capture) read() {
 	}
 }
 
-// flush waits until everything written so far has been read from the pipe, by
-// writing a marker and waiting for it to arrive.
 func (c *Capture) flush() {
 	c.mu.Lock()
 	c.syncs++
@@ -106,7 +98,6 @@ func (c *Capture) Since(m Mark) string {
 
 func (c *Capture) All() string { return c.Since(0) }
 
-// Stop restores log output (logus goes back to os.Stdout) and ends the capture.
 func (c *Capture) Stop() {
 	logus.SetOutput(nil)
 	log.SetOutput(c.prevL)

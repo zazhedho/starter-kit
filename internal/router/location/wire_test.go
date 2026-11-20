@@ -64,8 +64,6 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 	}
 }
 
-// Drain, the first step of shutdown, interrupts the sync service so it stops
-// accepting jobs while requests still drain; Close then waits for it.
 func TestRegisterLocationRegistersShutdownHooks(t *testing.T) {
 	d, _ := signedInDeps(t, "superadmin")
 	engine := engineFor(t, d)
@@ -87,8 +85,6 @@ func TestRegisterLocationRegistersShutdownHooks(t *testing.T) {
 	}
 }
 
-// The configured response cap reaches the service: a body over it is an upstream
-// failure (502), not a stored list.
 func TestRegisterLocationPassesTheResponseCap(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"code":"11","name":"` + strings.Repeat("A", 300) + `"}]`))

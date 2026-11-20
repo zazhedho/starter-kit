@@ -48,8 +48,6 @@ func accessLogLines(output string) []string {
 	return lines
 }
 
-// TestMiddlewareOrderAndSingleAccessLog checks that the request id precedes the
-// logger, CORS precedes the body limit, and each request is logged once.
 func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	engine := newEngine(t, routertest.NewDeps(t, func(c *config.Config) { c.HTTP.MaxBodyBytes = 1024 }))
 	const requestID = "0197a4b2-6c3e-7d11-9a55-3f1c2b4d5e6f"
@@ -62,7 +60,7 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 
 	big := httptest.NewRecorder()
 	bigReq := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(strings.Repeat("a", 4096)))
-	bigReq.Header.Set("Origin", "https://app.example.com") // CORS only answers requests that carry an Origin
+	bigReq.Header.Set("Origin", "https://app.example.com")
 	engine.ServeHTTP(big, bigReq)
 	lines := accessLogLines(logs.Since(mark))
 
@@ -86,8 +84,6 @@ func TestMiddlewareOrderAndSingleAccessLog(t *testing.T) {
 	}
 }
 
-// RequestIDMiddleware must run before Recovery: a panic is answered with the
-// same log_id the caller sent as X-Request-ID, not a fresh one.
 func TestRequestIDPrecedesRecovery(t *testing.T) {
 	engine := newEngine(t, routertest.NewDeps(t, nil))
 	engine.GET("/boom", func(*gin.Context) { panic("boom") })
@@ -213,10 +209,8 @@ func TestReadyz(t *testing.T) {
 		}
 	})
 
-	// A load balancer must stop sending traffic as soon as shutdown starts, while
-	// the database is still fine and requests are still being served.
 	t.Run("draining answers 503 without touching the database", func(t *testing.T) {
-		d := routertest.NewDeps(t, nil) // the mock expects no ping
+		d := routertest.NewDeps(t, nil)
 		engine := newEngine(t, d)
 		d.Lifecycle.Drain()
 		rec := get(engine)
@@ -261,9 +255,7 @@ func TestMountAuthKitRegistersAuthRoutes(t *testing.T) {
 func TestSessionRoutesAbsentWithoutRedis(t *testing.T) {
 	engine := newEngine(t, routertest.NewDeps(t, nil))
 
-	// GET /api/user/sessions itself answers 401 without Redis because the
-	// authenticated GET /api/user/:id route matches "sessions", so assert on the
-	// registered route table instead of the status code.
+	// GET /api/user/:id matches "sessions" and answers 401, so assert on the route table, not the status.
 	registered := map[string]bool{}
 	for _, route := range engine.Routes() {
 		registered[route.Method+" "+route.Path] = true
@@ -294,8 +286,6 @@ func TestNewNamesTheModuleThatFailsToRegister(t *testing.T) {
 	}
 }
 
-// serveFrom sends a GET whose connection comes from remote and whose
-// X-Forwarded-For header is forwarded, and returns the status and body.
 func serveFrom(engine *gin.Engine, path, remote, forwarded string) (int, string) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -346,14 +336,12 @@ func TestAConfiguredProxyIsHonoured(t *testing.T) {
 	if _, ip := serveFrom(engine, "/test/ip", "192.0.2.10", "203.0.113.9"); ip != "203.0.113.9" {
 		t.Fatalf("ClientIP = %q, want the forwarded client of a trusted proxy", ip)
 	}
-	// Two different forwarded clients behind the proxy each get their own budget.
 	for i := range 4 {
 		got, _ := serveFrom(engine, "/api/location/city", "192.0.2.10", fmt.Sprintf("203.0.113.%d", i+1))
 		if got != http.StatusBadRequest {
 			t.Fatalf("client %d = %d, want 400", i+1, got)
 		}
 	}
-	// An untrusted peer cannot borrow the header.
 	if _, ip := serveFrom(engine, "/test/ip", "198.51.100.7", "203.0.113.9"); ip != "198.51.100.7" {
 		t.Fatalf("ClientIP = %q, want the remote address of an untrusted peer", ip)
 	}

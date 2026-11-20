@@ -17,10 +17,8 @@ import (
 	domainlocation "starter-kit/internal/domain/location"
 )
 
-// maxNameLength is the width of the name columns, in characters.
 const maxNameLength = 255
 
-// maxEnvelopeDepth bounds how many {"data": ...} wrappers are unwrapped.
 const maxEnvelopeDepth = 3
 
 type locationServiceEnvelope struct {
@@ -32,8 +30,6 @@ type locationServiceItem struct {
 	Name string `json:"name"`
 }
 
-// entry is one location the Location Service returned, after validation: a code
-// stored as is and a name.
 type entry struct{ Code, Name string }
 
 func (s *Service) locationServiceURL(path string, query map[string]string) string {
@@ -50,9 +46,6 @@ func (s *Service) locationServiceURL(path string, query map[string]string) strin
 	return rawURL
 }
 
-// fetchEntries asks the Location Service for one level and returns the valid
-// entries that belong to parent, sorted by name then code. parent is empty for
-// provinces. Every failure wraps domainlocation.ErrUpstream.
 func (s *Service) fetchEntries(ctx context.Context, entity, path string, query map[string]string, parent string) ([]entry, error) {
 	body, err := s.getBody(ctx, s.locationServiceURL(path, query), entity)
 	if err != nil {
@@ -91,8 +84,6 @@ func (s *Service) fetchEntries(ctx context.Context, entity, path string, query m
 	return entries, nil
 }
 
-// getBody performs the GET and returns the body, which is read up to the
-// configured cap and no further.
 func (s *Service) getBody(ctx context.Context, target, entity string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
@@ -119,8 +110,6 @@ func (s *Service) getBody(ctx context.Context, target, entity string) ([]byte, e
 	return body, nil
 }
 
-// decodePairs reads either response shape, a {"<code>": "<name>"} object or an
-// array of {"code", "name"}, optionally inside {"data": ...}, into one list.
 func decodePairs(body []byte, depth int) ([]locationServiceItem, error) {
 	var envelope locationServiceEnvelope
 	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Data) > 0 && depth < maxEnvelopeDepth {
@@ -143,7 +132,6 @@ func decodePairs(body []byte, depth int) ([]locationServiceItem, error) {
 	return items, nil
 }
 
-// fetchRows fetches one level and builds its rows.
 func fetchRows[T any](ctx context.Context, s *Service, entity, path string, query map[string]string, parent string, build func(entry, time.Time) T) ([]T, error) {
 	entries, err := s.fetchEntries(ctx, entity, path, query, parent)
 	if err != nil {

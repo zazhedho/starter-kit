@@ -15,8 +15,6 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// Service holds the location use cases. Build it with NewService; a running
-// sync belongs to the Service until Close.
 type Service struct {
 	repo       Repository
 	cache      Cache
@@ -32,24 +30,17 @@ type Service struct {
 	staleAfter        time.Duration
 	progressInterval  time.Duration
 
-	// misses and flights keep a burst of reads for an empty level from calling
-	// the Location Service once per request.
 	misses  *missCache
 	flights singleflight.Group
 
-	// lifecycle: background sync jobs run under baseCtx, which Interrupt cancels.
-	baseCtx context.Context
-	cancel  context.CancelFunc
-	mu      sync.Mutex
-	closed  bool
-	jobs    sync.WaitGroup
-	// settleBy is the deadline Close was given: the final state write of a
-	// canceled job must end by then. Zero until Close is called with one.
+	baseCtx  context.Context
+	cancel   context.CancelFunc
+	mu       sync.Mutex
+	closed   bool
+	jobs     sync.WaitGroup
 	settleBy time.Time
 }
 
-// NewService builds the service. It performs no I/O: call RecoverInterruptedJobs
-// once at startup, and Close at shutdown.
 func NewService(repo Repository, opts Options) *Service {
 	cache := opts.Cache
 	if cache == nil {
@@ -67,9 +58,8 @@ func NewService(repo Repository, opts Options) *Service {
 	return &Service{
 		repo:  repo,
 		cache: cache,
-		// Zero would mean "no timeout" to http.Client; never allow that, so a
-		// project that builds Options by hand stays safe. The Location Service
-		// is not trusted to redirect: a redirect is an error status.
+		// Zero would mean no timeout to http.Client. A redirect is an error status: the Location Service
+		// is not trusted to redirect.
 		httpClient: &http.Client{
 			Timeout:       orDefault(opts.Timeout, defaultHTTPTimeout),
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -88,8 +78,6 @@ func NewService(repo Repository, opts Options) *Service {
 	}
 }
 
-// newUUIDv7 returns a time-ordered UUID, falling back to a random one if the
-// clock source fails. The router normally injects the same behavior.
 func newUUIDv7() string {
 	if id, err := uuid.NewV7(); err == nil {
 		return id.String()
@@ -107,7 +95,6 @@ func (s *Service) GetProvince(ctx context.Context) ([]dtolocation.Location, erro
 	})
 }
 
-// GetCity lists the cities of a province; ErrNotFound when the province is unknown.
 func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocation.Location, error) {
 	if err := validateCode("province_code", provinceCode); err != nil {
 		return nil, err
@@ -128,7 +115,6 @@ func (s *Service) GetCity(ctx context.Context, provinceCode string) ([]dtolocati
 	})
 }
 
-// GetDistrict lists the districts of a city; ErrNotFound when the city is unknown.
 func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocation.Location, error) {
 	if err := validateCode("city_code", cityCode); err != nil {
 		return nil, err
@@ -150,8 +136,6 @@ func (s *Service) GetDistrict(ctx context.Context, cityCode string) ([]dtolocati
 	})
 }
 
-// GetVillage lists the villages of a district; ErrNotFound when the district
-// or its city is unknown.
 func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtolocation.Location, error) {
 	if err := validateCode("district_code", districtCode); err != nil {
 		return nil, err
@@ -177,9 +161,6 @@ func (s *Service) GetVillage(ctx context.Context, districtCode string) ([]dtoloc
 	})
 }
 
-// StartSync queues a sync job and runs it in the background. requestedBy is the
-// id of the user who asked for it. When another job is queued or running, on
-// this or any other instance, it answers ErrSyncRunning with that job.
 func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, requestedBy string) (dtolocation.SyncJob, error) {
 	req, err := normalizeAndValidateRequest(req)
 	if err != nil {
@@ -243,14 +224,12 @@ func (s *Service) GetSyncJob(ctx context.Context, id string) (dtolocation.SyncJo
 	return mapSyncJob(job), nil
 }
 
-// normalizeAndValidateRequest defaults the level to "all" and checks that the
-// level is known and that the codes it needs, and any other given, are codes.
 func normalizeAndValidateRequest(req dtolocation.SyncRequest) (dtolocation.SyncRequest, error) {
 	if req.Level == "" {
 		req.Level = "all"
 	}
 
-	var required []string // the codes the level needs, in hierarchy order
+	var required []string
 	switch req.Level {
 	case "all", "province":
 	case "city":

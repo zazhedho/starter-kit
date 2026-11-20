@@ -8,9 +8,6 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-// Repository is the persistence the service needs; a missing row is ErrNotFound.
-// A sync job method with an owner touches only that instance's active job and
-// answers ErrNotFound when it finished or was taken over; heartbeats use the database clock.
 type Repository interface {
 	ListProvinces(ctx context.Context) ([]domainlocation.Province, error)
 	ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error)
@@ -24,8 +21,6 @@ type Repository interface {
 	UpsertDistricts(ctx context.Context, items []domainlocation.District) error
 	UpsertVillages(ctx context.Context, items []domainlocation.Village) error
 
-	// CreateSyncJob stores a queued job and answers ErrSyncRunning when another
-	// job is queued or running.
 	CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error
 	GetSyncJobByID(ctx context.Context, id string) (domainlocation.SyncJob, error)
 	GetActiveSyncJob(ctx context.Context) (domainlocation.SyncJob, error)
@@ -33,22 +28,16 @@ type Repository interface {
 	SaveSyncProgress(ctx context.Context, id, owner string, p domainlocation.SyncProgress, at time.Time) error
 	TouchSyncJob(ctx context.Context, id, owner string) error
 	FinishSyncJob(ctx context.Context, id, owner string, f domainlocation.SyncFinish, at time.Time) error
-	// FailStaleSyncJobs fails every queued or running job whose heartbeat is
-	// older than staleAfter by the database clock.
 	FailStaleSyncJobs(ctx context.Context, staleAfter time.Duration, now time.Time, message string) error
 }
 
-// Cache is the read-through cache. Implementations must treat every failure as
-// a miss (Get) or no-op (Set, DeleteKeys): it is an optimisation, not a dependency.
+// Cache implementations treat every failure as a miss (Get) or a no-op (Set, DeleteKeys).
 type Cache interface {
 	Get(ctx context.Context, key string) ([]dtolocation.Location, bool)
 	Set(ctx context.Context, key string, locations []dtolocation.Location, ttl time.Duration)
-	// DeleteKeys removes every key that starts with prefix.
 	DeleteKeys(ctx context.Context, prefix string)
 }
 
-// noopCache is the cache NewService installs when Options.Cache is nil: every
-// lookup misses.
 type noopCache struct{}
 
 func (noopCache) Get(context.Context, string) ([]dtolocation.Location, bool)         { return nil, false }

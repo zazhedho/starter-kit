@@ -97,8 +97,6 @@ func TestStartSyncRejectsMissingScopedCodes(t *testing.T) {
 	}
 }
 
-// requested_by_user_id is a UUID column; an empty or malformed id must fail here,
-// not as a 500 from Postgres.
 func TestStartSyncRejectsAMissingOrMalformedRequester(t *testing.T) {
 	svc := newTestService(t, &locationRepoTestDouble{}, nil)
 	for _, requestedBy := range []string{"", "   ", "user-1"} {
@@ -109,8 +107,6 @@ func TestStartSyncRejectsAMissingOrMalformedRequester(t *testing.T) {
 	}
 }
 
-// A sync code reaches SQL, the cache's delete pattern and the upstream query,
-// so a glob or any non-digit must never get that far.
 func TestStartSyncRejectsCodesThatAreNotDigits(t *testing.T) {
 	long := strings.Repeat("1", 21)
 	bad := []dtolocation.SyncRequest{
@@ -121,7 +117,7 @@ func TestStartSyncRejectsCodesThatAreNotDigits(t *testing.T) {
 		{Level: "city", ProvinceCode: long},
 		{Level: "district", ProvinceCode: "31", CityCode: "31*"},
 		{Level: "village", ProvinceCode: "31", CityCode: "3171", DistrictCode: "../1"},
-		{Level: "province", ProvinceCode: "x"}, // given although not needed: still validated
+		{Level: "province", ProvinceCode: "x"},
 	}
 	for _, req := range bad {
 		repo := &locationRepoTestDouble{}
@@ -169,7 +165,6 @@ func TestStartSyncCreatesAQueuedJobOwnedByThisInstance(t *testing.T) {
 	if job == nil || job.RequestedBy != "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99" || job.OwnerInstanceID != "instance-a" || !job.HeartbeatAt.IsZero() {
 		t.Fatalf("created job = %+v, want owner instance-a, the requester and a heartbeat left to the database", job)
 	}
-	// Before claiming the single active slot, jobs of dead instances are failed.
 	if len(repo.failStale) != 1 {
 		t.Fatalf("stale jobs were failed %d times, want once", len(repo.failStale))
 	}
@@ -205,8 +200,6 @@ func TestStartSyncUsesInjectedIDAndRequester(t *testing.T) {
 	}
 }
 
-// Without an injected generator the service issues UUIDv7 ids, the version
-// gokit.CreateUUID produces, so job ids stay time-ordered.
 func TestDefaultJobIDIsUUIDv7(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := newTestService(t, repo, nil)

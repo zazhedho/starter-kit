@@ -35,7 +35,6 @@ func TestSinceReturnsOnlyWhatWasLoggedAfterTheMark(t *testing.T) {
 	}
 }
 
-// Start redirects logus through SetOutput; it never swaps os.Stdout.
 func TestStdoutIsLeftAlone(t *testing.T) {
 	if os.Stdout == capture.w {
 		t.Fatal("os.Stdout points at the capture pipe")

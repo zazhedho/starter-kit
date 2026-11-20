@@ -1,6 +1,3 @@
-// Package routertest holds the helpers shared by the router tests and every
-// router/<module> test: dependencies backed by sqlmock, a database that really
-// executes statements, a route set and a request helper.
 package routertest
 
 import (
@@ -42,9 +39,6 @@ func newDryRunDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {
 	return db, sqlDB, mock
 }
 
-// NewDepsWithMock returns complete Deps over a dry-run database (statements are
-// built, not sent), with media disabled and no Redis. mutate may adjust the
-// config. The mock expects the pings made through Deps.SQLDB.
 func NewDepsWithMock(t *testing.T, mutate func(*config.Config)) (module.Deps, sqlmock.Sqlmock) {
 	t.Helper()
 	db, sqlDB, mock := newDryRunDB(t)
@@ -70,8 +64,6 @@ func NewDeps(t *testing.T, mutate func(*config.Config)) module.Deps {
 	return d
 }
 
-// NewExecDB returns a gorm database that really sends statements to sqlmock;
-// queries are matched as regular expressions.
 func NewExecDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
@@ -106,8 +98,6 @@ func SortedKeys(set map[string]bool) []string {
 	return keys
 }
 
-// AuthkitRoutes is what authkit mounts under /api on its own, with the same
-// dependencies as the service under test (no Redis).
 func AuthkitRoutes(t *testing.T, d module.Deps) map[string]bool {
 	t.Helper()
 	engine := gin.New()
@@ -117,9 +107,6 @@ func AuthkitRoutes(t *testing.T, d module.Deps) map[string]bool {
 	return RouteSet(engine)
 }
 
-// Mount registers one module alone on an empty engine, under /api as the router
-// does, and fails the test if registration returns an error. Use Engine.Routes
-// to read what the module mounts.
 func Mount(t *testing.T, register func(gin.IRouter, module.Deps) error, d module.Deps) *gin.Engine {
 	t.Helper()
 	engine := gin.New()
@@ -129,7 +116,6 @@ func Mount(t *testing.T, register func(gin.IRouter, module.Deps) error, d module
 	return engine
 }
 
-// Serve sends a body-less request to h and returns the status code.
 func Serve(h http.Handler, method, path string) int {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), method, path, nil))

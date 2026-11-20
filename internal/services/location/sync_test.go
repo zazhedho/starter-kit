@@ -52,8 +52,6 @@ func TestSyncIndividualLevels(t *testing.T) {
 	}
 }
 
-// A level the Location Service has no rows for is a no-op, not a failure (gorm
-// refuses to insert an empty list, and an empty answer is a valid one).
 func TestSyncOfALevelWithNoRowsSucceeds(t *testing.T) {
 	svc := newTestService(t, &locationRepoTestDouble{}, answering(`[]`))
 	got, err := svc.sync(context.Background(), dtolocation.SyncRequest{Level: "city", ProvinceCode: "31"}, func(domainlocation.SyncProgress) {})
@@ -97,7 +95,6 @@ func TestSyncDropsOnlyTheCacheKeysItTouched(t *testing.T) {
 	}
 }
 
-// startedJob runs a job to its end on a fresh service and returns the repository double.
 func runJob(t *testing.T, repo *locationRepoTestDouble, rt http.RoundTripper, opts Options, req dtolocation.SyncRequest) *Service {
 	t.Helper()
 	opts.HeartbeatInterval = orDefault(opts.HeartbeatInterval, time.Hour)
@@ -119,7 +116,6 @@ func TestRunSyncJobRecordsStartProgressAndCompletion(t *testing.T) {
 	if got.Status != "completed" || got.Message != "Location sync completed" || got.ErrorMessage != "" {
 		t.Fatalf("final state = %+v", got)
 	}
-	// The counts reach the job through a progress write, not a whole-row save.
 	if last := repo.progress[len(repo.progress)-1]; last.ProvinceCount != 1 {
 		t.Fatalf("last progress = %+v, want the final counts", last)
 	}
@@ -145,7 +141,6 @@ func TestRunSyncJobThatCannotStartIsLoggedNotFinished(t *testing.T) {
 	}
 }
 
-// Many progress reports in a short time become a handful of writes.
 func TestProgressWritesAreThrottled(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := NewService(repo, Options{ProgressInterval: time.Hour, HeartbeatInterval: time.Hour})
@@ -198,8 +193,6 @@ func TestARunningJobSendsHeartbeats(t *testing.T) {
 	}
 }
 
-// When another instance has taken the job over (its heartbeat looked stale), this
-// instance must stop and must not write a final state over the takeover.
 func TestAJobThatWasTakenOverStopsWithoutFinishing(t *testing.T) {
 	repo := &locationRepoTestDouble{touchErr: domainlocation.ErrNotFound}
 	started := make(chan struct{})
@@ -209,7 +202,7 @@ func TestAJobThatWasTakenOverStopsWithoutFinishing(t *testing.T) {
 		default:
 			close(started)
 		}
-		<-req.Context().Done() // runs until the job is canceled
+		<-req.Context().Done()
 		return nil, req.Context().Err()
 	})
 	svc := NewService(repo, Options{HeartbeatInterval: 5 * time.Millisecond})
@@ -228,8 +221,6 @@ func TestAJobThatWasTakenOverStopsWithoutFinishing(t *testing.T) {
 	}
 }
 
-// A progress write that finds the job gone means another instance took it over:
-// the job stops at once instead of waiting for the next heartbeat.
 func TestAProgressWriteThatLostTheJobCancelsIt(t *testing.T) {
 	repo := &locationRepoTestDouble{progressErr: domainlocation.ErrNotFound}
 	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
