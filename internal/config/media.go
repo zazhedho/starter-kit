@@ -23,6 +23,8 @@ type Media struct {
 	UserUploadLimit  int
 	UserUploadWindow time.Duration
 	UploadTimeout    time.Duration
+	// UploadMaxConcurrent caps the uploads in progress; more are answered 503.
+	UploadMaxConcurrent int
 }
 
 // Storage is the object-storage setting the media module needs.
@@ -53,6 +55,7 @@ func mediaFromEnv() (Media, Storage) {
 		UserUploadLimit:     gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_LIMIT", 10),
 		UserUploadWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS", 60)) * time.Second,
 		UploadTimeout:       gokit.GetEnv("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
+		UploadMaxConcurrent: gokit.GetEnv("MEDIA_UPLOAD_MAX_CONCURRENT", 8),
 	}
 	provider := normalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio"))
 	storage := Storage{
@@ -172,6 +175,9 @@ func (c Config) validateMediaRate() []string {
 	}
 	if c.Media.UploadRateWindow <= 0 {
 		problems = append(problems, "MEDIA_UPLOAD_RATE_WINDOW_SECONDS must be greater than zero")
+	}
+	if c.Media.UploadMaxConcurrent <= 0 {
+		problems = append(problems, "MEDIA_UPLOAD_MAX_CONCURRENT must be greater than zero")
 	}
 	if c.Media.UserUploadLimit <= 0 {
 		problems = append(problems, "MEDIA_UPLOAD_USER_RATE_LIMIT must be greater than zero")

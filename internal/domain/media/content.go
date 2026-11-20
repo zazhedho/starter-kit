@@ -43,11 +43,11 @@ func NormalizeContentType(contentType string) string {
 const MaxOriginalNameChars = 255
 
 // SafeFilename reduces a client-supplied name to its base name without control
-// characters or invalid UTF-8, capped at 255 characters, or "file" when nothing
-// usable is left.
+// or format characters (bidi overrides, zero-width), or invalid UTF-8, capped at
+// 255 characters, or "file" when nothing usable is left.
 func SafeFilename(filename string) string {
 	name := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r

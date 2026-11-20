@@ -100,3 +100,18 @@ func enableMediaEnv(t *testing.T) {
 	t.Setenv("STORAGE_BUCKET_NAME", "bucket")
 	t.Setenv("STORAGE_BASE_URL", "https://files.example.com")
 }
+
+func TestUploadMaxConcurrentDefaultsToEightAndMustBePositive(t *testing.T) {
+	clearEnv(t)
+	setRequiredEnv(t)
+	if got := FromEnv().Media.UploadMaxConcurrent; got != 8 {
+		t.Fatalf("UploadMaxConcurrent = %d, want 8", got)
+	}
+	for _, bad := range []string{"0", "-1"} {
+		clearEnv(t)
+		setRequiredEnv(t)
+		enableMediaEnv(t)
+		t.Setenv("MEDIA_UPLOAD_MAX_CONCURRENT", bad)
+		wantInError(t, validateFromEnv(t), "MEDIA_UPLOAD_MAX_CONCURRENT")
+	}
+}

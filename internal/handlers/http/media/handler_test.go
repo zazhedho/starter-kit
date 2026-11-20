@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -95,8 +96,13 @@ func serve(t *testing.T, svc Service, userID, role, method, target string, body 
 // as "resource:action".
 func serveWithPermissions(t *testing.T, svc Service, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveHandler(t, New(svc, nil, 0, 0), userID, role, permissions, method, target, body, contentType)
+}
+
+// serveHandler is serveWithPermissions for a handler built by the test.
+func serveHandler(t *testing.T, h *Handler, userID, role string, permissions []string, method, target string, body []byte, contentType string) *httptest.ResponseRecorder {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
-	h := New(svc, nil, 0)
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		scope := authkit.NewScope(userID, "tester", role, permissions)
@@ -532,6 +538,117 @@ func TestMediaErrorsUseAFixedEnvelopeMessagePerStatus(t *testing.T) {
 			rec := serve(t, svc, uuid.NewString(), "viewer", c.method, c.target, nil, "")
 			if rec.Code != c.status || envelopeMessage(t, rec) != c.message || errorMessage(t, rec) != c.detail {
 				t.Fatalf("got %d %s, want %d message %q detail %q", rec.Code, rec.Body.String(), c.status, c.message, c.detail)
+			}
+		})
+	}
+}
+
+// auditDouble records the audit events a handler writes; the embedded nil
+// interface stands in for the reads the handler never makes.
+type auditDouble struct {
+	authkit.AuditService
+	mu     sync.Mutex
+	events []authkit.AuditEvent
+}
+
+func (a *auditDouble) Store(_ context.Context, event authkit.AuditEvent) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = append(a.events, event)
+	return nil
+}
+
+// The audit trail is read by operators: a client-supplied name with bidi or
+// zero-width characters must reach it in its sanitized form, as it reaches the table.
+func TestFailedUploadAuditStoresTheSanitizedName(t *testing.T) {
+	audit := &auditDouble{}
+	svc := &serviceDouble{maxFileSize: 1024, err: domainmedia.ErrUnsupportedContentType}
+	body, ct := multipartBody(t, "file", "../evil\u202Egnp\u200B.exe", []byte("data"))
+
+	rec := serveHandler(t, New(svc, audit, 0, 0), uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(audit.events))
+	}
+	after, _ := audit.events[0].AfterData.(map[string]any)
+	if got := after["original_name"]; got != "evilgnp.exe" {
+		t.Fatalf("audited original_name = %q, want the sanitized name", got)
+	}
+}
+
+// blockingService holds every upload until release is closed.
+type blockingService struct {
+	serviceDouble
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingService) Upload(ctx context.Context, owner string, file multipart.File, header *multipart.FileHeader) (domainmedia.Media, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return b.serviceDouble.Upload(ctx, owner, file, header)
+}
+
+// Uploads beyond MEDIA_UPLOAD_MAX_CONCURRENT are refused with 503 before the body
+// is read, and a freed slot is usable again.
+func TestUploadsBeyondTheConcurrencyCapAnswer503(t *testing.T) {
+	svc := &blockingService{serviceDouble: serviceDouble{maxFileSize: 1024}, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	h := New(svc, nil, 0, 1)
+	upload := func() *httptest.ResponseRecorder {
+		body, ct := multipartBody(t, "file", "a.png", []byte("data"))
+		return serveHandler(t, h, uuid.NewString(), "viewer", nil, http.MethodPost, "/media", body, ct)
+	}
+
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- upload() }()
+	<-svc.entered // the first upload holds the only slot
+
+	mark := logs.Mark()
+	rec := upload()
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("an upload over the cap = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	if out := logs.Since(mark); !strings.Contains(out, `"level":"WARN"`) {
+		t.Fatalf("a refused upload is expected traffic, logged at WARN; got:\n%s", out)
+	}
+
+	close(svc.release)
+	if got := <-first; got.Code != http.StatusCreated {
+		t.Fatalf("the first upload = %d: %s", got.Code, got.Body.String())
+	}
+	if again := upload(); again.Code != http.StatusCreated {
+		t.Fatalf("after the slot was freed an upload = %d: %s", again.Code, again.Body.String())
+	}
+}
+
+func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
+	cases := []struct {
+		name, target string
+		perms        []string
+		err          error
+		wantLevel    string
+	}{
+		{"bad query", "/media?page=abc", nil, nil, "WARN"},
+		{"bad owner filter", "/media?filters[owner_user_id]=x", []string{"media:list_any"}, nil, "WARN"},
+		{"not found", "/media", nil, domainmedia.ErrNotFound, "WARN"},
+		{"unexpected", "/media", nil, errors.New("database down"), "ERROR"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mark := logs.Mark()
+			serveWithPermissions(t, &serviceDouble{err: c.err}, uuid.NewString(), "viewer", c.perms, http.MethodGet, c.target, nil, "")
+			out := logs.Since(mark)
+			if !strings.Contains(out, `"level":"`+c.wantLevel+`"`) {
+				t.Fatalf("want a %s log line, got:\n%s", c.wantLevel, out)
+			}
+			if c.wantLevel == "WARN" && strings.Contains(out, `"level":"ERROR"`) {
+				t.Fatalf("a client error was logged at ERROR:\n%s", out)
+			}
+			if !strings.Contains(out, "[MediaHandler][List]") {
+				t.Fatalf("the line lacks the handler prefix:\n%s", out)
 			}
 		})
 	}

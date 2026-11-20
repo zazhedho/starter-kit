@@ -29,5 +29,5 @@ func wire(d module.Deps) (*wired, error) {
 		AllowedContentTypes: m.AllowedContentTypes,
 		NewID:               gokit.CreateUUID,
 	})
-	return &wired{handler: httpmedia.New(svc, d.Kit.Audit(), m.UploadTimeout)}, nil
+	return &wired{handler: httpmedia.New(svc, d.Kit.Audit(), m.UploadTimeout, m.UploadMaxConcurrent)}, nil
 }
