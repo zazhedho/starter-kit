@@ -10,6 +10,10 @@ import (
 
 // Repository is the persistence the service needs; the GORM adapter satisfies it
 // and maps a missing row to domainlocation.ErrNotFound.
+//
+// The sync job methods with an owner act only on a job of that service instance
+// that is still queued or running, and answer ErrNotFound when none matches:
+// the job finished or another instance took it over.
 type Repository interface {
 	ListProvinces(ctx context.Context) ([]domainlocation.Province, error)
 	ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error)
@@ -22,11 +26,19 @@ type Repository interface {
 	UpsertCities(ctx context.Context, items []domainlocation.City) error
 	UpsertDistricts(ctx context.Context, items []domainlocation.District) error
 	UpsertVillages(ctx context.Context, items []domainlocation.Village) error
+
+	// CreateSyncJob stores a queued job and answers ErrSyncRunning when another
+	// job is queued or running.
 	CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error
-	UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error
 	GetSyncJobByID(ctx context.Context, id string) (domainlocation.SyncJob, error)
 	GetActiveSyncJob(ctx context.Context) (domainlocation.SyncJob, error)
-	FailActiveSyncJobs(ctx context.Context, message string) error
+	StartSyncJob(ctx context.Context, id, owner string, at time.Time) error
+	SaveSyncProgress(ctx context.Context, id, owner string, p domainlocation.SyncProgress, at time.Time) error
+	TouchSyncJob(ctx context.Context, id, owner string, at time.Time) error
+	FinishSyncJob(ctx context.Context, id, owner string, f domainlocation.SyncFinish, at time.Time) error
+	// FailStaleSyncJobs fails every queued or running job whose heartbeat is
+	// older than cutoff.
+	FailStaleSyncJobs(ctx context.Context, cutoff, now time.Time, message string) error
 }
 
 // Cache is the read-through cache. Implementations must treat every failure as

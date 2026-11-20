@@ -56,7 +56,6 @@ require (
 	golang.org/x/arch v0.33.0 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/net v0.63.0 // indirect
-	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
@@ -78,6 +77,7 @@ require (
 	github.com/zazhedho/authkit v0.4.0
 	github.com/zazhedho/gokit v0.5.0
 	github.com/zazhedho/logus v0.3.0
+	golang.org/x/sync v0.25.0
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
 )

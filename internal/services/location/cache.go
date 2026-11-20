@@ -26,3 +26,9 @@ func (s *Service) setLocationCache(ctx context.Context, cacheKey string, locatio
 	}
 	s.cache.Set(ctx, cacheKey, locations, s.cacheTTL)
 }
+
+// invalidate deletes the cached keys that start with prefix. It outlives a
+// canceled sync so a stale entry is never left behind.
+func (s *Service) invalidate(prefix string) {
+	s.cache.DeleteKeys(context.Background(), prefix)
+}

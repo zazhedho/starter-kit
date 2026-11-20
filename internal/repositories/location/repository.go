@@ -3,8 +3,10 @@ package location
 import (
 	"context"
 	"errors"
+	"reflect"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/zazhedho/gokit"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -90,12 +92,86 @@ func (r *Repository) UpsertVillages(ctx context.Context, items []domainlocation.
 	return r.upsert(ctx, "code", items)
 }
 
+// activeStatuses are the states of a job that has not finished. The unique
+// index ux_location_sync_jobs_one_active allows one row in these states.
+var activeStatuses = []string{"queued", "running"}
+
+// CreateSyncJob stores a queued job. The unique index lets only one job be
+// queued or running; when one already is, the answer is ErrSyncRunning.
 func (r *Repository) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
-	return r.db.WithContext(ctx).Create(job).Error
+	err := r.db.WithContext(ctx).Create(job).Error
+	if isUniqueViolation(err) {
+		return domainlocation.ErrSyncRunning
+	}
+	return err
 }
 
-func (r *Repository) UpdateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
-	return r.db.WithContext(ctx).Save(job).Error
+// isUniqueViolation recognizes PostgreSQL's unique_violation (23505), both as
+// the raw driver error and as gorm's translation of it.
+func isUniqueViolation(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "23505"
+}
+
+// StartSyncJob moves a queued job of this instance to running.
+func (r *Repository) StartSyncJob(ctx context.Context, id, owner string, at time.Time) error {
+	return r.updateOwned(ctx, id, owner, []string{"queued"}, map[string]any{
+		"status":       "running",
+		"message":      "Location sync is running",
+		"started_at":   at,
+		"updated_at":   at,
+		"heartbeat_at": at,
+	})
+}
+
+// SaveSyncProgress records the message and counts of a job of this instance.
+// Only these columns are written, never the whole row.
+func (r *Repository) SaveSyncProgress(ctx context.Context, id, owner string, p domainlocation.SyncProgress, at time.Time) error {
+	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{
+		"message":        p.Message,
+		"province_count": p.ProvinceCount,
+		"city_count":     p.CityCount,
+		"district_count": p.DistrictCount,
+		"village_count":  p.VillageCount,
+		"updated_at":     at,
+		"heartbeat_at":   at,
+	})
+}
+
+// TouchSyncJob is the heartbeat of a job of this instance.
+func (r *Repository) TouchSyncJob(ctx context.Context, id, owner string, at time.Time) error {
+	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{"heartbeat_at": at})
+}
+
+// FinishSyncJob records the final state of a job of this instance.
+func (r *Repository) FinishSyncJob(ctx context.Context, id, owner string, f domainlocation.SyncFinish, at time.Time) error {
+	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{
+		"status":        f.Status,
+		"message":       f.Message,
+		"error_message": f.ErrorMessage,
+		"finished_at":   at,
+		"updated_at":    at,
+		"heartbeat_at":  at,
+	})
+}
+
+// updateOwned updates the named columns of the job id when it belongs to owner
+// and is in one of statuses. No match means the job was finished or taken
+// over, and is reported as ErrNotFound.
+func (r *Repository) updateOwned(ctx context.Context, id, owner string, statuses []string, columns map[string]any) error {
+	res := r.db.WithContext(ctx).Model(&domainlocation.SyncJob{}).
+		Where("id = ? AND owner_instance_id = ? AND status IN ?", id, owner, statuses).
+		Updates(columns)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domainlocation.ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) GetSyncJobByID(ctx context.Context, id string) (ret domainlocation.SyncJob, err error) {
@@ -105,16 +181,17 @@ func (r *Repository) GetSyncJobByID(ctx context.Context, id string) (ret domainl
 
 func (r *Repository) GetActiveSyncJob(ctx context.Context) (ret domainlocation.SyncJob, err error) {
 	err = r.db.WithContext(ctx).
-		Where("status IN ?", []string{"queued", "running"}).
+		Where("status IN ?", activeStatuses).
 		Order("created_at ASC").
 		First(&ret).Error
 	return ret, translateNotFound(err)
 }
 
-func (r *Repository) FailActiveSyncJobs(ctx context.Context, message string) error {
-	now := time.Now()
+// FailStaleSyncJobs fails every queued or running job whose heartbeat is older
+// than cutoff: its instance is gone. Jobs of live instances are left alone.
+func (r *Repository) FailStaleSyncJobs(ctx context.Context, cutoff, now time.Time, message string) error {
 	return r.db.WithContext(ctx).Model(&domainlocation.SyncJob{}).
-		Where("status IN ?", []string{"queued", "running"}).
+		Where("status IN ? AND heartbeat_at < ?", activeStatuses, cutoff).
 		Updates(map[string]any{
 			"status":        "failed",
 			"message":       "Location sync interrupted",
@@ -125,6 +202,9 @@ func (r *Repository) FailActiveSyncJobs(ctx context.Context, message string) err
 }
 
 func (r *Repository) upsert(ctx context.Context, conflictColumn string, values any) error {
+	if rv := reflect.ValueOf(values); rv.Kind() == reflect.Slice && rv.Len() == 0 {
+		return nil // gorm refuses to insert an empty slice
+	}
 	switch items := values.(type) {
 	case []domainlocation.Province:
 		prepareUpsertRows(items, func(item *domainlocation.Province) (*string, *time.Time, **time.Time) {

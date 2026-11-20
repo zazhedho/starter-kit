@@ -9,6 +9,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 
+	domainlocation "starter-kit/internal/domain/location"
+	dtolocation "starter-kit/internal/dto/location"
 	"starter-kit/internal/testutil/routertest"
 )
 
@@ -60,13 +62,17 @@ func TestRegisterLocationBoundsStartupRecovery(t *testing.T) {
 	}
 }
 
-func TestRegisterLocationRegistersAShutdownHook(t *testing.T) {
+// Drain, the first step of shutdown, interrupts the sync service so it stops
+// accepting jobs while requests still drain; Close then waits for it.
+func TestRegisterLocationRegistersShutdownHooks(t *testing.T) {
 	d := routertest.NewDeps(t, nil)
-	if err := Register(gin.New(), d); err != nil {
-		t.Fatalf("Register: %v", err)
+	w, err := wire(d)
+	if err != nil {
+		t.Fatalf("wire: %v", err)
 	}
-	if got := d.Lifecycle.Len(); got != 1 {
-		t.Fatalf("Register registered %d shutdown hooks, want 1", got)
+	d.Lifecycle.Drain()
+	if _, err := w.service.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "u"); !errors.Is(err, domainlocation.ErrShuttingDown) {
+		t.Fatalf("StartSync after Drain = %v, want ErrShuttingDown: the drain hook is not registered", err)
 	}
 	if err := d.Lifecycle.Close(context.Background()); err != nil {
 		t.Fatalf("Lifecycle.Close = %v", err)

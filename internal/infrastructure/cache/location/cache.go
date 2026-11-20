@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -80,7 +81,7 @@ func (c *Cache) DeleteKeys(ctx context.Context, pattern string) {
 	var keys []string
 	var cursor uint64
 	for {
-		foundKeys, nextCursor, err := c.client.Scan(ctx, cursor, pattern+"*", scanCount).Result()
+		foundKeys, nextCursor, err := c.client.Scan(ctx, cursor, escapeGlob(pattern)+"*", scanCount).Result()
 		if err != nil {
 			logus.Logf(logus.LevelWarn, "location cache scan failed; pattern=%s; err=%v", pattern, err)
 			return
@@ -98,4 +99,10 @@ func (c *Cache) DeleteKeys(ctx context.Context, pattern string) {
 	if err := c.client.Del(ctx, keys...).Err(); err != nil {
 		logus.Logf(logus.LevelWarn, "location cache delete failed; pattern=%s; err=%v", pattern, err)
 	}
+}
+
+// escapeGlob makes Redis treat every character of s literally in a SCAN MATCH
+// pattern, so a prefix can never widen into a pattern.
+func escapeGlob(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`, "]", `\]`).Replace(s)
 }

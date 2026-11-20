@@ -64,3 +64,18 @@ func TestRedisKeysStoredAsGiven(t *testing.T) {
 		t.Fatalf("expected the prefix delete to clear everything, left %v", keys)
 	}
 }
+
+func TestDeleteKeysTreatsThePrefixLiterally(t *testing.T) {
+	client, mock := redismock.NewClientMock()
+	mock.ExpectScan(0, `location:city:3\*\?\[1\]\\*`, 100).SetVal(nil, 0)
+	New(client).DeleteKeys(context.Background(), `location:city:3*?[1]\`)
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the prefix was not escaped: %v", err)
+	}
+}
+
+func TestEscapeGlob(t *testing.T) {
+	if got := escapeGlob("location:city:31"); got != "location:city:31" {
+		t.Fatalf("a plain prefix changed: %q", got)
+	}
+}

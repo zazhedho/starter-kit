@@ -1,66 +1,34 @@
 package location
 
 import (
-	"sort"
-	"strings"
 	"time"
 
 	domainlocation "starter-kit/internal/domain/location"
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-func normalizeKey(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
+func viewProvince(r domainlocation.Province) dtolocation.Location {
+	return dtolocation.Location{Code: r.Code, Name: r.Name}
+}
 
-func mapProvinces(rows []domainlocation.Province) []dtolocation.Location {
+func viewCity(r domainlocation.City) dtolocation.Location {
+	return dtolocation.Location{Code: r.Code, Name: r.Name}
+}
+
+func viewDistrict(r domainlocation.District) dtolocation.Location {
+	return dtolocation.Location{Code: r.Code, Name: r.Name}
+}
+
+func viewVillage(r domainlocation.Village) dtolocation.Location {
+	return dtolocation.Location{Code: r.Code, Name: r.Name}
+}
+
+func views[T any](rows []T, view func(T) dtolocation.Location) []dtolocation.Location {
 	locations := make([]dtolocation.Location, 0, len(rows))
 	for _, row := range rows {
-		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
+		locations = append(locations, view(row))
 	}
 	return locations
-}
-
-func mapCities(rows []domainlocation.City) []dtolocation.Location {
-	locations := make([]dtolocation.Location, 0, len(rows))
-	for _, row := range rows {
-		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
-	}
-	return locations
-}
-
-func mapDistricts(rows []domainlocation.District) []dtolocation.Location {
-	locations := make([]dtolocation.Location, 0, len(rows))
-	for _, row := range rows {
-		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
-	}
-	return locations
-}
-
-func mapVillages(rows []domainlocation.Village) []dtolocation.Location {
-	locations := make([]dtolocation.Location, 0, len(rows))
-	for _, row := range rows {
-		locations = append(locations, dtolocation.Location{Code: row.Code, Name: row.Name})
-	}
-	return locations
-}
-
-func sortProvinces(items []domainlocation.Province) []domainlocation.Province {
-	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
-	return items
-}
-
-func sortCities(items []domainlocation.City) []domainlocation.City {
-	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
-	return items
-}
-
-func sortDistricts(items []domainlocation.District) []domainlocation.District {
-	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
-	return items
-}
-
-func sortVillages(items []domainlocation.Village) []domainlocation.Village {
-	sort.Slice(items, func(i, j int) bool { return normalizeKey(items[i].Name) < normalizeKey(items[j].Name) })
-	return items
 }
 
 func mapSyncJob(job domainlocation.SyncJob) dtolocation.SyncJob {

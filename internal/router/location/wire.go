@@ -21,6 +21,7 @@ var recoveryTimeout = 10 * time.Second
 // wired is what the location routes need once the module is built.
 type wired struct {
 	handler *httplocation.Handler
+	service *servicelocation.Service
 }
 
 // wire builds repository, cache, service and handler, fails sync jobs a previous
@@ -43,6 +44,7 @@ func wire(d module.Deps) (*wired, error) {
 	if err := svc.RecoverInterruptedJobs(recoverCtx); err != nil {
 		return nil, fmt.Errorf("recover location sync jobs: %w", err)
 	}
+	d.Lifecycle.OnDrain(svc.Interrupt) // the job records its end while requests drain
 	d.Lifecycle.OnClose("location sync", svc.Close)
-	return &wired{handler: httplocation.New(svc)}, nil
+	return &wired{handler: httplocation.New(svc), service: svc}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/zazhedho/logus"
@@ -12,223 +13,200 @@ import (
 	dtolocation "starter-kit/internal/dto/location"
 )
 
-type syncProgress struct {
-	Message       string
-	ProvinceCount int
-	CityCount     int
-	DistrictCount int
-	VillageCount  int
-}
+// A sync is an upsert: it adds rows and updates names, and removes nothing. A
+// location the Location Service stopped listing stays in the tables.
 
-// runSyncJob runs one job under the lifecycle context; if Close cancels it, it ends
-// failed/interrupted, as RecoverInterruptedJobs would after a restart.
+// runSyncJob runs one job of this instance under a context that Interrupt
+// cancels. While it runs, a heartbeat shows the other instances it is alive; if
+// the job is taken over (its heartbeat went stale) the job stops. A job cut
+// short by shutdown ends failed/interrupted.
 func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
-	jobCtx := s.baseCtx
-	if !s.syncing.CompareAndSwap(false, true) {
-		s.markSyncJobFailed(jobID, "Another location sync is already running in this service instance.")
+	ctx, cancelJob := context.WithCancel(s.baseCtx)
+	defer cancelJob()
+
+	if ctx.Err() != nil {
+		s.markInterrupted(jobID)
 		return
 	}
-	defer s.syncing.Store(false)
-
-	if jobCtx.Err() != nil {
-		s.markSyncJobInterrupted(jobID)
-		return
-	}
-
-	job, err := s.repo.GetSyncJobByID(jobCtx, jobID)
-	if err != nil {
-		s.markIfInterrupted(jobCtx, jobID)
-		logus.Logf(logus.LevelError, "failed to load location sync job %s: %v", jobID, err)
-		return
-	}
-
-	startedAt := time.Now()
-	job.Status = "running"
-	job.Message = "Location sync is running"
-	job.StartedAt = &startedAt
-	job.UpdatedAt = &startedAt
-	if err := s.repo.UpdateSyncJob(jobCtx, &job); err != nil {
-		s.markIfInterrupted(jobCtx, jobID)
+	if err := s.repo.StartSyncJob(ctx, jobID, s.instanceID, time.Now()); err != nil {
+		s.markIfInterrupted(ctx, jobID)
 		logus.Logf(logus.LevelError, "failed to mark location sync job %s as running: %v", jobID, err)
 		return
 	}
 
-	result, err := s.sync(jobCtx, req, func(progress syncProgress) {
-		s.applySyncProgress(&job, progress)
-		if updateErr := s.repo.UpdateSyncJob(jobCtx, &job); updateErr != nil {
-			logus.Logf(logus.LevelWarn, "failed to update location sync job progress %s: %v", job.ID, updateErr)
-		}
-	})
+	stopHeartbeat := s.beat(ctx, cancelJob, jobID)
+	defer stopHeartbeat()
+
+	progress := &progressWriter{s: s, ctx: ctx, jobID: jobID}
+	result, err := s.sync(ctx, req, progress.report)
 	if err != nil {
-		if jobCtx.Err() != nil {
-			s.markSyncJobInterrupted(job.ID)
-			return
+		switch {
+		case s.baseCtx.Err() != nil:
+			s.markInterrupted(jobID)
+		case ctx.Err() != nil:
+			logus.Logf(logus.LevelWarn, "location sync job %s was taken over by another instance; stopping", jobID)
+		default:
+			s.markFailed(jobID, err.Error())
 		}
-		s.markSyncJobFailed(job.ID, err.Error())
 		return
 	}
 
 	// The job finished; record it even if shutdown began a moment ago.
-	ctx, cancel, ok := s.settleContext()
-	if !ok {
-		logus.Logf(logus.LevelWarn, "location sync job %s finished after the shutdown deadline; its final state is not recorded", job.ID)
+	s.settle(jobID, func(ctx context.Context) error {
+		if err := s.repo.SaveSyncProgress(ctx, jobID, s.instanceID, result, time.Now()); err != nil {
+			return err
+		}
+		return s.repo.FinishSyncJob(ctx, jobID, s.instanceID, domainlocation.SyncFinish{
+			Status: "completed", Message: "Location sync completed",
+		}, time.Now())
+	}, "completed")
+}
+
+// beat reports the job's heartbeat every heartbeatInterval until the returned
+// stop function is called. When the job no longer belongs to this instance it
+// cancels the job.
+func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID string) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(s.heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				err := s.repo.TouchSyncJob(ctx, jobID, s.instanceID, time.Now())
+				switch {
+				case errors.Is(err, domainlocation.ErrNotFound):
+					cancelJob()
+					return
+				case err != nil && ctx.Err() == nil:
+					logus.Logf(logus.LevelWarn, "failed to send the heartbeat of location sync job %s: %v", jobID, err)
+				}
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
+}
+
+// progressWriter stores a job's progress, at most once per progressInterval so
+// that a sync of thousands of rows does not become thousands of writes.
+type progressWriter struct {
+	s     *Service
+	ctx   context.Context
+	jobID string
+
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (w *progressWriter) report(p domainlocation.SyncProgress) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.last.IsZero() && time.Since(w.last) < w.s.progressInterval {
 		return
 	}
-	defer cancel()
-	s.applySyncProgress(&job, result)
-	finishedAt := time.Now()
-	job.Status = "completed"
-	job.Message = "Location sync completed"
-	job.ErrorMessage = ""
-	job.FinishedAt = &finishedAt
-	job.UpdatedAt = &finishedAt
-	if err := s.repo.UpdateSyncJob(ctx, &job); err != nil {
-		logus.Logf(logus.LevelError, "failed to mark location sync job %s as completed: %v", job.ID, err)
+	w.last = time.Now()
+	if err := w.s.repo.SaveSyncProgress(w.ctx, w.jobID, w.s.instanceID, p, time.Now()); err != nil && w.ctx.Err() == nil {
+		logus.Logf(logus.LevelWarn, "failed to update location sync job progress %s: %v", w.jobID, err)
 	}
 }
 
-func (s *Service) markSyncJobFailed(jobID, errorMessage string) {
+func (s *Service) markFailed(jobID, errorMessage string) {
 	s.finishFailed(jobID, "Location sync failed", errorMessage)
 }
 
-// markSyncJobInterrupted ends a job cut short by shutdown with the exact
-// message and error text FailActiveSyncJobs would write.
-func (s *Service) markSyncJobInterrupted(jobID string) {
+// markInterrupted ends a job cut short by shutdown with the message and error
+// text a stale takeover writes.
+func (s *Service) markInterrupted(jobID string) {
 	s.finishFailed(jobID, "Location sync interrupted", shutdownMessage)
 }
 
 func (s *Service) finishFailed(jobID, message, errorMessage string) {
-	ctx, cancel, ok := s.settleContext()
-	if !ok {
-		logus.Logf(logus.LevelWarn, "location sync job %s ended after the shutdown deadline; its final state is not recorded", jobID)
-		return
+	s.settle(jobID, func(ctx context.Context) error {
+		return s.repo.FinishSyncJob(ctx, jobID, s.instanceID, domainlocation.SyncFinish{
+			Status: "failed", Message: message, ErrorMessage: errorMessage,
+		}, time.Now())
+	}, "failed")
+}
+
+// markIfInterrupted records the interrupted state when ctx was canceled, so a
+// job that never got going is not left queued.
+func (s *Service) markIfInterrupted(ctx context.Context, jobID string) {
+	if ctx.Err() != nil {
+		s.markInterrupted(jobID)
 	}
-	defer cancel()
-	job, err := s.repo.GetSyncJobByID(ctx, jobID)
+}
+
+// syncLevel fetches one level, stores it and drops the cache keys it covers.
+func syncLevel[T any](ctx context.Context, s *Service, report func(domainlocation.SyncProgress), message string,
+	fetch func(context.Context) ([]T, error), upsert func(context.Context, []T) error, cacheKey string) ([]T, error) {
+	report(domainlocation.SyncProgress{Message: message})
+	rows, err := fetch(ctx)
 	if err != nil {
-		logus.Logf(logus.LevelError, "failed to load location sync job %s for failure update: %v", jobID, err)
-		return
+		return nil, err
 	}
-
-	finishedAt := time.Now()
-	job.Status = "failed"
-	job.Message = message
-	job.ErrorMessage = errorMessage
-	job.FinishedAt = &finishedAt
-	job.UpdatedAt = &finishedAt
-	if err := s.repo.UpdateSyncJob(ctx, &job); err != nil {
-		logus.Logf(logus.LevelError, "failed to mark location sync job %s as failed: %v", job.ID, err)
+	if err := upsert(ctx, rows); err != nil {
+		return nil, err
 	}
+	s.invalidate(cacheKey)
+	return rows, nil
 }
 
-func (s *Service) applySyncProgress(job *domainlocation.SyncJob, progress syncProgress) {
-	job.Message = progress.Message
-	job.ProvinceCount = progress.ProvinceCount
-	job.CityCount = progress.CityCount
-	job.DistrictCount = progress.DistrictCount
-	job.VillageCount = progress.VillageCount
-	job.UpdatedAt = new(time.Now())
-}
-
-func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, progress func(syncProgress)) (syncProgress, error) {
+func (s *Service) sync(ctx context.Context, req dtolocation.SyncRequest, report func(domainlocation.SyncProgress)) (domainlocation.SyncProgress, error) {
 	switch req.Level {
 	case "province":
-		progress(syncProgress{Message: "Fetching provinces"})
-		provinces, err := s.fetchProvinces(ctx)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.repo.UpsertProvinces(ctx, provinces); err != nil {
-			return syncProgress{}, err
-		}
-		s.cache.DeleteKeys(context.Background(), provinceKey())
-		return syncProgress{
-			Message:       "Province sync completed",
-			ProvinceCount: len(provinces),
-		}, nil
+		rows, err := syncLevel(ctx, s, report, "Fetching provinces", s.fetchProvinces, s.repo.UpsertProvinces, provinceKey())
+		return domainlocation.SyncProgress{Message: "Province sync completed", ProvinceCount: len(rows)}, err
 	case "city":
-		progress(syncProgress{Message: fmt.Sprintf("Fetching cities for province %s", req.ProvinceCode)})
-		cities, err := s.fetchCities(ctx, req.ProvinceCode)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.repo.UpsertCities(ctx, cities); err != nil {
-			return syncProgress{}, err
-		}
-		s.cache.DeleteKeys(context.Background(), cityKey(req.ProvinceCode))
-		return syncProgress{
-			Message:   "City sync completed",
-			CityCount: len(cities),
-		}, nil
+		rows, err := syncLevel(ctx, s, report, fmt.Sprintf("Fetching cities for province %s", req.ProvinceCode),
+			func(ctx context.Context) ([]domainlocation.City, error) { return s.fetchCities(ctx, req.ProvinceCode) },
+			s.repo.UpsertCities, cityKey(req.ProvinceCode))
+		return domainlocation.SyncProgress{Message: "City sync completed", CityCount: len(rows)}, err
 	case "district":
-		progress(syncProgress{Message: fmt.Sprintf("Fetching districts for city %s", req.CityCode)})
-		districts, err := s.fetchDistricts(ctx, req.ProvinceCode, req.CityCode)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.repo.UpsertDistricts(ctx, districts); err != nil {
-			return syncProgress{}, err
-		}
-		s.cache.DeleteKeys(context.Background(), districtKey(req.CityCode))
-		return syncProgress{
-			Message:       "District sync completed",
-			DistrictCount: len(districts),
-		}, nil
+		rows, err := syncLevel(ctx, s, report, fmt.Sprintf("Fetching districts for city %s", req.CityCode),
+			func(ctx context.Context) ([]domainlocation.District, error) {
+				return s.fetchDistricts(ctx, req.ProvinceCode, req.CityCode)
+			},
+			s.repo.UpsertDistricts, districtKey(req.CityCode))
+		return domainlocation.SyncProgress{Message: "District sync completed", DistrictCount: len(rows)}, err
 	case "village":
-		progress(syncProgress{Message: fmt.Sprintf("Fetching villages for district %s", req.DistrictCode)})
-		villages, err := s.fetchVillages(ctx, req.ProvinceCode, req.CityCode, req.DistrictCode)
-		if err != nil {
-			return syncProgress{}, err
-		}
-		if err := s.repo.UpsertVillages(ctx, villages); err != nil {
-			return syncProgress{}, err
-		}
-		s.cache.DeleteKeys(context.Background(), villageKey(req.DistrictCode))
-		return syncProgress{
-			Message:      "Village sync completed",
-			VillageCount: len(villages),
-		}, nil
+		rows, err := syncLevel(ctx, s, report, fmt.Sprintf("Fetching villages for district %s", req.DistrictCode),
+			func(ctx context.Context) ([]domainlocation.Village, error) {
+				return s.fetchVillages(ctx, req.ProvinceCode, req.CityCode, req.DistrictCode)
+			},
+			s.repo.UpsertVillages, villageKey(req.DistrictCode))
+		return domainlocation.SyncProgress{Message: "Village sync completed", VillageCount: len(rows)}, err
 	case "all":
-		return s.syncAll(ctx, progress)
+		return s.syncAll(ctx, report)
 	default:
-		return syncProgress{}, errors.New("invalid sync level")
+		return domainlocation.SyncProgress{}, errors.New("invalid sync level")
 	}
 }
 
-func (s *Service) syncAll(ctx context.Context, progress func(syncProgress)) (syncProgress, error) {
-	progress(syncProgress{Message: "Fetching provinces"})
-	provinces, err := s.fetchProvinces(ctx)
+func (s *Service) syncAll(ctx context.Context, report func(domainlocation.SyncProgress)) (domainlocation.SyncProgress, error) {
+	provinces, err := syncLevel(ctx, s, report, "Fetching provinces", s.fetchProvinces, s.repo.UpsertProvinces, provinceKey())
 	if err != nil {
-		return syncProgress{}, err
+		return domainlocation.SyncProgress{}, err
 	}
-	if err := s.repo.UpsertProvinces(ctx, provinces); err != nil {
-		return syncProgress{}, err
-	}
-	s.cache.DeleteKeys(context.Background(), provinceKey())
 
-	totals := syncProgress{ProvinceCount: len(provinces)}
-	progress(syncProgress{
-		Message:       "Provinces synced",
-		ProvinceCount: len(provinces),
-	})
+	totals := domainlocation.SyncProgress{ProvinceCount: len(provinces)}
+	report(domainlocation.SyncProgress{Message: "Provinces synced", ProvinceCount: len(provinces)})
 
-	for provinceIndex, province := range provinces {
-		if err := s.syncProvince(ctx, provinces, provinceIndex, province, &totals, progress); err != nil {
-			return syncProgress{}, err
+	for i, province := range provinces {
+		if err := s.syncProvince(ctx, provinces, i, province, &totals, report); err != nil {
+			return domainlocation.SyncProgress{}, err
 		}
 	}
 
-	s.cache.DeleteKeys(context.Background(), cachePrefix)
-	return syncProgress{
-		Message:       "Full location sync completed",
-		ProvinceCount: len(provinces),
-		CityCount:     totals.CityCount,
-		DistrictCount: totals.DistrictCount,
-		VillageCount:  totals.VillageCount,
-	}, nil
+	s.invalidate(cachePrefix)
+	totals.Message = "Full location sync completed"
+	return totals, nil
 }
 
-func (s *Service) syncProvince(ctx context.Context, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *syncProgress, progress func(syncProgress)) error {
+func (s *Service) syncProvince(ctx context.Context, provinces []domainlocation.Province, index int, province domainlocation.Province, totals *domainlocation.SyncProgress, report func(domainlocation.SyncProgress)) error {
 	cities, err := s.fetchCities(ctx, province.Code)
 	if err != nil {
 		return err
@@ -238,32 +216,20 @@ func (s *Service) syncProvince(ctx context.Context, provinces []domainlocation.P
 			return err
 		}
 		totals.CityCount += len(cities)
-		s.cache.DeleteKeys(context.Background(), cityKey(province.Code))
+		s.invalidate(cityKey(province.Code))
 	}
-	progress(syncProgress{
-		Message:       fmt.Sprintf("Processed province %d/%d: %s", index+1, len(provinces), province.Name),
-		ProvinceCount: totals.ProvinceCount,
-		CityCount:     totals.CityCount,
-		DistrictCount: totals.DistrictCount,
-		VillageCount:  totals.VillageCount,
-	})
+	report(withMessage(*totals, fmt.Sprintf("Processed province %d/%d: %s", index+1, len(provinces), province.Name)))
 
 	for cityIndex, city := range cities {
 		if err := s.syncCity(ctx, province, city, totals); err != nil {
 			return err
 		}
-		progress(syncProgress{
-			Message:       fmt.Sprintf("Processed city %d/%d in province %s", cityIndex+1, len(cities), province.Name),
-			ProvinceCount: totals.ProvinceCount,
-			CityCount:     totals.CityCount,
-			DistrictCount: totals.DistrictCount,
-			VillageCount:  totals.VillageCount,
-		})
+		report(withMessage(*totals, fmt.Sprintf("Processed city %d/%d in province %s", cityIndex+1, len(cities), province.Name)))
 	}
 	return nil
 }
 
-func (s *Service) syncCity(ctx context.Context, province domainlocation.Province, city domainlocation.City, totals *syncProgress) error {
+func (s *Service) syncCity(ctx context.Context, province domainlocation.Province, city domainlocation.City, totals *domainlocation.SyncProgress) error {
 	districts, err := s.fetchDistricts(ctx, province.Code, city.Code)
 	if err != nil {
 		return err
@@ -273,7 +239,7 @@ func (s *Service) syncCity(ctx context.Context, province domainlocation.Province
 			return err
 		}
 		totals.DistrictCount += len(districts)
-		s.cache.DeleteKeys(context.Background(), districtKey(city.Code))
+		s.invalidate(districtKey(city.Code))
 	}
 	for _, district := range districts {
 		villages, err := s.fetchVillages(ctx, province.Code, city.Code, district.Code)
@@ -287,7 +253,12 @@ func (s *Service) syncCity(ctx context.Context, province domainlocation.Province
 			return err
 		}
 		totals.VillageCount += len(villages)
-		s.cache.DeleteKeys(context.Background(), villageKey(district.Code))
+		s.invalidate(villageKey(district.Code))
 	}
 	return nil
+}
+
+func withMessage(p domainlocation.SyncProgress, message string) domainlocation.SyncProgress {
+	p.Message = message
+	return p
 }

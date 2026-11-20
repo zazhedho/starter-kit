@@ -24,6 +24,8 @@ func TestNoEnvReadsOutsideConfig(t *testing.T) {
 				return fs.SkipDir
 			case path == filepath.Join("internal", "config"):
 				return fs.SkipDir
+			case path == filepath.Join("internal", "testutil"):
+				return fs.SkipDir // test helpers read test-only variables such as STARTER_KIT_TEST_DATABASE_URL
 			}
 			return nil
 		}

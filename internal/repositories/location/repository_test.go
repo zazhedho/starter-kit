@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -77,12 +79,10 @@ func TestLocationRepositoryDryRunUpserts(t *testing.T) {
 func TestLocationRepositoryDryRunSyncJobs(t *testing.T) {
 	repo := NewRepository(newDryRunDB(t))
 	ctx := context.Background()
-	job := &domainlocation.SyncJob{ID: "job-1", Status: "queued"}
+	now := time.Now()
+	job := &domainlocation.SyncJob{ID: "job-1", Status: "queued", OwnerInstanceID: "a", HeartbeatAt: now}
 	if err := repo.CreateSyncJob(ctx, job); err != nil {
 		t.Fatalf("create sync job: %v", err)
-	}
-	if err := repo.UpdateSyncJob(ctx, job); err != nil {
-		t.Fatalf("update sync job: %v", err)
 	}
 	if _, err := repo.GetSyncJobByID(ctx, "job-1"); err != nil {
 		t.Fatalf("get sync job: %v", err)
@@ -90,8 +90,12 @@ func TestLocationRepositoryDryRunSyncJobs(t *testing.T) {
 	if _, err := repo.GetActiveSyncJob(ctx); err != nil {
 		t.Fatalf("get active sync job: %v", err)
 	}
-	if err := repo.FailActiveSyncJobs(ctx, "stopped"); err != nil {
-		t.Fatalf("fail active sync jobs: %v", err)
+}
+
+func TestLocationRepositoryUpsertOfNothingIsANoop(t *testing.T) {
+	repo := NewRepository(newDryRunDB(t))
+	if err := repo.UpsertCities(context.Background(), nil); err != nil {
+		t.Fatalf("an empty upsert must succeed without a statement: %v", err)
 	}
 }
 
@@ -159,5 +163,83 @@ func TestLocationRepositoryKeepsOtherErrors(t *testing.T) {
 	_, err := NewRepository(db).GetProvinceByCode(context.Background(), "31")
 	if !errors.Is(err, boom) || errors.Is(err, domainlocation.ErrNotFound) {
 		t.Fatalf("expected the original error, got %v", err)
+	}
+}
+
+// The job updates write named columns for one owner, never the whole row.
+func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	at := time.Now()
+	calls := map[string]func(r *Repository) error{
+		"start": func(r *Repository) error { return r.StartSyncJob(ctx, "job-1", "inst-a", at) },
+		"progress": func(r *Repository) error {
+			return r.SaveSyncProgress(ctx, "job-1", "inst-a", domainlocation.SyncProgress{Message: "m", CityCount: 2}, at)
+		},
+		"touch": func(r *Repository) error { return r.TouchSyncJob(ctx, "job-1", "inst-a", at) },
+		"finish": func(r *Repository) error {
+			return r.FinishSyncJob(ctx, "job-1", "inst-a", domainlocation.SyncFinish{Status: "completed", Message: "done"}, at)
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			db, mock := newNoRowsRepo(t)
+			mock.ExpectExec(`UPDATE "location_sync_jobs" SET .* WHERE id = \$\d+ AND owner_instance_id = \$\d+ AND status IN`).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			if err := call(NewRepository(db)); err != nil {
+				t.Fatalf("%s = %v", name, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// No row matched: the job was finished or taken over by another instance.
+func TestSyncJobUpdateOfAJobThatIsNoLongerOurs(t *testing.T) {
+	db, mock := newNoRowsRepo(t)
+	mock.ExpectExec(`UPDATE "location_sync_jobs"`).WillReturnResult(sqlmock.NewResult(0, 0))
+	err := NewRepository(db).TouchSyncJob(context.Background(), "job-1", "inst-a", time.Now())
+	if !errors.Is(err, domainlocation.ErrNotFound) {
+		t.Fatalf("TouchSyncJob = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateSyncJobMapsAUniqueViolationToErrSyncRunning(t *testing.T) {
+	cases := map[string]error{
+		"driver error":     &pgconn.PgError{Code: "23505"},
+		"translated error": gorm.ErrDuplicatedKey,
+	}
+	for name, dbErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			db, mock := newNoRowsRepo(t)
+			mock.ExpectExec(`INSERT INTO "location_sync_jobs"`).WillReturnError(dbErr)
+			err := NewRepository(db).CreateSyncJob(context.Background(), &domainlocation.SyncJob{ID: "job-2", Status: "queued"})
+			if !errors.Is(err, domainlocation.ErrSyncRunning) {
+				t.Fatalf("CreateSyncJob = %v, want ErrSyncRunning", err)
+			}
+		})
+	}
+	t.Run("other errors are kept", func(t *testing.T) {
+		db, mock := newNoRowsRepo(t)
+		boom := errors.New("connection reset")
+		mock.ExpectExec(`INSERT INTO "location_sync_jobs"`).WillReturnError(boom)
+		err := NewRepository(db).CreateSyncJob(context.Background(), &domainlocation.SyncJob{ID: "job-2"})
+		if !errors.Is(err, boom) || errors.Is(err, domainlocation.ErrSyncRunning) {
+			t.Fatalf("CreateSyncJob = %v", err)
+		}
+	})
+}
+
+func TestFailStaleSyncJobsOnlyTouchesActiveJobsWithAStaleHeartbeat(t *testing.T) {
+	db, mock := newNoRowsRepo(t)
+	mock.ExpectExec(`UPDATE "location_sync_jobs" SET .* WHERE status IN \(\$\d+,\$\d+\) AND heartbeat_at < \$\d+`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	now := time.Now()
+	if err := NewRepository(db).FailStaleSyncJobs(context.Background(), now.Add(-time.Minute), now, "stopped"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

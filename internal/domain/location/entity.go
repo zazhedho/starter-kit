@@ -68,7 +68,7 @@ type SyncJob struct {
 	ProvinceCode  string     `json:"province_code,omitempty" gorm:"column:province_code"`
 	CityCode      string     `json:"city_code,omitempty" gorm:"column:city_code"`
 	DistrictCode  string     `json:"district_code,omitempty" gorm:"column:district_code"`
-	RequestedBy   string     `json:"requested_by" gorm:"column:requested_by_user_id"`
+	RequestedBy   string     `json:"requested_by_user_id" gorm:"column:requested_by_user_id"`
 	Message       string     `json:"message,omitempty" gorm:"column:message"`
 	ErrorMessage  string     `json:"error_message,omitempty" gorm:"column:error_message"`
 	ProvinceCount int        `json:"province_count" gorm:"column:province_count"`
@@ -79,8 +79,31 @@ type SyncJob struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty" gorm:"column:finished_at"`
 	CreatedAt     time.Time  `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty" gorm:"column:updated_at"`
+
+	// OwnerInstanceID names the service instance running the job; HeartbeatAt is
+	// the last time that instance reported in. A job whose heartbeat is stale
+	// belongs to a dead instance and may be taken over.
+	OwnerInstanceID string    `json:"-" gorm:"column:owner_instance_id"`
+	HeartbeatAt     time.Time `json:"-" gorm:"column:heartbeat_at"`
 }
 
 func (SyncJob) TableName() string {
 	return "location_sync_jobs"
+}
+
+// SyncProgress is what a running sync job reports: a message and how many rows
+// of each level it has stored so far.
+type SyncProgress struct {
+	Message       string
+	ProvinceCount int
+	CityCount     int
+	DistrictCount int
+	VillageCount  int
+}
+
+// SyncFinish is the final state of a sync job.
+type SyncFinish struct {
+	Status       string // "completed" or "failed"
+	Message      string
+	ErrorMessage string
 }
