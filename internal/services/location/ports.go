@@ -9,8 +9,8 @@ import (
 )
 
 // Repository is the persistence the service needs; a missing row is ErrNotFound.
-// The sync job methods with an owner touch only that instance's queued or running
-// job, and answer ErrNotFound when it finished or was taken over.
+// A sync job method with an owner touches only that instance's active job and
+// answers ErrNotFound when it finished or was taken over; heartbeats use the database clock.
 type Repository interface {
 	ListProvinces(ctx context.Context) ([]domainlocation.Province, error)
 	ListCitiesByProvince(ctx context.Context, provinceCode string) ([]domainlocation.City, error)
@@ -31,11 +31,11 @@ type Repository interface {
 	GetActiveSyncJob(ctx context.Context) (domainlocation.SyncJob, error)
 	StartSyncJob(ctx context.Context, id, owner string, at time.Time) error
 	SaveSyncProgress(ctx context.Context, id, owner string, p domainlocation.SyncProgress, at time.Time) error
-	TouchSyncJob(ctx context.Context, id, owner string, at time.Time) error
+	TouchSyncJob(ctx context.Context, id, owner string) error
 	FinishSyncJob(ctx context.Context, id, owner string, f domainlocation.SyncFinish, at time.Time) error
 	// FailStaleSyncJobs fails every queued or running job whose heartbeat is
-	// older than cutoff.
-	FailStaleSyncJobs(ctx context.Context, cutoff, now time.Time, message string) error
+	// older than staleAfter by the database clock.
+	FailStaleSyncJobs(ctx context.Context, staleAfter time.Duration, now time.Time, message string) error
 }
 
 // Cache is the read-through cache. Implementations must treat every failure as

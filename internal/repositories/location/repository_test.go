@@ -3,6 +3,7 @@ package location
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,8 +80,7 @@ func TestLocationRepositoryDryRunUpserts(t *testing.T) {
 func TestLocationRepositoryDryRunSyncJobs(t *testing.T) {
 	repo := NewRepository(newDryRunDB(t))
 	ctx := context.Background()
-	now := time.Now()
-	job := &domainlocation.SyncJob{ID: "job-1", Status: "queued", OwnerInstanceID: "a", HeartbeatAt: now}
+	job := &domainlocation.SyncJob{ID: "job-1", Status: "queued", OwnerInstanceID: "a"}
 	if err := repo.CreateSyncJob(ctx, job); err != nil {
 		t.Fatalf("create sync job: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
 		"progress": func(r *Repository) error {
 			return r.SaveSyncProgress(ctx, "job-1", "inst-a", domainlocation.SyncProgress{Message: "m", CityCount: 2}, at)
 		},
-		"touch": func(r *Repository) error { return r.TouchSyncJob(ctx, "job-1", "inst-a", at) },
+		"touch": func(r *Repository) error { return r.TouchSyncJob(ctx, "job-1", "inst-a") },
 		"finish": func(r *Repository) error {
 			return r.FinishSyncJob(ctx, "job-1", "inst-a", domainlocation.SyncFinish{Status: "completed", Message: "done"}, at)
 		},
@@ -199,7 +199,7 @@ func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
 func TestSyncJobUpdateOfAJobThatIsNoLongerOurs(t *testing.T) {
 	db, mock := newNoRowsRepo(t)
 	mock.ExpectExec(`UPDATE "location_sync_jobs"`).WillReturnResult(sqlmock.NewResult(0, 0))
-	err := NewRepository(db).TouchSyncJob(context.Background(), "job-1", "inst-a", time.Now())
+	err := NewRepository(db).TouchSyncJob(context.Background(), "job-1", "inst-a")
 	if !errors.Is(err, domainlocation.ErrNotFound) {
 		t.Fatalf("TouchSyncJob = %v, want ErrNotFound", err)
 	}
@@ -233,13 +233,56 @@ func TestCreateSyncJobMapsAUniqueViolationToErrSyncRunning(t *testing.T) {
 
 func TestFailStaleSyncJobsOnlyTouchesActiveJobsWithAStaleHeartbeat(t *testing.T) {
 	db, mock := newNoRowsRepo(t)
-	mock.ExpectExec(`UPDATE "location_sync_jobs" SET .* WHERE status IN \(\$\d+,\$\d+\) AND heartbeat_at < \$\d+`).
+	mock.ExpectExec(`UPDATE "location_sync_jobs" SET .* WHERE status IN \(\$\d+,\$\d+\) AND heartbeat_at < now\(\) - make_interval\(secs => \$\d+\)`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	now := time.Now()
-	if err := NewRepository(db).FailStaleSyncJobs(context.Background(), now.Add(-time.Minute), now, "stopped"); err != nil {
+	if err := NewRepository(db).FailStaleSyncJobs(context.Background(), time.Minute, time.Now(), "stopped"); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Heartbeats come from the database clock: the instances of a service do not
+// agree about the time, and the stale check compares them.
+func TestHeartbeatsAreStampedByTheDatabaseClock(t *testing.T) {
+	ctx := context.Background()
+	at := time.Now()
+	calls := map[string]func(r *Repository) error{
+		"start": func(r *Repository) error { return r.StartSyncJob(ctx, "job-1", "inst-a", at) },
+		"progress": func(r *Repository) error {
+			return r.SaveSyncProgress(ctx, "job-1", "inst-a", domainlocation.SyncProgress{}, at)
+		},
+		"touch": func(r *Repository) error { return r.TouchSyncJob(ctx, "job-1", "inst-a") },
+		"finish": func(r *Repository) error {
+			return r.FinishSyncJob(ctx, "job-1", "inst-a", domainlocation.SyncFinish{Status: "failed"}, at)
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			db, mock := newNoRowsRepo(t)
+			mock.ExpectExec(`UPDATE "location_sync_jobs" SET .*"heartbeat_at"=now\(\)`).WillReturnResult(sqlmock.NewResult(0, 1))
+			if err := call(NewRepository(db)); err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCreateSyncJobLeavesTheHeartbeatToTheDatabase(t *testing.T) {
+	db := newDryRunDB(t)
+	var statement string
+	if err := db.Callback().Create().After("gorm:create").Register("capture", func(tx *gorm.DB) { statement = tx.Statement.SQL.String() }); err != nil {
+		t.Fatal(err)
+	}
+	job := &domainlocation.SyncJob{ID: "job-3", Status: "queued", HeartbeatAt: time.Now()}
+	if err := NewRepository(db).CreateSyncJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if statement == "" || strings.Contains(statement, "heartbeat_at") {
+		t.Fatalf("INSERT = %q: the heartbeat column must be left to its database default", statement)
 	}
 }

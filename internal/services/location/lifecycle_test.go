@@ -179,15 +179,14 @@ func TestNewServiceDoesNotTouchTheRepository(t *testing.T) {
 func TestRecoverInterruptedJobsTakesOverOnlyStaleJobs(t *testing.T) {
 	repo := &locationRepoTestDouble{}
 	svc := NewService(repo, Options{StaleAfter: 90 * time.Second})
-	before := time.Now()
 	if err := svc.RecoverInterruptedJobs(context.Background()); err != nil {
 		t.Fatalf("RecoverInterruptedJobs = %v", err)
 	}
 	if len(repo.failStale) != 1 {
 		t.Fatalf("FailStaleSyncJobs called %d times", len(repo.failStale))
 	}
-	if age := before.Sub(repo.failStale[0]); age < 89*time.Second || age > 91*time.Second {
-		t.Fatalf("the cutoff is %v old, want the 90s StaleAfter, so younger heartbeats are kept", age)
+	if repo.failStale[0] != 90*time.Second {
+		t.Fatalf("the repository was told %v, want the 90s StaleAfter, so younger heartbeats are kept", repo.failStale[0])
 	}
 	if repo.failStaleMessage != staleMessage {
 		t.Fatalf("unexpected recovery message %q", repo.failStaleMessage)

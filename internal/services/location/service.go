@@ -194,7 +194,7 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, re
 
 	// A job whose instance died would hold the single active slot forever.
 	now := time.Now()
-	if err := s.repo.FailStaleSyncJobs(ctx, now.Add(-s.staleAfter), now, staleMessage); err != nil {
+	if err := s.repo.FailStaleSyncJobs(ctx, s.staleAfter, now, staleMessage); err != nil {
 		s.jobs.Done()
 		return dtolocation.SyncJob{}, err
 	}
@@ -211,7 +211,6 @@ func (s *Service) StartSync(ctx context.Context, req dtolocation.SyncRequest, re
 		CreatedAt:       now,
 		UpdatedAt:       &now,
 		OwnerInstanceID: s.instanceID,
-		HeartbeatAt:     now,
 	}
 	if err := s.repo.CreateSyncJob(ctx, &job); err != nil {
 		s.jobs.Done()

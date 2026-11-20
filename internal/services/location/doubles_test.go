@@ -41,7 +41,7 @@ type locationRepoTestDouble struct {
 	progress            []domainlocation.SyncProgress
 	touches             int
 	finishes            []domainlocation.SyncFinish
-	failStale           []time.Time // cutoffs
+	failStale           []time.Duration // staleAfter of each call
 	failStaleMessage    string
 	upsertProvinceCount int
 	upsertCityCount     int
@@ -181,7 +181,7 @@ func (m *locationRepoTestDouble) SaveSyncProgress(_ context.Context, _, _ string
 	return m.progressErr
 }
 
-func (m *locationRepoTestDouble) TouchSyncJob(context.Context, string, string, time.Time) error {
+func (m *locationRepoTestDouble) TouchSyncJob(context.Context, string, string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.touches++
@@ -197,10 +197,10 @@ func (m *locationRepoTestDouble) FinishSyncJob(ctx context.Context, _, _ string,
 	return m.finishErr
 }
 
-func (m *locationRepoTestDouble) FailStaleSyncJobs(_ context.Context, cutoff, _ time.Time, message string) error {
+func (m *locationRepoTestDouble) FailStaleSyncJobs(_ context.Context, staleAfter time.Duration, _ time.Time, message string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.failStale = append(m.failStale, cutoff)
+	m.failStale = append(m.failStale, staleAfter)
 	m.failStaleMessage = message
 	return m.failStaleErr
 }

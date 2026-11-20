@@ -23,8 +23,7 @@ const (
 // stale: the instance that owned it is gone. A job of an instance that is still
 // alive, for example during a rolling deploy, is left alone. Call it once at startup.
 func (s *Service) RecoverInterruptedJobs(ctx context.Context) error {
-	now := time.Now()
-	if err := s.repo.FailStaleSyncJobs(ctx, now.Add(-s.staleAfter), now, staleMessage); err != nil {
+	if err := s.repo.FailStaleSyncJobs(ctx, s.staleAfter, time.Now(), staleMessage); err != nil {
 		return fmt.Errorf("mark interrupted location sync jobs: %w", err)
 	}
 	return nil

@@ -232,3 +232,27 @@ func TestAJobThatWasTakenOverStopsWithoutFinishing(t *testing.T) {
 		t.Fatalf("the job recorded %d final states over the takeover", finishes)
 	}
 }
+
+// A progress write that finds the job gone means another instance took it over:
+// the job stops at once instead of waiting for the next heartbeat.
+func TestAProgressWriteThatLostTheJobCancelsIt(t *testing.T) {
+	repo := &locationRepoTestDouble{progressErr: domainlocation.ErrNotFound}
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	svc := NewService(repo, Options{HeartbeatInterval: time.Hour})
+	svc.httpClient = &http.Client{Transport: rt}
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
+
+	done := make(chan struct{})
+	go func() { svc.runSyncJob("job-1", dtolocation.SyncRequest{Level: "province"}); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a job whose progress write lost ownership kept running")
+	}
+	if finishes, _, _ := repo.counts(); finishes != 0 {
+		t.Fatalf("the job recorded %d final states over the takeover", finishes)
+	}
+}

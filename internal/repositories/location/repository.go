@@ -96,10 +96,11 @@ func (r *Repository) UpsertVillages(ctx context.Context, items []domainlocation.
 // index ux_location_sync_jobs_one_active allows one row in these states.
 var activeStatuses = []string{"queued", "running"}
 
-// CreateSyncJob stores a queued job. The unique index lets only one job be
-// queued or running; when one already is, the answer is ErrSyncRunning.
+// CreateSyncJob stores a queued job; the database sets its heartbeat. The unique
+// index lets only one job be queued or running; when one already is, the answer
+// is ErrSyncRunning.
 func (r *Repository) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
-	err := r.db.WithContext(ctx).Create(job).Error
+	err := r.db.WithContext(ctx).Omit("heartbeat_at").Create(job).Error
 	if isUniqueViolation(err) {
 		return domainlocation.ErrSyncRunning
 	}
@@ -116,6 +117,10 @@ func isUniqueViolation(err error) bool {
 	return ok && pgErr.Code == "23505"
 }
 
+// dbNow stamps heartbeat_at with the database clock: the instances of a service
+// disagree about the time, and the heartbeat is compared across them.
+var dbNow = gorm.Expr("now()")
+
 // StartSyncJob moves a queued job of this instance to running.
 func (r *Repository) StartSyncJob(ctx context.Context, id, owner string, at time.Time) error {
 	return r.updateOwned(ctx, id, owner, []string{"queued"}, map[string]any{
@@ -123,7 +128,7 @@ func (r *Repository) StartSyncJob(ctx context.Context, id, owner string, at time
 		"message":      "Location sync is running",
 		"started_at":   at,
 		"updated_at":   at,
-		"heartbeat_at": at,
+		"heartbeat_at": dbNow,
 	})
 }
 
@@ -137,13 +142,13 @@ func (r *Repository) SaveSyncProgress(ctx context.Context, id, owner string, p d
 		"district_count": p.DistrictCount,
 		"village_count":  p.VillageCount,
 		"updated_at":     at,
-		"heartbeat_at":   at,
+		"heartbeat_at":   dbNow,
 	})
 }
 
 // TouchSyncJob is the heartbeat of a job of this instance.
-func (r *Repository) TouchSyncJob(ctx context.Context, id, owner string, at time.Time) error {
-	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{"heartbeat_at": at})
+func (r *Repository) TouchSyncJob(ctx context.Context, id, owner string) error {
+	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{"heartbeat_at": dbNow})
 }
 
 // FinishSyncJob records the final state of a job of this instance.
@@ -154,7 +159,7 @@ func (r *Repository) FinishSyncJob(ctx context.Context, id, owner string, f doma
 		"error_message": f.ErrorMessage,
 		"finished_at":   at,
 		"updated_at":    at,
-		"heartbeat_at":  at,
+		"heartbeat_at":  dbNow,
 	})
 }
 
@@ -188,10 +193,11 @@ func (r *Repository) GetActiveSyncJob(ctx context.Context) (ret domainlocation.S
 }
 
 // FailStaleSyncJobs fails every queued or running job whose heartbeat is older
-// than cutoff: its instance is gone. Jobs of live instances are left alone.
-func (r *Repository) FailStaleSyncJobs(ctx context.Context, cutoff, now time.Time, message string) error {
+// than staleAfter by the database clock: its instance is gone. Jobs of live
+// instances are left alone.
+func (r *Repository) FailStaleSyncJobs(ctx context.Context, staleAfter time.Duration, now time.Time, message string) error {
 	return r.db.WithContext(ctx).Model(&domainlocation.SyncJob{}).
-		Where("status IN ? AND heartbeat_at < ?", activeStatuses, cutoff).
+		Where("status IN ? AND heartbeat_at < now() - make_interval(secs => ?)", activeStatuses, staleAfter.Seconds()).
 		Updates(map[string]any{
 			"status":        "failed",
 			"message":       "Location sync interrupted",

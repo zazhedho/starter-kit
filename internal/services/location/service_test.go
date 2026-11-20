@@ -158,7 +158,6 @@ func TestStartSyncCreatesAQueuedJobOwnedByThisInstance(t *testing.T) {
 	svc := NewService(repo, Options{InstanceID: "instance-a", StaleAfter: 90 * time.Second, HeartbeatInterval: time.Hour})
 	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 
-	before := time.Now()
 	got, err := svc.StartSync(context.Background(), dtolocation.SyncRequest{Level: "province"}, "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99")
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
@@ -167,15 +166,15 @@ func TestStartSyncCreatesAQueuedJobOwnedByThisInstance(t *testing.T) {
 		t.Fatalf("unexpected job response: %+v", got)
 	}
 	job := repo.createdJob
-	if job == nil || job.RequestedBy != "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99" || job.OwnerInstanceID != "instance-a" || job.HeartbeatAt.Before(before) {
-		t.Fatalf("created job = %+v, want owner instance-a, requester user-1 and a fresh heartbeat", job)
+	if job == nil || job.RequestedBy != "2d5ea3a8-1e0f-4b8c-8f0e-1b6f5c1b2a99" || job.OwnerInstanceID != "instance-a" || !job.HeartbeatAt.IsZero() {
+		t.Fatalf("created job = %+v, want owner instance-a, the requester and a heartbeat left to the database", job)
 	}
 	// Before claiming the single active slot, jobs of dead instances are failed.
 	if len(repo.failStale) != 1 {
 		t.Fatalf("stale jobs were failed %d times, want once", len(repo.failStale))
 	}
-	if age := before.Sub(repo.failStale[0]); age < 89*time.Second || age > 91*time.Second {
-		t.Fatalf("stale cutoff is %v old, want StaleAfter (90s)", age)
+	if repo.failStale[0] != 90*time.Second {
+		t.Fatalf("repository was told %v, want StaleAfter (90s)", repo.failStale[0])
 	}
 }
 

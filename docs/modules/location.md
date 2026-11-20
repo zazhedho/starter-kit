@@ -123,7 +123,9 @@ PostgreSQL.
 - A job whose heartbeat is older than 2 minutes belongs to an instance that died. It is failed with the message
   `Location sync interrupted` when any instance starts, and before any new job is created, so a crashed instance
   never blocks syncs for longer than that. A job of an instance that is still alive is never touched, which
-  makes rolling deploys safe. The clocks of the instances should agree to well within 2 minutes.
+  makes rolling deploys safe. The heartbeat and the staleness check use the database clock, so the clocks of the
+  instances do not matter.
+- A job that finds it was taken over, on a heartbeat or a progress write, stops at once and writes nothing more.
 - Startup recovery runs before the routes are mounted and takes at most 10 seconds; if it fails or times out,
   registration fails and the service does not start.
 - On SIGINT or SIGTERM the running job is canceled at the start of the shutdown, before the HTTP requests drain,

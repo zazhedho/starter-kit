@@ -81,8 +81,8 @@ type SyncJob struct {
 	UpdatedAt     *time.Time `json:"updated_at,omitempty" gorm:"column:updated_at"`
 
 	// OwnerInstanceID names the service instance running the job; HeartbeatAt is
-	// the last time that instance reported in. A job whose heartbeat is stale
-	// belongs to a dead instance and may be taken over.
+	// the last time that instance reported in, by the database clock. A job whose
+	// heartbeat is stale belongs to a dead instance and may be taken over.
 	OwnerInstanceID string    `json:"-" gorm:"column:owner_instance_id"`
 	HeartbeatAt     time.Time `json:"-" gorm:"column:heartbeat_at"`
 }

@@ -35,7 +35,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	stopHeartbeat := s.beat(ctx, cancelJob, jobID)
 	defer stopHeartbeat()
 
-	progress := &progressWriter{s: s, ctx: ctx, jobID: jobID}
+	progress := &progressWriter{s: s, ctx: ctx, cancelJob: cancelJob, jobID: jobID}
 	result, err := s.sync(ctx, req, progress.report)
 	if err != nil {
 		switch {
@@ -75,7 +75,7 @@ func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID 
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				err := s.repo.TouchSyncJob(ctx, jobID, s.instanceID, time.Now())
+				err := s.repo.TouchSyncJob(ctx, jobID, s.instanceID)
 				switch {
 				case errors.Is(err, domainlocation.ErrNotFound):
 					cancelJob()
@@ -92,9 +92,10 @@ func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID 
 // progressWriter stores a job's progress, at most once per progressInterval so
 // that a sync of thousands of rows does not become thousands of writes.
 type progressWriter struct {
-	s     *Service
-	ctx   context.Context
-	jobID string
+	s         *Service
+	ctx       context.Context
+	cancelJob context.CancelFunc
+	jobID     string
 
 	mu   sync.Mutex
 	last time.Time
@@ -107,7 +108,11 @@ func (w *progressWriter) report(p domainlocation.SyncProgress) {
 		return
 	}
 	w.last = time.Now()
-	if err := w.s.repo.SaveSyncProgress(w.ctx, w.jobID, w.s.instanceID, p, time.Now()); err != nil && w.ctx.Err() == nil {
+	err := w.s.repo.SaveSyncProgress(w.ctx, w.jobID, w.s.instanceID, p, time.Now())
+	switch {
+	case errors.Is(err, domainlocation.ErrNotFound):
+		w.cancelJob() // another instance took the job over
+	case err != nil && w.ctx.Err() == nil:
 		logus.Logf(logus.LevelWarn, "failed to update location sync job progress %s: %v", w.jobID, err)
 	}
 }
