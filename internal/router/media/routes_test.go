@@ -190,33 +190,22 @@ func (r *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 // The response is written after the upload finishes, so the write deadline must
 // move with the read deadline: HTTP_WRITE_TIMEOUT (30 s) would otherwise cut
 // the response of a slow upload and make the client retry into a duplicate.
-func TestMediaUploadExtendsTheWriteDeadlineToo(t *testing.T) {
+func TestMediaUploadExtendsTheReadAndWriteDeadlines(t *testing.T) {
 	d, mock := authedDeps(t)
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	d.Config.Media.UploadTimeout = 90 * time.Second
-	engine := engineFor(t, d)
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	engine.ServeHTTP(rec, uploadRequest(t, d, 1024))
-	if rec.writeCalls == 0 {
-		t.Fatal("upload handler did not extend the write deadline")
-	}
-	if diff := time.Until(rec.writeDeadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
-		t.Fatalf("write deadline is %s away from now+UploadTimeout", diff)
-	}
-}
-
-func TestMediaUploadExtendsReadDeadline(t *testing.T) {
-	d, mock := authedDeps(t)
-	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	d.Config.Media.UploadTimeout = 90 * time.Second
-	engine := engineFor(t, d)
-	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	engine.ServeHTTP(rec, uploadRequest(t, d, 1024))
-	if rec.calls == 0 {
-		t.Fatal("upload handler did not extend the read deadline")
-	}
-	if diff := time.Until(rec.deadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
-		t.Fatalf("deadline is %s away from now+UploadTimeout", diff)
+	engineFor(t, d).ServeHTTP(rec, uploadRequest(t, d, 1024))
+	for name, c := range map[string]struct {
+		calls    int
+		deadline time.Time
+	}{"read": {rec.calls, rec.deadline}, "write": {rec.writeCalls, rec.writeDeadline}} {
+		if c.calls == 0 {
+			t.Fatalf("upload handler did not extend the %s deadline", name)
+		}
+		if diff := time.Until(c.deadline) - d.Config.Media.UploadTimeout; diff > time.Second || diff < -time.Second {
+			t.Fatalf("%s deadline is %s away from now+UploadTimeout", name, diff)
+		}
 	}
 }
 

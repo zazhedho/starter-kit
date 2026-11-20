@@ -8,29 +8,15 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	domainmedia "starter-kit/internal/domain/media"
 	dtomedia "starter-kit/internal/dto/media"
+	"starter-kit/internal/testutil/routertest"
 )
 
-func newMockRepo(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{SkipDefaultTransaction: true})
-	if err != nil {
-		t.Fatalf("open gorm: %v", err)
-	}
-	return db, mock
-}
-
 func TestMediaRepositoryGetByIDTranslatesNotFound(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	_, err := NewRepository(db).GetByID(context.Background(), "missing")
@@ -43,7 +29,7 @@ func TestMediaRepositoryGetByIDTranslatesNotFound(t *testing.T) {
 }
 
 func TestMediaRepositoryGetByIDKeepsOtherErrors(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	boom := errors.New("connection reset")
 	mock.ExpectQuery("SELECT").WillReturnError(boom)
 
@@ -54,7 +40,7 @@ func TestMediaRepositoryGetByIDKeepsOtherErrors(t *testing.T) {
 }
 
 func TestRepositoryStoreInsertsTheMediaRow(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err := NewRepository(db).Store(context.Background(), &domainmedia.Media{ID: "m-1", OwnerUserID: "u-1", CreatedAt: time.Now()})
@@ -67,7 +53,7 @@ func TestRepositoryStoreInsertsTheMediaRow(t *testing.T) {
 }
 
 func TestRepositoryStoreReturnsDatabaseErrors(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	boom := errors.New("insert failed")
 	mock.ExpectExec(`INSERT INTO "media"`).WillReturnError(boom)
 
@@ -77,7 +63,7 @@ func TestRepositoryStoreReturnsDatabaseErrors(t *testing.T) {
 }
 
 func TestRepositoryGetByIDReturnsTheRow(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectQuery(`SELECT .* FROM "media"`).WillReturnRows(
 		sqlmock.NewRows([]string{"id", "owner_user_id", "url"}).AddRow("m-1", "u-1", "https://cdn/x.png"))
 
@@ -93,7 +79,7 @@ func TestRepositoryGetByIDReturnsTheRow(t *testing.T) {
 // Deleting is a soft delete: the row is updated, not removed, so audit
 // references stay valid.
 func TestRepositoryDeleteSoftDeletesTheRow(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "media" SET "deleted_at"=`).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := NewRepository(db).Delete(context.Background(), "m-1"); err != nil {
@@ -107,7 +93,7 @@ func TestRepositoryDeleteSoftDeletesTheRow(t *testing.T) {
 // gokit answers ErrNotFound when no row matched (a second delete, or a race);
 // the repository turns it into the domain error the handler maps to 404.
 func TestRepositoryDeleteTranslatesNoMatchToTheDomainError(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "media" SET "deleted_at"=`).WillReturnResult(sqlmock.NewResult(0, 0))
 
 	if err := NewRepository(db).Delete(context.Background(), "m-1"); !errors.Is(err, domainmedia.ErrNotFound) {
@@ -116,7 +102,7 @@ func TestRepositoryDeleteTranslatesNoMatchToTheDomainError(t *testing.T) {
 }
 
 func TestRepositoryDeleteReturnsDatabaseErrors(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	boom := errors.New("update failed")
 	mock.ExpectExec(`UPDATE "media"`).WillReturnError(boom)
 
@@ -134,7 +120,7 @@ func expectCount(mock sqlmock.Sqlmock, total int) {
 }
 
 func TestRepositoryListAppliesSearchFiltersAndOrder(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	expectCount(mock, 41)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "media" WHERE (LOWER("original_name") LIKE LOWER($1) ESCAPE '\') AND "content_type" = $2 AND "owner_user_id" = $3 AND "media"."deleted_at" IS NULL ORDER BY "size","id" LIMIT $4 OFFSET $5`)).
 		WillReturnRows(listRows())
@@ -169,7 +155,7 @@ func TestRepositoryListCapsTheLimitAndReportsIt(t *testing.T) {
 		{"zero is the cap too", 0, 100},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			db, mock := newMockRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			expectCount(mock, 500)
 			mock.ExpectQuery(`SELECT \* FROM "media" .* LIMIT \$\d+`).
 				WithArgs(c.want).
@@ -190,7 +176,7 @@ func TestRepositoryListCapsTheLimitAndReportsIt(t *testing.T) {
 }
 
 func TestRepositoryListFiltersByOwnerAndContentType(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "media" WHERE`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -208,7 +194,7 @@ func TestRepositoryListFiltersByOwnerAndContentType(t *testing.T) {
 func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) {
 	for _, orderBy := range []string{"object_key", "url", "size; DROP TABLE media", "owner_user_id"} {
 		t.Run(orderBy, func(t *testing.T) {
-			db, mock := newMockRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			expectCount(mock, 1)
 			mock.ExpectQuery(`ORDER BY "created_at" DESC,"id" DESC LIMIT`).WillReturnRows(listRows())
 
@@ -223,7 +209,7 @@ func TestRepositoryListFallsBackToDefaultOrderForDisallowedColumn(t *testing.T) 
 }
 
 func TestRepositoryListFallsBackToDefaultOrderForBadDirection(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	expectCount(mock, 1)
 	mock.ExpectQuery(`ORDER BY "created_at" DESC,"id" DESC LIMIT`).WillReturnRows(listRows())
 
@@ -236,7 +222,7 @@ func TestRepositoryListFallsBackToDefaultOrderForBadDirection(t *testing.T) {
 }
 
 func TestRepositoryListReturnsDatabaseErrors(t *testing.T) {
-	db, mock := newMockRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	boom := errors.New("count failed")
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "media"`)).WillReturnError(boom)
 
@@ -258,7 +244,7 @@ func TestRepositoryListOrderByPinsTheTieBreaker(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			db, mock := newMockRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			expectCount(mock, 1)
 			mock.ExpectQuery(regexp.QuoteMeta(c.want)).WillReturnRows(listRows())
 

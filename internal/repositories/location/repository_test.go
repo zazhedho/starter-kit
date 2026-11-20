@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	domainlocation "starter-kit/internal/domain/location"
+	"starter-kit/internal/testutil/routertest"
 )
 
 func newDryRunDB(t *testing.T) *gorm.DB {
@@ -106,20 +107,6 @@ func TestLocationRepositoryUpsertIgnoresUnknownType(t *testing.T) {
 	}
 }
 
-func newNoRowsRepo(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
-	t.Helper()
-	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{SkipDefaultTransaction: true})
-	if err != nil {
-		t.Fatalf("open gorm: %v", err)
-	}
-	return db, mock
-}
-
 func TestLocationRepositoryTranslatesNotFound(t *testing.T) {
 	ctx := context.Background()
 	lookups := map[string]func(r *Repository) error{
@@ -143,7 +130,7 @@ func TestLocationRepositoryTranslatesNotFound(t *testing.T) {
 	}
 	for name, lookup := range lookups {
 		t.Run(name, func(t *testing.T) {
-			db, mock := newNoRowsRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 			err := lookup(NewRepository(db))
 			if !errors.Is(err, domainlocation.ErrNotFound) {
@@ -157,7 +144,7 @@ func TestLocationRepositoryTranslatesNotFound(t *testing.T) {
 }
 
 func TestLocationRepositoryKeepsOtherErrors(t *testing.T) {
-	db, mock := newNoRowsRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	boom := errors.New("connection reset")
 	mock.ExpectQuery("SELECT").WillReturnError(boom)
 	_, err := NewRepository(db).GetProvinceByCode(context.Background(), "31")
@@ -182,7 +169,7 @@ func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
-			db, mock := newNoRowsRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			mock.ExpectExec(`UPDATE "location_sync_jobs" SET .* WHERE id = \$\d+ AND owner_instance_id = \$\d+ AND status IN`).
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			if err := call(NewRepository(db)); err != nil {
@@ -197,7 +184,7 @@ func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
 
 // No row matched: the job was finished or taken over by another instance.
 func TestSyncJobUpdateOfAJobThatIsNoLongerOurs(t *testing.T) {
-	db, mock := newNoRowsRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "location_sync_jobs"`).WillReturnResult(sqlmock.NewResult(0, 0))
 	err := NewRepository(db).TouchSyncJob(context.Background(), "job-1", "inst-a")
 	if !errors.Is(err, domainlocation.ErrNotFound) {
@@ -212,7 +199,7 @@ func TestCreateSyncJobMapsAUniqueViolationToErrSyncRunning(t *testing.T) {
 	}
 	for name, dbErr := range cases {
 		t.Run(name, func(t *testing.T) {
-			db, mock := newNoRowsRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			mock.ExpectExec(`INSERT INTO "location_sync_jobs"`).WillReturnError(dbErr)
 			err := NewRepository(db).CreateSyncJob(context.Background(), &domainlocation.SyncJob{ID: "job-2", Status: "queued"})
 			if !errors.Is(err, domainlocation.ErrSyncRunning) {
@@ -221,7 +208,7 @@ func TestCreateSyncJobMapsAUniqueViolationToErrSyncRunning(t *testing.T) {
 		})
 	}
 	t.Run("other errors are kept", func(t *testing.T) {
-		db, mock := newNoRowsRepo(t)
+		db, mock := routertest.NewExecDB(t)
 		boom := errors.New("connection reset")
 		mock.ExpectExec(`INSERT INTO "location_sync_jobs"`).WillReturnError(boom)
 		err := NewRepository(db).CreateSyncJob(context.Background(), &domainlocation.SyncJob{ID: "job-2"})
@@ -232,7 +219,7 @@ func TestCreateSyncJobMapsAUniqueViolationToErrSyncRunning(t *testing.T) {
 }
 
 func TestFailStaleSyncJobsOnlyTouchesActiveJobsWithAStaleHeartbeat(t *testing.T) {
-	db, mock := newNoRowsRepo(t)
+	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "location_sync_jobs" SET .* WHERE status IN \(\$\d+,\$\d+\) AND heartbeat_at < now\(\) - make_interval\(secs => \$\d+\)`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := NewRepository(db).FailStaleSyncJobs(context.Background(), time.Minute, time.Now(), "stopped"); err != nil {
@@ -260,7 +247,7 @@ func TestHeartbeatsAreStampedByTheDatabaseClock(t *testing.T) {
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
-			db, mock := newNoRowsRepo(t)
+			db, mock := routertest.NewExecDB(t)
 			mock.ExpectExec(`UPDATE "location_sync_jobs" SET .*"heartbeat_at"=now\(\)`).WillReturnResult(sqlmock.NewResult(0, 1))
 			if err := call(NewRepository(db)); err != nil {
 				t.Fatal(err)
