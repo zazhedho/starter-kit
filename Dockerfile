@@ -25,23 +25,19 @@ RUN apk add --no-cache tzdata \
 
 # Copy the built binary from the builder stage
 COPY --from=builder /app/main ./main
-COPY deploy/entrypoint.sh ./entrypoint.sh
 
 # Copy migrations
 COPY migrations ./migrations
-
-# Ensure entrypoint is executable
-RUN chmod +x ./entrypoint.sh
 
 USER app
 
 # Expose port 8080 to the outside world
 EXPOSE 8080
 
-# Liveness only: /healthcheck does not touch the database. PORT is the service's
-# port (8080 when unset); alpine's busybox provides wget.
+# Liveness only: /healthcheck does not touch the database. PORT must be set in
+# the container environment (the service requires it); busybox provides wget.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-8080}/healthcheck" || exit 1
+    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/healthcheck" || exit 1
 
 # The service migrates at startup unless RUN_MIGRATION=false.
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["./main"]

@@ -51,8 +51,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    # internal/infrastructure/database has integration tests that read
-    # STARTER_KIT_TEST_DATABASE_URL and are skipped without it.
+    # The database, repository and migration tests read STARTER_KIT_TEST_DATABASE_URL
+    # and are skipped without it.
     services:
       postgres:
         image: postgres:17-alpine

@@ -83,7 +83,6 @@ starter-kit/
 │   ├── architecture/              # guard tests: the dependency rule, import aliases, package names, migration names
 │   └── testutil/                  # test helpers: logcapture, routertest (shared router test Deps and helpers)
 ├── migrations/                    # this project's migrations: <UTC timestamp>_<module>_<change>.{up,down}.sql, see migrations/README.md
-├── deploy/entrypoint.sh           # container entrypoint (runs the migration when asked)
 ├── docs/
 │   ├── adding-a-module.md         # checklist and a worked example
 │   ├── modules/<module>.md        # routes, permissions, env variables, operational notes per module
@@ -143,7 +142,7 @@ Internal-import rules apply to non-test files only. Test files are checked only 
 
 Infrastructure factories such as `storage.NewStorageProvider` may return an interface, because they select an implementation.
 
-Also checked: no `log.Fatal` or `os.Exit` call outside `cmd/` (read from the syntax tree, so comments and strings do not match), no package-level gorm, sql or Redis connections, the import aliases, package names matching their directories, `app` never importing a module's layers (`domain`, `dto`, `services`, `repositories`, `handlers`), `cmd` importing only `internal/app`, and no comment block longer than 3 lines in a non-test file (say why in a few lines; longer text belongs in `docs/`).
+Also checked: no `log.Fatal` or `os.Exit` call outside `cmd/` (read from the syntax tree with import aliases resolved, so comments, strings and a renamed `log` or `os` are judged correctly), no `panic` outside `cmd/` (the guard's `panicAllowed` map lists the exceptions, each with its reason), no one-line doc comment that only repeats the declaration it documents (`// NewRepository returns a Repository over db.`), no package-level gorm, sql or Redis connections, the import aliases, package names matching their directories, `app` never importing a module's layers (`domain`, `dto`, `services`, `repositories`, `handlers`), `cmd` importing only `internal/app`, and no comment block longer than 3 lines in a non-test file (say why in a few lines; longer text belongs in `docs/`).
 
 ### Names and import aliases
 
@@ -248,8 +247,7 @@ go run ./cmd/api -migrate-only    # migrate, then exit 0 without serving or open
 | `-h` | print usage and exit 0 |
 
 `RUN_MIGRATION` defaults to `true`, so the container migrates at startup unless it is set to `false`.
-`deploy/entrypoint.sh` (copied to `/app/entrypoint.sh` in the image) only starts the binary with the arguments it
-is given.
+The image's entrypoint is the binary itself (`ENTRYPOINT ["./main"]`), so container arguments are the flags above.
 
 | Code | When |
 |---|---|
@@ -312,7 +310,9 @@ A variable takes its value from the first of these that sets it (a blank value c
 | `APP_CONFIG` | directory holding `app.env`; without it the file is `config/<APP_ENV>.env` |
 
 A missing config file is logged at debug level only; a source that exists but cannot be read is logged as an error and
-ignored. Remote configuration never overrides a variable that is already set.
+ignored. Remote configuration never overrides a variable that is already set, but it may set any variable that is
+unset, secrets and `TRUSTED_PROXIES` included, so operators must trust the Consul source (or the config file) as much
+as the environment.
 
 ### HTTP, time zone and database pool
 
@@ -362,6 +362,22 @@ credential:
 | `connect to database: timed out` | the host did not answer in time |
 | `connect to database: unreachable` | any other failure to reach the server |
 
+### Email (SMTP)
+
+Email (register OTP, password reset) needs Redis and `SMTP_HOST`, `SMTP_PASS` and `SMTP_FROM`, all three: setting one
+makes the other two required, and `SMTP_FROM` must be a valid address. The rest is optional, and empty means the
+mailer's default:
+
+| Variable | Meaning |
+|---|---|
+| `SMTP_PORT` | server port, 1-65535 |
+| `SMTP_USER` | login user of the server |
+| `SMTP_SUBJECT` | subject of the register OTP email |
+| `RESET_SUBJECT` | subject of the password-reset email |
+| `AUTH_EMAIL_APP_NAME` | application name shown in the emails |
+
+`OTP_SECRET` and `RESET_SECRET` (at least 32 characters) are required when both Redis and SMTP are configured.
+
 ### Redis
 
 Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is not empty (`REDIS_PORT` defaults to
@@ -379,8 +395,7 @@ Redis is optional. It counts as configured when `REDIS_URL` or `REDIS_HOST` is n
 
 Logging goes through `logus`: `logus.Logf(level, format, args...)` for formatted messages, `logus.Log(level, args...)`
 (arguments are joined with single spaces, so do not add separators), and `LogContext`/`LogContextf` inside a request so the
-line carries the request id. `LOG_LEVEL`, `LOG_FORMAT` and `NODE` are read once. `SERVER_IP` (logus still reads the legacy
-`ServerIP` when it is empty) is written as `server_ip` on every line; the service sets it at startup to the host's first
+line carries the request id. `LOG_LEVEL`, `LOG_FORMAT` and `NODE` are read once. `SERVER_IP` is written as `server_ip` on every line; the service sets it at startup to the host's first
 non-loopback IPv4 address.
 
 ### Responses and middleware
@@ -402,14 +417,12 @@ make fmt         # golangci-lint fmt: formats the code and the import groups
 make hook-install   # git hooks: lint on commit, lint and tests on push
 ```
 
-The Docker image builds from `golang:1.27-alpine` and ships a static, stripped binary (`-trimpath`), the migrations and `deploy/entrypoint.sh`; `.dockerignore` keeps `.env*`, `.git`, docs and coverage output out of the build context, and a `HEALTHCHECK` calls `/healthcheck`. Dependabot (`.github/dependabot.yml`) opens weekly pull requests for Go modules, GitHub Actions and the Docker base image; the base image is pinned to the minor line, so only a new minor opens a PR.
+The Docker image builds from `golang:1.27-alpine` and ships a static, stripped binary (`-trimpath`), and the migrations; `.dockerignore` keeps `.env*`, `.claude`, key and certificate files (`*.pem`, `*.key`), `.git`, docs and coverage output out of the build context, and a `HEALTHCHECK` calls `/healthcheck` on `PORT`, so `PORT` must be set in the container environment (the service requires it anyway). Dependabot (`.github/dependabot.yml`) opens weekly pull requests for Go modules, GitHub Actions and the Docker base image; the base image is pinned to the minor line, so only a new minor opens a PR.
 
 CI (`.github/workflows/ci.yml`, every action pinned by commit SHA) runs four jobs: golangci-lint (revive, goimports and the rest of `.golangci.yml`; the action builds v2.14.0 with the job's Go through `install-mode: goinstall`, so it matches `go 1.27`), `go vet` with a `go mod tidy` diff check, build and tests (with a PostgreSQL service container and `STARTER_KIT_TEST_DATABASE_URL` set), and `govulncheck`. The unit tests need no services.
-`internal/infrastructure/database` also has integration tests against a real PostgreSQL; they are skipped unless
-`STARTER_KIT_TEST_DATABASE_URL` is set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable`
-against a throwaway container.
-
-`make test` also runs `internal/infrastructure` and repository tests against PostgreSQL when `STARTER_KIT_TEST_DATABASE_URL` is set (each test uses its own schema, with authkit's and this project's migrations applied).
+The database, repository and migration tests run against a real PostgreSQL when `STARTER_KIT_TEST_DATABASE_URL` is
+set, for example `postgres://postgres:test@127.0.0.1:55434/postgres?sslmode=disable` against a throwaway container,
+and are skipped otherwise (each test uses its own schema, with authkit's and this project's migrations applied).
 
 `internal/architecture` fails the build when a package imports what the dependency rule forbids, uses the wrong
 import alias, imports another module, returns an interface from a constructor, declares a package name that

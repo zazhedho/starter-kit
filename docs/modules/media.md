@@ -101,7 +101,7 @@ the list's order, including its `id` tie-breaker.
   creates an anonymous read policy; a bucket that already exists is never changed. R2 has no bucket policy: expose
   an R2 bucket through a custom domain or `r2.dev` in Cloudflare.
 - The `url` in an upload response is `STORAGE_BASE_URL` plus the object name. It works without signing only when
-  the bucket is public. For a private bucket, serve files through presigned URLs: add a method that calls the
+  the bucket is public: with `STORAGE_PUBLIC_READ=false` (the default) it needs presigning or a proxy. For a private bucket, serve files through presigned URLs: add a method that calls the
   S3 client's `PresignedGetObject(ctx, bucket, objectKey, expiry, nil)` to the provider, build the link from the
   row's `object_key` when a user asks for the file, and let the link expire. Presigning needs no extra
   configuration; it uses the same credentials.
