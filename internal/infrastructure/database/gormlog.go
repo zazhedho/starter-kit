@@ -11,19 +11,16 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-// slowQueryThreshold is the duration from which gorm logs a query as slow.
 const slowQueryThreshold = 200 * time.Millisecond
 
-// init makes Scan keep placeholders too: its parameter filter is a package-level
-// hook that keeps bound values regardless of ParameterizedQueries.
+// Scan's parameter filter is a package-level hook that keeps bound values regardless of
+// ParameterizedQueries; this keeps placeholders too.
 func init() {
 	gormlogger.RecorderParamsFilter = func(_ context.Context, sql string, _ ...any) (string, []any) {
 		return sql, nil
 	}
 }
 
-// logusWriter routes gorm's logger through logus: one line per report, caller
-// location cut to the file name so no local path is logged.
 type logusWriter struct{}
 
 func (logusWriter) Printf(format string, args ...any) {
@@ -36,8 +33,6 @@ func (logusWriter) Printf(format string, args ...any) {
 	logus.Log(logus.LevelWarn, "gorm; "+msg)
 }
 
-// newQueryLogger warns on failed and slow queries. Bound values are never printed;
-// a missing row is not a problem.
 func newQueryLogger() gormlogger.Interface {
 	return gormlogger.New(logusWriter{}, gormlogger.Config{
 		SlowThreshold:             slowQueryThreshold,

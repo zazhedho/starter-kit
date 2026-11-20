@@ -76,8 +76,6 @@ func TestRepositoryGetByIDReturnsTheRow(t *testing.T) {
 	}
 }
 
-// Deleting is a soft delete: the row is updated, not removed, so audit
-// references stay valid.
 func TestRepositoryDeleteSoftDeletesTheRow(t *testing.T) {
 	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "media" SET "deleted_at"=`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -90,8 +88,6 @@ func TestRepositoryDeleteSoftDeletesTheRow(t *testing.T) {
 	}
 }
 
-// gokit answers ErrNotFound when no row matched (a second delete, or a race);
-// the repository turns it into the domain error the handler maps to 404.
 func TestRepositoryDeleteTranslatesNoMatchToTheDomainError(t *testing.T) {
 	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "media" SET "deleted_at"=`).WillReturnResult(sqlmock.NewResult(0, 0))
@@ -140,8 +136,6 @@ func TestRepositoryListAppliesSearchFiltersAndOrder(t *testing.T) {
 	}
 }
 
-// The repository is the one place the page size is capped (gokit's
-// QueryOptions.MaxLimit) and it reports the limit it applied.
 func TestRepositoryListCapsTheLimitAndReportsIt(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -231,8 +225,6 @@ func TestRepositoryListReturnsDatabaseErrors(t *testing.T) {
 	}
 }
 
-// The generated ORDER BY is pinned in full: the id tie-breaker keeps pages from
-// skipping or repeating rows that share the sort value.
 func TestRepositoryListOrderByPinsTheTieBreaker(t *testing.T) {
 	cases := []struct {
 		name, orderBy, direction, want string

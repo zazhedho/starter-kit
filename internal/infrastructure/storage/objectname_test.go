@@ -21,8 +21,6 @@ func TestBuildObjectNameKeepsExtensionAndTrimsFolder(t *testing.T) {
 	}
 }
 
-// A public object is reachable by its URL alone, so the name must carry a full
-// random UUID rather than a few bits.
 func TestBuildObjectNameCarriesAFullRandomUUID(t *testing.T) {
 	pattern := regexp.MustCompile(`^media/\d{8}_\d{6}_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$`)
 	seen := map[string]bool{}

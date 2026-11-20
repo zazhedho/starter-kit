@@ -69,8 +69,6 @@ func getByCode[T any](ctx context.Context, db *gorm.DB, code string) (T, error) 
 	return ret, translateNotFound(err)
 }
 
-// translateNotFound maps the ORM's missing-row error to the domain sentinel so
-// callers never import the ORM to recognize it.
 func translateNotFound(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domainlocation.ErrNotFound
@@ -94,13 +92,9 @@ func (r *Repository) UpsertVillages(ctx context.Context, items []domainlocation.
 	return r.upsert(ctx, "code", items)
 }
 
-// activeStatuses are the states of a job that has not finished. The unique
-// index ux_location_sync_jobs_one_active allows one row in these states.
+// ux_location_sync_jobs_one_active allows one row in these states.
 var activeStatuses = []string{"queued", "running"}
 
-// CreateSyncJob stores a queued job; the database sets its heartbeat. The unique
-// index lets only one job be queued or running; when one already is, the answer
-// is ErrSyncRunning.
 func (r *Repository) CreateSyncJob(ctx context.Context, job *domainlocation.SyncJob) error {
 	err := r.db.WithContext(ctx).Omit("heartbeat_at").Create(job).Error
 	if isUniqueViolation(err) {
@@ -109,8 +103,6 @@ func (r *Repository) CreateSyncJob(ctx context.Context, job *domainlocation.Sync
 	return err
 }
 
-// isUniqueViolation recognizes PostgreSQL's unique_violation (23505), both as
-// the raw driver error and as gorm's translation of it.
 func isUniqueViolation(err error) bool {
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		return true
@@ -119,11 +111,9 @@ func isUniqueViolation(err error) bool {
 	return ok && pgErr.Code == "23505"
 }
 
-// dbNow stamps heartbeat_at with the database clock: the instances of a service
-// disagree about the time, and the heartbeat is compared across them.
+// heartbeat_at uses the database clock: instances disagree about time and compare heartbeats across each other.
 var dbNow = gorm.Expr("now()")
 
-// StartSyncJob moves a queued job of this instance to running.
 func (r *Repository) StartSyncJob(ctx context.Context, id, owner string, at time.Time) error {
 	return r.updateOwned(ctx, id, owner, []string{"queued"}, map[string]any{
 		"status":       "running",
@@ -134,8 +124,6 @@ func (r *Repository) StartSyncJob(ctx context.Context, id, owner string, at time
 	})
 }
 
-// SaveSyncProgress records the message and counts of a job of this instance.
-// Only these columns are written, never the whole row.
 func (r *Repository) SaveSyncProgress(ctx context.Context, id, owner string, p domainlocation.SyncProgress, at time.Time) error {
 	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{
 		"message":        p.Message,
@@ -148,12 +136,10 @@ func (r *Repository) SaveSyncProgress(ctx context.Context, id, owner string, p d
 	})
 }
 
-// TouchSyncJob is the heartbeat of a job of this instance.
 func (r *Repository) TouchSyncJob(ctx context.Context, id, owner string) error {
 	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{"heartbeat_at": dbNow})
 }
 
-// FinishSyncJob records the final state of a job of this instance.
 func (r *Repository) FinishSyncJob(ctx context.Context, id, owner string, f domainlocation.SyncFinish, at time.Time) error {
 	return r.updateOwned(ctx, id, owner, activeStatuses, map[string]any{
 		"status":        f.Status,
@@ -165,9 +151,7 @@ func (r *Repository) FinishSyncJob(ctx context.Context, id, owner string, f doma
 	})
 }
 
-// updateOwned updates the named columns of the job id when it belongs to owner
-// and is in one of statuses. No match means the job was finished or taken
-// over, and is reported as ErrNotFound.
+// No match means the job was finished or taken over, reported as ErrNotFound.
 func (r *Repository) updateOwned(ctx context.Context, id, owner string, statuses []string, columns map[string]any) error {
 	res := r.db.WithContext(ctx).Model(&domainlocation.SyncJob{}).
 		Where("id = ? AND owner_instance_id = ? AND status IN ?", id, owner, statuses).
@@ -196,9 +180,6 @@ func (r *Repository) GetActiveSyncJob(ctx context.Context) (domainlocation.SyncJ
 	return ret, translateNotFound(err)
 }
 
-// FailStaleSyncJobs fails every queued or running job whose heartbeat is older
-// than staleAfter by the database clock: its instance is gone. Jobs of live
-// instances are left alone.
 func (r *Repository) FailStaleSyncJobs(ctx context.Context, staleAfter time.Duration, now time.Time, message string) error {
 	return r.db.WithContext(ctx).Model(&domainlocation.SyncJob{}).
 		Where("status IN ? AND heartbeat_at < now() - make_interval(secs => ?)", activeStatuses, staleAfter.Seconds()).

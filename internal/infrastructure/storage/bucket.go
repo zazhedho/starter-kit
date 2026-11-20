@@ -8,13 +8,8 @@ import (
 	"github.com/minio/minio-go/v7"
 )
 
-// startupTimeout bounds the bucket check made while the provider is built. A
-// variable so tests can shorten it.
 var startupTimeout = 15 * time.Second
 
-// ensureBucket makes sure the bucket exists, creating it when it is missing, so
-// MinIO and R2 start the same way. It runs under startupTimeout. It reports
-// whether it created the bucket.
 func ensureBucket(client *minio.Client, bucket, region string) (created bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()

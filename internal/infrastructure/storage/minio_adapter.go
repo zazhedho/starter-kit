@@ -8,16 +8,11 @@ import (
 	"github.com/minio/minio-go/v7"
 )
 
-// MinIOAdapter is the MinIO implementation of Provider. Files are addressed
-// under <baseURL>/<bucket>/<object>.
 type MinIOAdapter struct {
 	s3Core
 	baseURL string
 }
 
-// NewMinIOAdapter connects to MinIO and creates the bucket when it is missing.
-// A bucket created here is private unless Config.PublicRead is set; an existing
-// bucket's policy is never changed.
 func NewMinIOAdapter(config Config) (*MinIOAdapter, error) {
 	core, err := newS3Core("MinIO", config, config.Endpoint)
 	if err != nil {
@@ -45,7 +40,6 @@ func (m *MinIOAdapter) UploadFile(ctx context.Context, file multipart.File, file
 	return objectName, fmt.Sprintf("%s/%s/%s", m.baseURL, m.bucket, objectName), nil
 }
 
-// setPublicReadPolicy lets anyone read the bucket's objects without signing.
 func setPublicReadPolicy(client *minio.Client, bucket string) error {
 	policy := fmt.Sprintf(`{
 	"Version": "2012-10-17",

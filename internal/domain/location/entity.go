@@ -80,9 +80,7 @@ type SyncJob struct {
 	CreatedAt     time.Time  `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty" gorm:"column:updated_at"`
 
-	// OwnerInstanceID names the service instance running the job; HeartbeatAt is
-	// the last time that instance reported in, by the database clock. A job whose
-	// heartbeat is stale belongs to a dead instance and may be taken over.
+	// A stale heartbeat (by the database clock) means a dead instance whose job may be taken over.
 	OwnerInstanceID string    `json:"-" gorm:"column:owner_instance_id"`
 	HeartbeatAt     time.Time `json:"-" gorm:"column:heartbeat_at"`
 }
@@ -91,8 +89,6 @@ func (SyncJob) TableName() string {
 	return "location_sync_jobs"
 }
 
-// SyncProgress is what a running sync job reports: a message and how many rows
-// of each level it has stored so far.
 type SyncProgress struct {
 	Message       string
 	ProvinceCount int
@@ -102,7 +98,7 @@ type SyncProgress struct {
 }
 
 type SyncFinish struct {
-	Status       string // "completed" or "failed"
+	Status       string
 	Message      string
 	ErrorMessage string
 }

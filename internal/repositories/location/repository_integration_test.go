@@ -15,9 +15,6 @@ import (
 	"starter-kit/internal/testutil/pgtest"
 )
 
-// These tests run against the PostgreSQL named by STARTER_KIT_TEST_DATABASE_URL
-// and are skipped without it.
-
 func newJob(owner string) *domainlocation.SyncJob {
 	return &domainlocation.SyncJob{
 		ID: uuid.NewString(), Status: "queued", Level: "all", Message: "queued", RequestedBy: uuid.NewString(),
@@ -25,7 +22,6 @@ func newJob(owner string) *domainlocation.SyncJob {
 	}
 }
 
-// ageHeartbeat moves a job's heartbeat into the past by the database clock.
 func ageHeartbeat(t *testing.T, db *gorm.DB, id string, age time.Duration) {
 	t.Helper()
 	if err := db.Exec(`UPDATE location_sync_jobs SET heartbeat_at = now() - make_interval(secs => ?) WHERE id = ?`, age.Seconds(), id).Error; err != nil {
@@ -88,7 +84,6 @@ func TestIntegrationJobUpdatesAreScopedToTheOwnerAndTheirColumns(t *testing.T) {
 	if err := repo.FinishSyncJob(ctx, job.ID, "a", domainlocation.SyncFinish{Status: "failed", Message: "Location sync failed", ErrorMessage: "boom"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// A late write from the same instance must not reopen or change a finished job.
 	if err := repo.SaveSyncProgress(ctx, job.ID, "a", domainlocation.SyncProgress{Message: "late", CityCount: 99}, time.Now()); !errors.Is(err, domainlocation.ErrNotFound) {
 		t.Fatalf("progress after finish = %v, want ErrNotFound", err)
 	}
@@ -160,8 +155,6 @@ func TestIntegrationUpsertsAreIdempotentAndUpdateNames(t *testing.T) {
 	}
 }
 
-// The migrations create the owner and heartbeat columns and the unique index,
-// and seed the permission with the conflict target the live-name index needs.
 func TestIntegrationMigrationShape(t *testing.T) {
 	db := pgtest.Open(t)
 	var n int64
@@ -185,7 +178,6 @@ func TestIntegrationMigrationShape(t *testing.T) {
 	}
 }
 
-// Applying a migration twice must not fail or duplicate the seeds.
 func TestIntegrationMigrationsCanBeAppliedTwice(t *testing.T) {
 	db := pgtest.Open(t)
 	for _, file := range pgtest.MigrationFiles(t, ".up.sql") {
@@ -204,8 +196,6 @@ func TestIntegrationMigrationsCanBeAppliedTwice(t *testing.T) {
 	}
 }
 
-// The heartbeat follows the database clock, not the caller's: a touch moves it to
-// the database's now, and the stale cutoff is measured against that clock too.
 func TestIntegrationHeartbeatUsesTheDatabaseClock(t *testing.T) {
 	db := pgtest.Open(t)
 	repo := NewRepository(db)
@@ -229,7 +219,6 @@ func TestIntegrationHeartbeatUsesTheDatabaseClock(t *testing.T) {
 	if dbNow.Sub(touched) > time.Minute || touched.After(dbNow.Add(time.Second)) {
 		t.Fatalf("heartbeat %v is not the database's now %v", touched, dbNow)
 	}
-	// A cutoff of one hour ago must not take over a heartbeat just stamped.
 	if err := repo.FailStaleSyncJobs(ctx, time.Hour, time.Now(), "stopped"); err != nil {
 		t.Fatal(err)
 	}

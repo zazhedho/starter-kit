@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// NewStorageProvider returns the adapter named by config.Provider (minio, or
-// r2 / cloudflare / cloudflare-r2) and an error for any other name.
 func NewStorageProvider(config Config) (Provider, error) {
 	provider := strings.ToLower(strings.TrimSpace(config.Provider))
 

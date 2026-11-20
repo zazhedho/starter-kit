@@ -153,7 +153,6 @@ func TestLocationRepositoryKeepsOtherErrors(t *testing.T) {
 	}
 }
 
-// The job updates write named columns for one owner, never the whole row.
 func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now()
@@ -182,7 +181,6 @@ func TestSyncJobUpdatesAreColumnScopedAndOwnerScoped(t *testing.T) {
 	}
 }
 
-// No row matched: the job was finished or taken over by another instance.
 func TestSyncJobUpdateOfAJobThatIsNoLongerOurs(t *testing.T) {
 	db, mock := routertest.NewExecDB(t)
 	mock.ExpectExec(`UPDATE "location_sync_jobs"`).WillReturnResult(sqlmock.NewResult(0, 0))
@@ -230,8 +228,6 @@ func TestFailStaleSyncJobsOnlyTouchesActiveJobsWithAStaleHeartbeat(t *testing.T)
 	}
 }
 
-// Heartbeats come from the database clock: the instances of a service do not
-// agree about the time, and the stale check compares them.
 func TestHeartbeatsAreStampedByTheDatabaseClock(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now()

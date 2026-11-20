@@ -13,8 +13,6 @@ import (
 	dtomedia "starter-kit/internal/dto/media"
 )
 
-// maxListLimit is the one cap on the page size of a media list; gokit applies
-// it to every request, and PageSize reports the result.
 const maxListLimit = 100
 
 var (
@@ -22,9 +20,6 @@ var (
 	listFilterKeys   = []string{"owner_user_id", "content_type"}
 )
 
-// Repository is the GORM adapter for the media table. It embeds the generic
-// gokit repository and overrides GetByID and Delete to translate the not-found
-// error into the domain error.
 type Repository struct {
 	*gokit.Repository[domainmedia.Media]
 }
@@ -33,8 +28,6 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{Repository: gokit.NewRepository[domainmedia.Media](db)}
 }
 
-// GetByID shadows the embedded generic lookup to translate the ORM's
-// missing-row error into domainmedia.ErrNotFound.
 func (r *Repository) GetByID(ctx context.Context, id string) (domainmedia.Media, error) {
 	media, err := r.Repository.GetByID(ctx, id)
 	if errors.Is(err, gokit.ErrNotFound) {
@@ -43,9 +36,6 @@ func (r *Repository) GetByID(ctx context.Context, id string) (domainmedia.Media,
 	return media, err
 }
 
-// Delete shadows the embedded generic delete: gokit answers ErrNotFound when no
-// row matched (for example a concurrent delete), which becomes
-// domainmedia.ErrNotFound, so the handler answers 404.
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	err := r.Repository.Delete(ctx, id)
 	if errors.Is(err, gokit.ErrNotFound) {
@@ -54,8 +44,6 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-// List returns one page of media and the total. An order outside the allow list
-// falls back to created_at DESC, and id is the last sort key so pages are stable.
 func (r *Repository) List(ctx context.Context, req dtomedia.ListRequest) (dtomedia.ListResult, error) {
 	filters := map[string]any{}
 	if req.OwnerUserID != "" {
@@ -70,9 +58,8 @@ func (r *Repository) List(ctx context.Context, req dtomedia.ListRequest) (dtomed
 		orderBy, direction = "created_at", "DESC"
 	}
 
-	// gokit appends DefaultOrders only when the params carry no explicit
-	// order, so the chosen order goes through DefaultOrders to get the
-	// tie-breaker after it.
+	// gokit appends DefaultOrders only when no explicit order is set, so the chosen order goes through
+	// DefaultOrders to get the tie-breaker.
 	params := gokit.BaseParams{
 		Search:  req.Search,
 		Filters: filters,

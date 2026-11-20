@@ -27,7 +27,7 @@ type locationServiceTestDouble struct {
 	err       error
 	startReq  dtolocation.SyncRequest
 	requested string
-	lookups   int // GetSyncJob calls
+	lookups   int
 }
 
 func (m *locationServiceTestDouble) GetProvince(ctx context.Context) ([]dtolocation.Location, error) {
@@ -106,7 +106,6 @@ func TestLocationListHandlersValidateRequiredQueries(t *testing.T) {
 	}
 }
 
-// Every read maps the service's errors through the one mapper.
 func TestLocationReadsMapDomainErrors(t *testing.T) {
 	cases := []struct {
 		err    error
@@ -215,7 +214,6 @@ func TestLocationGetSyncJobMapsNotFound(t *testing.T) {
 	}
 }
 
-// A job id that is not a UUID is a malformed request, not a lookup that fails.
 func TestLocationGetSyncJobRejectsAnIdThatIsNotAUUID(t *testing.T) {
 	service := &locationServiceTestDouble{err: errors.New("must not be called")}
 	handler := New(service)
@@ -297,7 +295,6 @@ func jsonEqual(t *testing.T, a, b []byte) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-// A client error is expected traffic: it is logged at WARN, never at ERROR.
 func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -327,8 +324,6 @@ func TestClientErrorsAreLoggedAtWarnAndServerErrorsAtError(t *testing.T) {
 	}
 }
 
-// envelope is the wire shape every handler answers with: error is always a
-// list of {field, code, message}, and message is the handler's fixed text.
 type envelope struct {
 	LogID   uuid.UUID       `json:"log_id"`
 	Code    int             `json:"code"`
@@ -403,8 +398,6 @@ func TestLocationErrorsUseTheErrorListEnvelope(t *testing.T) {
 	}
 }
 
-// requireErrorEnvelope checks a failed response: false status, one error entry
-// with a code, and data present only when wantData.
 func requireErrorEnvelope(t *testing.T, rec *httptest.ResponseRecorder, message, detail string, wantData bool) {
 	t.Helper()
 	res := decodeEnvelope(t, rec)
@@ -423,7 +416,6 @@ func carriesData(data json.RawMessage) bool {
 	return len(data) > 0 && string(data) != "null"
 }
 
-// A nil result list is sent as [], never null.
 func TestLocationEmptyListIsAnEmptyArray(t *testing.T) {
 	handler := New(&locationServiceTestDouble{})
 	rec := performLocationRequest(http.MethodGet, "/province", "/province", nil, handler.GetProvince, nil)

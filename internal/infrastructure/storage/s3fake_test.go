@@ -15,14 +15,12 @@ import (
 	"time"
 )
 
-// fakeS3 is the few S3 calls the adapters make, answered from memory. Requests
-// are recorded as "METHOD /path?query".
 type fakeS3 struct {
 	mu           sync.Mutex
 	requests     []string
 	authHeaders  []string
 	bucketExists bool
-	hang         chan struct{} // when non-nil, bucket calls block until it is closed
+	hang         chan struct{}
 }
 
 func newFakeS3(t *testing.T, bucketExists bool) (*fakeS3, string) {
@@ -79,7 +77,6 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// seen reports whether the exact request "METHOD /path[?query]" was made.
 func (f *fakeS3) seen(request string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -241,8 +238,6 @@ func TestUploadAndDeleteObject(t *testing.T) {
 	}
 }
 
-// A canceled request must fail the upload and the delete of both providers, and
-// the error names the provider.
 func TestStorageCallsFailWithACanceledContext(t *testing.T) {
 	data := []byte("\x89PNG\r\n\x1a\n")
 	for name, c := range map[string]struct {

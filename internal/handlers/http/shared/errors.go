@@ -1,5 +1,3 @@
-// Package shared holds what the HTTP handlers of every module have in common:
-// how a failed request is answered and logged.
 package shared
 
 import (
@@ -10,9 +8,7 @@ import (
 	"github.com/zazhedho/logus"
 )
 
-// Write answers a failed request. A 500 gets gokit's standard body, which carries
-// the log ID; any other status gets the fixed envelope message for that status,
-// and detail is the reason given to the caller, never an internal error's text.
+// Write answers with detail as the reason shown to the caller, never an internal error's text.
 func Write(ctx *gin.Context, status int, detail string) {
 	logID := gokit.RequestID(ctx)
 	if status == http.StatusInternalServerError {
@@ -22,8 +18,6 @@ func Write(ctx *gin.Context, status int, detail string) {
 	ctx.JSON(status, gokit.ErrorResponse(status, message(status), logID, detail))
 }
 
-// Log records why a request failed. A client error (4xx) is expected traffic and
-// is logged at WARN; only a server error is logged at ERROR.
 func Log(ctx *gin.Context, status int, prefix, operation string, err error) {
 	level := logus.LevelError
 	if status < http.StatusInternalServerError {

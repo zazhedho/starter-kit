@@ -7,16 +7,12 @@ import (
 	"strings"
 )
 
-// R2Adapter is the Cloudflare R2 implementation of Provider. Files are
-// addressed under <baseURL>/<object>.
 type R2Adapter struct {
 	s3Core
 	baseURL string
 }
 
-// NewR2Adapter connects to R2 and creates the bucket when it is missing. Without
-// BaseURL, files are addressed under https://<bucket>.r2.dev. Public access to R2
-// is configured in Cloudflare, not through a bucket policy.
+// NewR2Adapter sets no bucket policy: public access to R2 is configured in Cloudflare.
 func NewR2Adapter(config Config) (*R2Adapter, error) {
 	core, err := newS3Core("R2", config, r2Endpoint(config))
 	if err != nil {
@@ -35,8 +31,6 @@ func NewR2Adapter(config Config) (*R2Adapter, error) {
 	return &R2Adapter{s3Core: core, baseURL: baseURL}, nil
 }
 
-// r2Endpoint is the host to dial: the account's own R2 host when an account ID
-// is set and the endpoint is not already one, else the endpoint without scheme.
 func r2Endpoint(config Config) string {
 	endpoint := strings.TrimPrefix(config.Endpoint, "https://")
 	endpoint = strings.TrimPrefix(endpoint, "http://")

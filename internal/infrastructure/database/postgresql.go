@@ -19,9 +19,7 @@ import (
 	"starter-kit/internal/config"
 )
 
-// Open connects to PostgreSQL and applies the pool limits. pgx parses the DSN,
-// and its errors can quote it, so they are never returned or logged: failures
-// map to a fixed message.
+// Open never returns or logs pgx errors, which can quote the DSN; failures map to a fixed message.
 func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
 	logus.Log(logus.LevelDebug, "database.Open; initialize db connection")
 
@@ -34,18 +32,14 @@ func Open(cfg config.Database, timezone string) (*gorm.DB, *sql.DB, error) {
 	return attach(stdlib.OpenDB(*connCfg), cfg)
 }
 
-// attach wraps an existing pool in gorm, checks the connection, and applies
-// the pool limits. On failure the pool is closed and only an error returned.
 func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
 		TranslateError: true,
-		// Silent during the connection check: gorm would print the raw driver
-		// error, DSN included, before we see it. The real logger is set below.
+		// Silent during the check: gorm would print the raw driver error, DSN included.
 		Logger: gormlogger.Discard,
 	})
 	if err != nil {
-		// gorm closes the pool when its own check fails; closing again is
-		// harmless and keeps this guarantee independent of gorm's internals.
+		// gorm closes the pool when its own check fails; closing again is harmless.
 		_ = sqlDB.Close()
 		return nil, nil, failed("connect to database: "+classify(err), "database.Open; ")
 	}
@@ -60,9 +54,6 @@ func attach(sqlDB *sql.DB, cfg config.Database) (*gorm.DB, *sql.DB, error) {
 	return db, sqlDB, nil
 }
 
-// sessionParams applies the configured time zone, except when DATABASE_URL
-// itself sets one (zoneInURL). Otherwise it replaces any zone already present,
-// such as one merged from PGTZ (names are case-insensitive).
 func sessionParams(params map[string]string, timezone string, zoneInURL bool) map[string]string {
 	out := make(map[string]string, len(params)+1)
 	for k, v := range params {
@@ -83,8 +74,6 @@ func sessionParams(params map[string]string, timezone string, zoneInURL bool) ma
 	return out
 }
 
-// urlNamesTimeZone reports whether the DATABASE_URL text itself sets a time zone
-// (query parameter or keyword); environment-derived settings do not count.
 func urlNamesTimeZone(raw string) bool {
 	if u, err := url.Parse(raw); err == nil && u.Scheme != "" && strings.Contains(raw, "://") {
 		for k := range u.Query() {
@@ -102,8 +91,6 @@ func failed(msg, logPrefix string) error {
 	return errors.New(msg)
 }
 
-// classify names the failure kind without any driver text: configuration (server
-// refused) versus network (no answer).
 func classify(err error) string {
 	var parseErr *pgconn.ParseConfigError
 	var pgErr *pgconn.PgError

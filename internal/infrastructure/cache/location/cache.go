@@ -15,8 +15,6 @@ import (
 
 const scanCount = int64(100)
 
-// Cache is the Redis implementation of the location service's cache port. A nil
-// client disables it: every Get misses and Set and DeleteKeys do nothing.
 type Cache struct {
 	client *redis.Client
 }
@@ -100,8 +98,6 @@ func (c *Cache) DeleteKeys(ctx context.Context, pattern string) {
 	}
 }
 
-// escapeGlob makes Redis treat every character of s literally in a SCAN MATCH
-// pattern, so a prefix can never widen into a pattern.
 func escapeGlob(s string) string {
 	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`, "]", `\]`).Replace(s)
 }

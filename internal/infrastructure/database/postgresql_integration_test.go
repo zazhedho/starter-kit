@@ -15,8 +15,6 @@ import (
 
 const integrationTimezone = "Asia/Jakarta"
 
-// adminSettings returns settings for STARTER_KIT_TEST_DATABASE_URL in both
-// accepted shapes (URL and DB_* parts); the test is skipped if it is unset.
 func adminSettings(t *testing.T) (viaURL, viaParts config.Database) {
 	t.Helper()
 	raw := os.Getenv("STARTER_KIT_TEST_DATABASE_URL")
@@ -73,8 +71,6 @@ func TestIntegrationConnectsThroughBothPaths(t *testing.T) {
 	}
 }
 
-// TestIntegrationDatabaseURLKeepsItsOwnTimeZone: a time zone written in the
-// URL itself is not overridden.
 func TestIntegrationDatabaseURLKeepsItsOwnTimeZone(t *testing.T) {
 	viaURL, _ := adminSettings(t)
 	u, _ := url.Parse(viaURL.URL)

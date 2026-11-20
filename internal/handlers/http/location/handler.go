@@ -45,8 +45,6 @@ func (h *Handler) GetVillage(ctx *gin.Context) {
 	h.listByParent(ctx, "GetVillage", "district_code", "Get village successfully", h.service.GetVillage)
 }
 
-// listByParent serves the lookups that need a parent code in the query string,
-// answering 400 when it is missing. The service validates the code itself.
 func (h *Handler) listByParent(ctx *gin.Context, method, param, okMessage string, lookup func(context.Context, string) ([]dtolocation.Location, error)) {
 	code := ctx.Query(param)
 	if code == "" {
@@ -75,7 +73,7 @@ func (h *Handler) Sync(ctx *gin.Context) {
 	if errors.Is(err, domainlocation.ErrSyncRunning) {
 		httpshared.Log(ctx, http.StatusConflict, "[LocationHandler][Sync]", "Service.StartSync", err)
 		res := gokit.ErrorResponse(http.StatusConflict, msgSyncRunning, logID, msgSyncRunning)
-		res.Data = data // the job that is already running
+		res.Data = data
 		ctx.JSON(http.StatusConflict, res)
 		return
 	}
@@ -90,7 +88,7 @@ func (h *Handler) Sync(ctx *gin.Context) {
 func (h *Handler) GetSyncJob(ctx *gin.Context) {
 	id, err := gokit.ValidateUUIDParam(ctx, gokit.RequestID(ctx))
 	if err != nil {
-		return // ValidateUUIDParam has answered 400
+		return
 	}
 
 	data, err := h.service.GetSyncJob(ctx.Request.Context(), id)
@@ -101,20 +99,16 @@ func (h *Handler) GetSyncJob(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gokit.Response(http.StatusOK, "Get location sync job successfully", gokit.RequestID(ctx), data))
 }
 
-// fail logs and answers a service error with the status locationErrorResponse maps it to.
 func fail(ctx *gin.Context, method string, err error) {
 	status, detail := locationErrorResponse(err)
 	httpshared.Log(ctx, status, "[LocationHandler]["+method+"]", "Service."+method, err)
 	httpshared.Write(ctx, status, detail)
 }
 
-// locationErrorResponse is the one place service errors become HTTP statuses.
-// The detail is written for the caller; an unexpected error gets the standard
-// 500 body instead of its text.
 func locationErrorResponse(err error) (int, string) {
 	switch {
 	case errors.Is(err, domainlocation.ErrInvalidCode), errors.Is(err, domainlocation.ErrInvalidSync):
-		return http.StatusBadRequest, err.Error() // a fixed validation message, see NewInvalidCode and NewInvalidSync
+		return http.StatusBadRequest, err.Error()
 	case errors.Is(err, domainlocation.ErrSyncJobNotFound):
 		return http.StatusNotFound, "location sync job not found"
 	case errors.Is(err, domainlocation.ErrNotFound):

@@ -7,7 +7,6 @@ import (
 	"starter-kit/internal/testutil/logcapture"
 )
 
-// logs captures what the handlers log during the tests (see logcapture).
 var logs *logcapture.Capture
 
 func TestMain(m *testing.M) {

@@ -7,9 +7,7 @@ import (
 	"unicode"
 )
 
-// contentTypeExtensions is every content type the module can store, with the
-// extension its objects get. HTML and SVG are left out: served from a public
-// bucket they would run script.
+// HTML and SVG are left out: served from a public bucket they would run script.
 var contentTypeExtensions = map[string]string{
 	"application/pdf": ".pdf",
 	"image/gif":       ".gif",
@@ -18,7 +16,6 @@ var contentTypeExtensions = map[string]string{
 	"image/webp":      ".webp",
 }
 
-// SupportedContentTypes lists the storable content types, sorted.
 func SupportedContentTypes() []string {
 	types := make([]string, 0, len(contentTypeExtensions))
 	for contentType := range contentTypeExtensions {
@@ -32,18 +29,13 @@ func ExtensionFor(contentType string) string {
 	return contentTypeExtensions[NormalizeContentType(contentType)]
 }
 
-// NormalizeContentType lower-cases a media type and drops its parameters.
 func NormalizeContentType(contentType string) string {
 	contentType, _, _ = strings.Cut(strings.ToLower(strings.TrimSpace(contentType)), ";")
 	return strings.TrimSpace(contentType)
 }
 
-// MaxOriginalNameChars caps the stored original_name.
 const MaxOriginalNameChars = 255
 
-// SafeFilename reduces a client-supplied name to its base name without control
-// or format characters (bidi overrides, zero-width), or invalid UTF-8, capped at
-// 255 characters, or "file" when nothing usable is left.
 func SafeFilename(filename string) string {
 	name := strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
