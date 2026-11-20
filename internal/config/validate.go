@@ -173,3 +173,12 @@ func validPort(value string) bool {
 	port, err := strconv.Atoi(value)
 	return err == nil && port >= 1 && port <= 65535
 }
+
+// isDevelopment reports a local APP_ENV, where plain http to a dependency is acceptable.
+func (c Config) isDevelopment() bool {
+	switch normalizeKey(c.App.Env) {
+	case "development", "dev", "local", "test":
+		return true
+	}
+	return false
+}

@@ -23,6 +23,8 @@ var managedEnv = []string{
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_SUBJECT", "RESET_SUBJECT", "AUTH_EMAIL_APP_NAME",
 	"MEDIA_ENABLED", "MEDIA_MAX_FILE_SIZE_MB", "MEDIA_ALLOWED_CONTENT_TYPES", "MEDIA_UPLOAD_RATE_LIMIT",
 	"MEDIA_UPLOAD_RATE_WINDOW_SECONDS", "MEDIA_UPLOAD_TIMEOUT",
+	"MEDIA_UPLOAD_USER_RATE_LIMIT", "MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS",
+	"LOCATION_SERVICE_MAX_RESPONSE_MB", "LOCATION_RATE_LIMIT", "LOCATION_RATE_WINDOW_SECONDS", "STORAGE_PUBLIC_READ",
 	"STORAGE_PROVIDER", "STORAGE_ENDPOINT", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY", "STORAGE_BUCKET_NAME",
 	"STORAGE_BASE_URL", "STORAGE_REGION", "STORAGE_USE_SSL", "R2_ACCOUNT_ID",
 	// authkit's own variables, read by authkit.ConfigFromEnv.
@@ -117,7 +119,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Location.ServiceTimeout != 20*time.Second || cfg.Location.CacheTTL != 180*24*time.Hour {
 		t.Fatalf("Location = %+v", cfg.Location)
 	}
-	if cfg.Storage.Provider != "minio" || cfg.Storage.Region != "auto" || cfg.Storage.UseSSL {
+	if cfg.Storage.Provider != "minio" || cfg.Storage.Region != "" || cfg.Storage.UseSSL {
 		t.Fatalf("Storage = %+v", cfg.Storage)
 	}
 	if cfg.Redis.Configured() {

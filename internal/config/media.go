@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,12 @@ import (
 
 const defaultAllowedContentTypes = "image/jpeg,image/png,image/webp,image/gif,application/pdf"
 
+// SupportedContentTypes is every type MEDIA_ALLOWED_CONTENT_TYPES may list: the
+// ones the upload sniffer recognizes from a file's first bytes and the service
+// has a file extension for. HTML and SVG are not here on purpose: served from a
+// public bucket they would run script in the bucket's origin.
+var SupportedContentTypes = []string{"application/pdf", "image/gif", "image/jpeg", "image/png", "image/webp"}
+
 // Media is the media module's setting.
 type Media struct {
 	Enabled             bool
@@ -18,19 +25,25 @@ type Media struct {
 	AllowedContentTypes []string
 	UploadRateLimit     int
 	UploadRateWindow    time.Duration
-	UploadTimeout       time.Duration
+	// UserUploadLimit uploads per UserUploadWindow and user, on top of the per-IP limit.
+	UserUploadLimit  int
+	UserUploadWindow time.Duration
+	UploadTimeout    time.Duration
 }
 
 // Storage is the object-storage setting the media module needs.
 type Storage struct {
 	Provider, Endpoint, AccessKey, SecretKey, Bucket, BaseURL, Region, R2AccountID string
 	UseSSL                                                                         bool
+	// PublicRead lets MinIO create a missing bucket with an anonymous
+	// read policy; otherwise the bucket is private.
+	PublicRead bool
 }
 
 // String redacts both keys.
 func (s Storage) String() string {
-	return fmt.Sprintf("Storage{Provider:%q Endpoint:%q AccessKey:%s SecretKey:%s Bucket:%q BaseURL:%q Region:%q R2AccountID:%q UseSSL:%t}",
-		s.Provider, s.Endpoint, redact(s.AccessKey), redact(s.SecretKey), s.Bucket, withoutUserinfo(s.BaseURL), s.Region, s.R2AccountID, s.UseSSL)
+	return fmt.Sprintf("Storage{Provider:%q Endpoint:%q AccessKey:%s SecretKey:%s Bucket:%q BaseURL:%q Region:%q R2AccountID:%q UseSSL:%t PublicRead:%t}",
+		s.Provider, s.Endpoint, redact(s.AccessKey), redact(s.SecretKey), s.Bucket, withoutUserinfo(s.BaseURL), s.Region, s.R2AccountID, s.UseSSL, s.PublicRead)
 }
 
 // GoString keeps %#v from printing the raw fields.
@@ -43,20 +56,41 @@ func mediaFromEnv() (Media, Storage) {
 		AllowedContentTypes: splitList(gokit.GetEnv("MEDIA_ALLOWED_CONTENT_TYPES", defaultAllowedContentTypes)),
 		UploadRateLimit:     gokit.GetEnv("MEDIA_UPLOAD_RATE_LIMIT", 20),
 		UploadRateWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_RATE_WINDOW_SECONDS", 60)) * time.Second,
+		UserUploadLimit:     gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_LIMIT", 10),
+		UserUploadWindow:    time.Duration(gokit.GetEnv("MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS", 60)) * time.Second,
 		UploadTimeout:       gokit.GetEnv("MEDIA_UPLOAD_TIMEOUT", 2*time.Minute),
 	}
+	provider := normalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio"))
 	storage := Storage{
-		Provider:    normalizeKey(gokit.GetEnv("STORAGE_PROVIDER", "minio")),
+		Provider:    provider,
 		Endpoint:    gokit.GetEnv("STORAGE_ENDPOINT", ""),
 		AccessKey:   gokit.GetEnv("STORAGE_ACCESS_KEY", ""),
 		SecretKey:   gokit.GetEnv("STORAGE_SECRET_KEY", ""),
 		Bucket:      gokit.GetEnv("STORAGE_BUCKET_NAME", ""),
 		BaseURL:     gokit.GetEnv("STORAGE_BASE_URL", ""),
-		Region:      gokit.GetEnv("STORAGE_REGION", "auto"),
+		Region:      gokit.GetEnv("STORAGE_REGION", defaultRegion(provider)),
 		R2AccountID: gokit.GetEnv("R2_ACCOUNT_ID", ""),
 		UseSSL:      gokit.GetEnv("STORAGE_USE_SSL", false),
+		PublicRead:  gokit.GetEnv("STORAGE_PUBLIC_READ", false),
 	}
 	return media, storage
+}
+
+// defaultRegion is "auto" for R2, which requires it, and empty for MinIO, whose
+// server picks its own region (us-east-1 unless configured).
+func defaultRegion(provider string) string {
+	if isR2(provider) {
+		return "auto"
+	}
+	return ""
+}
+
+func isR2(provider string) bool {
+	switch provider {
+	case "r2", "cloudflare", "cloudflare-r2":
+		return true
+	}
+	return false
 }
 
 // validateMedia covers the media module's own settings, its storage and the
@@ -72,6 +106,7 @@ func (c Config) validateMedia() []string {
 	if c.Media.MaxFileSizeBytes <= 0 {
 		problems = append(problems, "MEDIA_MAX_FILE_SIZE_MB must be between 1 and 1024")
 	}
+	problems = append(problems, c.validateContentTypes()...)
 	problems = append(problems, c.validateStorage()...)
 	problems = append(problems, c.validateMediaRate()...)
 	return problems
@@ -90,8 +125,13 @@ func (c Config) validateStorage() []string {
 	if provider == "" {
 		provider = "minio"
 	}
-	switch provider {
-	case "minio", "r2", "cloudflare", "cloudflare-r2":
+	switch {
+	case provider == "minio":
+	case isR2(provider):
+		// R2 signs every request with the secret key; plain http would send it in clear text.
+		if !s.UseSSL {
+			problems = append(problems, "STORAGE_USE_SSL must be true for the r2, cloudflare and cloudflare-r2 providers")
+		}
 	default:
 		problems = append(problems, "STORAGE_PROVIDER must be one of: minio, r2, cloudflare, cloudflare-r2")
 	}
@@ -115,6 +155,24 @@ func (c Config) validateStorage() []string {
 	return problems
 }
 
+// validateContentTypes rejects any configured type the service cannot serve
+// safely or can never match, because the content type comes from sniffing the
+// file's first bytes.
+func (c Config) validateContentTypes() []string {
+	for _, configured := range c.Media.AllowedContentTypes {
+		if !slices.Contains(SupportedContentTypes, normalizeContentType(configured)) {
+			return []string{"MEDIA_ALLOWED_CONTENT_TYPES may list only: " + strings.Join(SupportedContentTypes, ", ") + " (text/html and SVG are never allowed)"}
+		}
+	}
+	return nil
+}
+
+// normalizeContentType lower-cases a media type and drops its parameters.
+func normalizeContentType(contentType string) string {
+	contentType, _, _ = strings.Cut(normalizeKey(contentType), ";")
+	return strings.TrimSpace(contentType)
+}
+
 func (c Config) validateMediaRate() []string {
 	if !c.Media.Enabled {
 		return nil
@@ -125,6 +183,12 @@ func (c Config) validateMediaRate() []string {
 	}
 	if c.Media.UploadRateWindow <= 0 {
 		problems = append(problems, "MEDIA_UPLOAD_RATE_WINDOW_SECONDS must be greater than zero")
+	}
+	if c.Media.UserUploadLimit <= 0 {
+		problems = append(problems, "MEDIA_UPLOAD_USER_RATE_LIMIT must be greater than zero")
+	}
+	if c.Media.UserUploadWindow <= 0 {
+		problems = append(problems, "MEDIA_UPLOAD_USER_RATE_WINDOW_SECONDS must be greater than zero")
 	}
 	return problems
 }

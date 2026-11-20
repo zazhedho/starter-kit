@@ -84,6 +84,9 @@ func run(ctx context.Context, args []string, d deps) error {
 		return err
 	}
 	logus.Logf(logus.LevelInfo, "APP: %s; PORT: %s", cfg.App.Name, cfg.App.Port)
+	for _, warning := range cfg.Warnings() {
+		logus.Log(logus.LevelWarn, warning)
+	}
 
 	return execute(ctx, cfg, d)
 }

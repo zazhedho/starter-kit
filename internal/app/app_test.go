@@ -25,6 +25,7 @@ import (
 
 	"starter-kit/internal/config"
 	"starter-kit/internal/infrastructure/storage"
+	"starter-kit/internal/testutil/logcapture"
 )
 
 const testJWTKey = "test-jwt-key-that-is-at-least-32-characters-long"
@@ -841,9 +842,18 @@ func TestSetServerIPEnv(t *testing.T) {
 	}
 }
 
+// logs captures what the service logs during the tests (see logcapture).
+var logs *logcapture.Capture
+
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
-	os.Exit(m.Run())
+	logs = logcapture.Start()
+	code := m.Run()
+	if code != 0 {
+		_, _ = os.Stderr.WriteString(logs.All())
+	}
+	logs.Stop()
+	os.Exit(code)
 }
 
 func TestCloseWithoutLifecycleDoesNotPanic(t *testing.T) {
@@ -931,5 +941,44 @@ func TestModuleDepsExposesTheAppsDependencies(t *testing.T) {
 	}
 	if d.Lifecycle != a.lifecycle {
 		t.Fatal("ModuleDeps must share the App's Lifecycle so hooks run at Close")
+	}
+}
+
+func TestRunWarnsAboutUnsafeSettings(t *testing.T) {
+	t.Setenv("APP_NAME", "svc")
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("APP_TIMEZONE", "UTC")
+	t.Setenv("PORT", "8080")
+	t.Setenv("DB_HOST", "127.0.0.1")
+	t.Setenv("DB_PORT", "1") // nothing listens here
+	t.Setenv("DB_USERNAME", "u")
+	t.Setenv("DB_PASS", "CHANGE_ME_DB_PASSWORD")
+	t.Setenv("DB_NAME", "n")
+	t.Setenv("JWT_KEY", testJWTKey)
+	t.Setenv("MEDIA_ENABLED", "true")
+	t.Setenv("STORAGE_ENDPOINT", "files.example.test")
+	t.Setenv("STORAGE_ACCESS_KEY", "access")
+	t.Setenv("STORAGE_SECRET_KEY", "secret")
+	t.Setenv("STORAGE_BUCKET_NAME", "bucket")
+	t.Setenv("STORAGE_BASE_URL", "https://files.example.test")
+	for _, key := range []string{"REDIS_URL", "REDIS_HOST", "CONSUL"} {
+		t.Setenv(key, "")
+	}
+	t.Chdir(t.TempDir()) // no .env here
+
+	mark := logs.Mark()
+	// The database does not exist, so the run fails after the warnings are logged.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = Run(ctx, []string{"-migrate=false"})
+
+	out := logs.Since(mark)
+	for _, want := range []string{"MEDIA_ENABLED is true without Redis", "DB_PASS holds a placeholder"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("startup log lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "CHANGE_ME_DB_PASSWORD") {
+		t.Fatalf("a warning printed a secret value:\n%s", out)
 	}
 }
