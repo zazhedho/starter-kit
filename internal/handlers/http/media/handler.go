@@ -14,6 +14,7 @@ import (
 
 	domainmedia "starter-kit/internal/domain/media"
 	dtomedia "starter-kit/internal/dto/media"
+	httpshared "starter-kit/internal/handlers/http/shared"
 )
 
 const (
@@ -59,8 +60,8 @@ func (h *Handler) Upload(ctx *gin.Context) {
 			statusCode = http.StatusRequestEntityTooLarge
 			message = domainmedia.ErrFileTooLarge.Error()
 		}
-		logus.LogContextf(ctx, logus.LevelWarn, "%s; FormFile; Error: %v", logPrefix, err)
-		ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, mediaMessage(statusCode), logID, message))
+		httpshared.Log(ctx, statusCode, logPrefix, "FormFile", err)
+		httpshared.Write(ctx, statusCode, message)
 		return
 	}
 	defer func() {
@@ -85,8 +86,8 @@ func (h *Handler) Upload(ctx *gin.Context) {
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
-		logus.LogContextf(ctx, logus.LevelError, "%s; Service.Upload; Error: %v", logPrefix, err)
-		writeMediaError(ctx, logID, statusCode, publicError)
+		httpshared.Log(ctx, statusCode, logPrefix, "Service.Upload", err)
+		httpshared.Write(ctx, statusCode, publicError)
 		return
 	}
 
@@ -147,8 +148,9 @@ func (h *Handler) List(ctx *gin.Context) {
 		Limit:          params.Limit,
 	})
 	if err != nil {
-		logus.LogContextf(ctx, logus.LevelError, "%s; Service.List; Error: %v", logPrefix, err)
-		ctx.JSON(http.StatusInternalServerError, gokit.InternalServerError(logID))
+		statusCode, publicError := mediaErrorResponse(err)
+		httpshared.Log(ctx, statusCode, logPrefix, "Service.List", err)
+		httpshared.Write(ctx, statusCode, publicError)
 		return
 	}
 
@@ -177,8 +179,8 @@ func (h *Handler) Delete(ctx *gin.Context) {
 		})
 
 		statusCode, publicError := mediaErrorResponse(err)
-		logus.LogContextf(ctx, logus.LevelError, "%s; Service.Delete; Error: %v", logPrefix, err)
-		writeMediaError(ctx, logID, statusCode, publicError)
+		httpshared.Log(ctx, statusCode, logPrefix, "Service.Delete", err)
+		httpshared.Write(ctx, statusCode, publicError)
 		return
 	}
 
@@ -204,28 +206,7 @@ func actorFrom(ctx context.Context) domainmedia.Actor {
 	}
 }
 
-// writeMediaError answers with the standard 500 body for a plain server error
-// and with the mapped status otherwise. The envelope message is a fixed text
-// for the status; publicError is the caller-safe detail.
-func writeMediaError(ctx *gin.Context, logID uuid.UUID, statusCode int, publicError string) {
-	if statusCode == http.StatusInternalServerError {
-		ctx.JSON(statusCode, gokit.InternalServerError(logID))
-		return
-	}
-	ctx.JSON(statusCode, gokit.ErrorResponse(statusCode, mediaMessage(statusCode), logID, publicError))
-}
-
-func mediaMessage(statusCode int) string {
-	switch statusCode {
-	case http.StatusNotFound:
-		return gokit.MsgResourceNotFound
-	case http.StatusRequestEntityTooLarge:
-		return gokit.MsgRequestTooLarge
-	default:
-		return gokit.MsgInvalidRequest
-	}
-}
-
+// mediaErrorResponse is the one place service errors become HTTP statuses.
 func mediaErrorResponse(err error) (int, string) {
 	switch {
 	case errors.Is(err, domainmedia.ErrEmptyFile), errors.Is(err, domainmedia.ErrUnsupportedContentType):
