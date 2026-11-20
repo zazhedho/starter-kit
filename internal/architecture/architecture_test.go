@@ -59,7 +59,23 @@ func fatalCalls(t *testing.T, name string, src []byte) []string {
 	if err != nil {
 		t.Fatalf("parse %s: %v", name, err)
 	}
-	local := map[string]string{} // local package name -> import path
+	local := fatalImports(file)
+	var found []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		if pkg, name, ok := packageCall(n); ok {
+			switch importPath := local[pkg]; {
+			case importPath == "log" && strings.HasPrefix(name, "Fatal"), importPath == "os" && name == "Exit":
+				found = append(found, importPath+"."+name)
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// fatalImports maps the local name of each log or os import in file to its path.
+func fatalImports(file *ast.File) map[string]string {
+	local := map[string]string{}
 	for _, spec := range file.Imports {
 		importPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil || (importPath != "log" && importPath != "os") {
@@ -71,27 +87,25 @@ func fatalCalls(t *testing.T, name string, src []byte) []string {
 		}
 		local[localName] = importPath
 	}
-	var found []string
-	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		switch importPath := local[pkg.Name]; {
-		case importPath == "log" && strings.HasPrefix(sel.Sel.Name, "Fatal"), importPath == "os" && sel.Sel.Name == "Exit":
-			found = append(found, importPath+"."+sel.Sel.Name)
-		}
-		return true
-	})
-	return found
+	return local
+}
+
+// packageCall reports the package identifier and function name of a call
+// written as pkg.Func(...).
+func packageCall(n ast.Node) (pkg, name string, ok bool) {
+	call, isCall := n.(*ast.CallExpr)
+	if !isCall {
+		return "", "", false
+	}
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel {
+		return "", "", false
+	}
+	id, isIdent := sel.X.(*ast.Ident)
+	if !isIdent {
+		return "", "", false
+	}
+	return id.Name, sel.Sel.Name, true
 }
 
 // panicCalls counts the calls to the builtin panic in src.
@@ -1203,60 +1217,78 @@ func restatingComments(t *testing.T, name string, src []byte) []string {
 	}
 	var found []string
 	check := func(declName string, doc *ast.CommentGroup, known map[string]bool) {
-		if doc == nil || len(doc.List) != 1 || strings.HasPrefix(doc.List[0].Text, "/*") {
-			return
-		}
-		text := strings.TrimSpace(strings.TrimPrefix(doc.List[0].Text, "//"))
-		if !strings.HasPrefix(text, declName+" ") {
-			return
-		}
-		for _, w := range words(text) {
-			if !known[w] && !restatingStopwords[w] {
-				return
-			}
-		}
-		found = append(found, fmt.Sprintf("%s: %s", declName, text))
-	}
-	ident := func(known map[string]bool, texts ...string) {
-		for _, text := range texts {
-			for _, w := range words(text) {
-				known[w] = true
-			}
+		if text, ok := restatingDoc(declName, doc, known); ok {
+			found = append(found, fmt.Sprintf("%s: %s", declName, text))
 		}
 	}
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			known := map[string]bool{}
-			ident(known, d.Name.Name)
-			fields := []*ast.FieldList{d.Recv, d.Type.Params, d.Type.Results}
-			for _, list := range fields {
-				if list == nil {
-					continue
-				}
-				for _, f := range list.List {
-					ident(known, types.ExprString(f.Type))
-					for _, n := range f.Names {
-						ident(known, n.Name)
-					}
-				}
-			}
-			check(d.Name.Name, d.Doc, known)
+			check(d.Name.Name, d.Doc, funcWords(d))
 		case *ast.GenDecl:
 			for _, spec := range d.Specs {
 				if ts, ok := spec.(*ast.TypeSpec); ok {
-					doc := ts.Doc
-					if doc == nil && len(d.Specs) == 1 {
-						doc = d.Doc
-					}
-					known := map[string]bool{}
-					ident(known, ts.Name.Name)
-					check(ts.Name.Name, doc, known)
+					check(ts.Name.Name, typeDoc(d, ts), addWords(map[string]bool{}, ts.Name.Name))
 				}
 			}
 		}
 	}
 	return found
+}
+
+// restatingDoc returns the text of a one-line doc comment that starts with
+// declName and uses only words in known or the stopwords.
+func restatingDoc(declName string, doc *ast.CommentGroup, known map[string]bool) (string, bool) {
+	if doc == nil || len(doc.List) != 1 || strings.HasPrefix(doc.List[0].Text, "/*") {
+		return "", false
+	}
+	text := strings.TrimSpace(strings.TrimPrefix(doc.List[0].Text, "//"))
+	if !strings.HasPrefix(text, declName+" ") {
+		return "", false
+	}
+	for _, w := range words(text) {
+		if !known[w] && !restatingStopwords[w] {
+			return "", false
+		}
+	}
+	return text, true
+}
+
+// addWords adds the words of each text to known and returns it.
+func addWords(known map[string]bool, texts ...string) map[string]bool {
+	for _, text := range texts {
+		for _, w := range words(text) {
+			known[w] = true
+		}
+	}
+	return known
+}
+
+// funcWords collects the words of a function's name, receiver, parameters and
+// results.
+func funcWords(d *ast.FuncDecl) map[string]bool {
+	known := addWords(map[string]bool{}, d.Name.Name)
+	for _, list := range []*ast.FieldList{d.Recv, d.Type.Params, d.Type.Results} {
+		if list == nil {
+			continue
+		}
+		for _, f := range list.List {
+			addWords(known, types.ExprString(f.Type))
+			for _, n := range f.Names {
+				addWords(known, n.Name)
+			}
+		}
+	}
+	return known
+}
+
+// typeDoc is the doc comment of a type spec, falling back to the declaration's
+// when it holds that one spec.
+func typeDoc(d *ast.GenDecl, ts *ast.TypeSpec) *ast.CommentGroup {
+	if ts.Doc == nil && len(d.Specs) == 1 {
+		return d.Doc
+	}
+	return ts.Doc
 }
 
 // TestCommentsDoNotRestateTheDeclaration: a comment must add something the name
