@@ -16,10 +16,10 @@ import (
 // A sync only upserts: a location the Location Service stopped listing stays in the tables.
 
 func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
-	ctx, cancelJob := context.WithCancel(s.baseCtx)
+	ctx, cancelJob := s.jobContext()
 	defer cancelJob()
 
-	if ctx.Err() != nil {
+	if s.interrupted() {
 		s.markInterrupted(jobID)
 		return
 	}
@@ -36,7 +36,7 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 	result, err := s.sync(ctx, req, func(p domainlocation.SyncProgress) { progress.report(ctx, p) })
 	if err != nil {
 		switch {
-		case s.baseCtx.Err() != nil:
+		case s.interrupted():
 			s.markInterrupted(jobID)
 		case ctx.Err() != nil:
 			logus.Logf(logus.LevelWarn, "location: sync job %s was taken over by another instance; stopping", jobID)
@@ -55,6 +55,18 @@ func (s *Service) runSyncJob(jobID string, req dtolocation.SyncRequest) {
 			Status: "completed", Message: "Location sync completed",
 		}, time.Now())
 	}, "completed")
+}
+
+func (s *Service) jobContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-s.stopped:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }
 
 func (s *Service) beat(ctx context.Context, cancelJob context.CancelFunc, jobID string) (stop func()) {

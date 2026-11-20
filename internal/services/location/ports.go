@@ -40,6 +40,11 @@ type Cache interface {
 
 type noopCache struct{}
 
-func (noopCache) Get(context.Context, string) ([]dtolocation.Location, bool)         { return nil, false }
-func (noopCache) Set(context.Context, string, []dtolocation.Location, time.Duration) {}
-func (noopCache) DeleteKeys(context.Context, string)                                 {}
+func (noopCache) Get(context.Context, string) ([]dtolocation.Location, bool) { return nil, false }
+func (noopCache) Set(context.Context, string, []dtolocation.Location, time.Duration) {
+	// Nothing is cached.
+}
+
+func (noopCache) DeleteKeys(context.Context, string) {
+	// Nothing is cached, so nothing to delete.
+}
